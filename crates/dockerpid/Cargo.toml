@@ -1,0 +1,15 @@
+[package]
+name = "dockerpid"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Return the host PID of a Docker container (Rust port of dockerpid)"
+
+[[bin]]
+name = "dockerpid"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+serde_json.workspace = true

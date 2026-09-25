@@ -1,0 +1,29 @@
+[package]
+name = "cpdaemon"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Cloud Probe management daemon (Rust port of cpdaemon)"
+
+[[bin]]
+name = "cpdaemon"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+thiserror.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+clap.workspace = true
+tokio = { version = "1", features = ["full"] }
+axum = "0.7"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+chrono.workspace = true
+uuid.workspace = true
+parking_lot.workspace = true
+libc.workspace = true
+nix.workspace = true
+log.workspace = true
+env_logger.workspace = true
+cpgolib = { path = "../cpgolib" }

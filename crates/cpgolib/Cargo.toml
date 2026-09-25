@@ -1,0 +1,20 @@
+[package]
+name = "cpgolib"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Shared library for Cloud Probe clients (Rust port of cpgolib)"
+
+[lib]
+name = "cpgolib"
+path = "src/lib.rs"
+
+[dependencies]
+anyhow.workspace = true
+thiserror.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+chrono.workspace = true
+log.workspace = true
+env_logger.workspace = true

@@ -1,0 +1,11 @@
+# Rust build artifacts
+/target
+**/target/
+
+# cargo-fuzz artifacts (crashes/corpus growth)
+crates/cpworker/fuzz/artifacts/
+crates/cpworker/fuzz/coverage/
+
+# Editor / OS
+*.swp
+.DS_Store

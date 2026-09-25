@@ -1,0 +1,79 @@
+#!/usr/bin/env bash
+# Coverage-guided fuzzing for the Cloud Probe Rust port (cargo-fuzz + libFuzzer).
+#
+# Usage:
+#   fuzz.sh [seconds] [target|all]      # fuzz (default: all, 30s each)
+#   fuzz.sh --check [target|all]        # short smoke run (5s each)
+#   FUZZ_SEED=123 fuzz.sh 60 zmq_batch  # fixed seed, longer run
+#   fuzz.sh repro zmq_batch <artifact>  # reproduce a crash
+#
+# Targets: packet_split config vxlan zmq_batch sim_dst
+set -euo pipefail
+export PATH="$HOME/.cargo/bin:$PATH"
+
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+CRATE="$HERE/crates/cpworker"
+ALL_TARGETS="packet_split config vxlan zmq_batch sim_dst"
+
+ensure_toolchain() {
+    if ! rustup toolchain list | grep -q '^nightly'; then
+        echo "==> installing nightly toolchain (libFuzzer needs it)"
+        rustup toolchain install nightly --profile minimal
+    fi
+    if ! command -v cargo-fuzz >/dev/null 2>&1; then
+        echo "==> installing cargo-fuzz"
+        cargo install cargo-fuzz
+    fi
+}
+
+ensure_toolchain
+cd "$CRATE"
+
+MODE="${1:-run}"
+case "$MODE" in
+    --check)
+        TIME=5
+        TARGETS="${2:-$ALL_TARGETS}"
+        ARGS=(-max_total_time="$TIME" -rss_limit_mb=4096)
+        ;;
+    repro)
+        TARGET="$2"
+        shift 2
+        exec cargo +nightly fuzz run "$TARGET" "$@"
+        ;;
+    *)
+        TIME="${1:-30}"
+        TARGETS="${2:-$ALL_TARGETS}"
+        ARGS=(-max_total_time="$TIME" -rss_limit_mb=4096)
+        if [ -n "${FUZZ_SEED:-}" ]; then
+            ARGS+=(-seed="$FUZZ_SEED")
+        fi
+        ;;
+esac
+
+[ "$TARGETS" = "all" ] && TARGETS="$ALL_TARGETS"
+
+echo "==> building fuzz targets"
+cargo +nightly fuzz build >/dev/null
+
+# Seed the corpora with the hand-written regression inputs.
+for t in $TARGETS; do
+    if [ -d "fuzz/seeds/$t" ]; then
+        mkdir -p "fuzz/corpus/$t"
+        cp -n fuzz/seeds/$t/* "fuzz/corpus/$t/" 2>/dev/null || true
+    fi
+done
+
+fail=0
+for t in $TARGETS; do
+    echo "=========================================================="
+    echo " fuzz: $t (max_total_time=${ARGS[0]#-max_total_time=}s)"
+    echo "=========================================================="
+    if cargo +nightly fuzz run "$t" -- "${ARGS[@]}"; then
+        echo "  $t: OK"
+    else
+        echo "  ❌ $t: CRASH — artifact under crates/cpworker/fuzz/artifacts/$t/"
+        fail=1
+    fi
+done
+exit $fail

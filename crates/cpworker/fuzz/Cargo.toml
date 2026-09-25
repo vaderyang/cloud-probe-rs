@@ -1,0 +1,51 @@
+[package]
+name = "cpworker-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+# Standalone workspace (keep the fuzz targets out of the main workspace).
+[workspace]
+
+[dependencies]
+libfuzzer-sys = "0.4"
+cpworker = { path = ".." }
+cpsim = { path = "../../sim" }
+
+[[bin]]
+name = "packet_split"
+path = "fuzz_targets/packet_split.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "config"
+path = "fuzz_targets/config.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "zmq_batch"
+path = "fuzz_targets/zmq_batch.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "vxlan"
+path = "fuzz_targets/vxlan.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "sim_dst"
+path = "fuzz_targets/sim_dst.rs"
+test = false
+doc = false
+bench = false

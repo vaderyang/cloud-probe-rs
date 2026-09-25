@@ -1,0 +1,37 @@
+[package]
+name = "cpworker"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Netis Cloud Probe packet capture and forwarding engine (Rust port)"
+
+[[bin]]
+name = "cpworker"
+path = "src/main.rs"
+
+[lib]
+name = "cpworker"
+path = "src/lib.rs"
+
+[dependencies]
+anyhow.workspace = true
+thiserror.workspace = true
+clap.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+libc.workspace = true
+nix.workspace = true
+log.workspace = true
+env_logger.workspace = true
+signal-hook.workspace = true
+byteorder.workspace = true
+chrono.workspace = true
+socket2.workspace = true
+parking_lot.workspace = true
+pcap.workspace = true
+zmq.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+tempfile = "3"

@@ -1,0 +1,23 @@
+[package]
+name = "cpctl"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Control utility for cpworker (Rust port of cpctl)"
+
+[[bin]]
+name = "cpctl"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+clap.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+humantime.workspace = true
+log.workspace = true
+env_logger.workspace = true
+chrono.workspace = true
+
+cpgolib = { path = "../cpgolib" }
