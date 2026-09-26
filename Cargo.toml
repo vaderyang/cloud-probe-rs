@@ -37,7 +37,7 @@ parking_lot = "0.12"
 pcap = "2"
 zmq = "0.10"
 tokio = { version = "1", features = ["full"] }
-axum = "0.7"
+axum = "0.8"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 tracing = "0.1"
 tracing-subscriber = "0.3"
