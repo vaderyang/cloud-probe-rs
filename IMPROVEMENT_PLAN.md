@@ -6,12 +6,25 @@
 
 ## 进度总览
 
-| 阶段 | 主题 | 项数 | 预估 | 风险 |
-|---|---|---|---|---|
-| P1 | 快速清扫（锁策略、死依赖、脆弱 unwrap） | 3 | 0.5–1 天 | 低 |
-| P2 | 可靠性加固（panic 面、可观测性） | 3 | 1–2 天 | 低 |
-| P3 | 移除 C 依赖（纯 Rust） | 3 | 周级 | 高 |
-| P4 | 可选质量项（覆盖率、文档、基准） | 3 | 1–2 天 | 低 |
+| 阶段 | 主题 | 项数 | 预估 | 风险 | 状态 |
+|---|---|---|---|---|---|
+| P1 | 快速清扫（锁策略、死依赖、脆弱 unwrap） | 3 | 0.5–1 天 | 低 | ✅ 已完成 |
+| P2 | 可靠性加固（panic 面、可观测性） | 3 | 1–2 天 | 低 | ⬜ 待开始 |
+| P3 | 移除 C 依赖（纯 Rust） | 3 | 周级 | 高 | ⬜ 待开始 |
+| P4 | 可选质量项（覆盖率、文档、基准） | 3 | 1–2 天 | 低 | ⬜ 待开始 |
+
+### P1 完成记录（commits `0ff95d6` / `62597d9` / `3ba6813`）
+
+- **P1.1**：`worker.rs` 已迁移到 `parking_lot`（`wait_while_for` 替代
+  `std::sync` 的 `wait_timeout_while`），消除 21 处投毒 `.lock().unwrap()`。
+- **P1.2**：删除 cpdaemon 的 `thiserror`/`env_logger` 与 workspace 的
+  `tracing`/`tracing-subscriber`；tokio features 收窄为
+  `rt-multi-thread/macros/net/signal/sync`。
+- **P1.3**：`task.rs` 引入 `PipelineShared` 消除 ring/alloc 脆弱不变量；
+  另修 `duration_since`、`as_object_mut`、`CString::new` 三处 unwrap。
+- 验证：`cargo fmt --check` ✅ / `cargo clippy --workspace --all-targets` ✅ /
+  `cargo test --workspace` **71 passed, 0 failed** ✅ / `cargo deny check`
+  （advisories/bans/licenses/sources）✅
 
 ---
 
