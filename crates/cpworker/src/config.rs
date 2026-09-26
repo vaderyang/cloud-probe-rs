@@ -59,6 +59,62 @@ pub const LOG_ERROR: i32 = 4;
 /// Log level: fatal.
 pub const LOG_FATAL: i32 = 5;
 
+// --- Numeric configuration limits (AUDIT4 P5-15) ---------------------------
+//
+// `serde_json` hands every JSON number to us as `i64`, while the runtime
+// structs use `i32`/`u16`/`u64`. Casting with `as` wraps silently, so the
+// limits below are enforced at parse time and the values are converted with
+// `TryFrom`. They are public because the C/Rust differential harness and the
+// worker documentation both have to quote them.
+
+/// Default `snaplen` when the key is absent (C: `config.c`).
+pub const DEFAULT_SNAPLEN: i64 = 2_048;
+/// Default `libpcap.buffer_size_mb` when the key is absent.
+pub const DEFAULT_BUFFER_SIZE_MB: i64 = 256;
+/// Default `libpcap.timeout_ms` when the key is absent (0 = no timeout).
+pub const DEFAULT_TIMEOUT_MS: i64 = 0;
+/// Default `dpdk_pdump.ring_size` when the key is absent.
+pub const DEFAULT_RING_SIZE: i64 = 2_048;
+/// Smallest accepted `snaplen`. `0` keeps the backend's own default (the C
+/// parser accepted it too).
+pub const SNAPLEN_MIN: i64 = 0;
+/// Largest accepted `snaplen`: libpcap's own maximum snapshot length, which is
+/// also the largest value a pcap savefile can record (see `CapturerKind::snaplen`
+/// for the offline replay default).
+pub const SNAPLEN_MAX: i64 = 262_144;
+/// Smallest accepted `libpcap.buffer_size_mb` (0 = OS default).
+pub const BUFFER_SIZE_MB_MIN: i64 = 0;
+/// Largest accepted `libpcap.buffer_size_mb` (8 GiB). Far above any
+/// `net.core.rmem_max`; larger values are a mistake, not a tuning request.
+pub const BUFFER_SIZE_MB_MAX: i64 = 8_192;
+/// Smallest accepted `libpcap.timeout_ms` (0 = non-blocking / no timeout).
+pub const TIMEOUT_MS_MIN: i64 = 0;
+/// Largest accepted `libpcap.timeout_ms` (10 minutes).
+pub const TIMEOUT_MS_MAX: i64 = 600_000;
+/// Smallest accepted `dpdk_pdump.ring_size`.
+pub const RING_SIZE_MIN: i64 = 1;
+/// Largest accepted `dpdk_pdump.ring_size` (2^20 descriptors).
+pub const RING_SIZE_MAX: i64 = 1_048_576;
+/// Smallest accepted `pipeline.buffer_size_mb` (must be positive).
+pub const PIPELINE_BUFFER_MB_MIN: i64 = 1;
+/// Largest accepted `pipeline.buffer_size_mb` (8 GiB).
+pub const PIPELINE_BUFFER_MB_MAX: i64 = 8_192;
+/// Smallest accepted output `slice` (0 = no truncation).
+pub const SLICE_MIN: i64 = 0;
+/// Largest accepted output `slice`: bigger than any frame, so it already means
+/// "never truncate".
+pub const SLICE_MAX: i64 = 65_535;
+/// Smallest accepted `rate_limit_mbps` (0 = unlimited).
+pub const RATE_LIMIT_MBPS_MIN: i64 = 0;
+/// Largest accepted `rate_limit_mbps` (1 Tbps). Consumers multiply it by 1e6 to
+/// get bytes/second, so an unbounded value overflows the token bucket.
+pub const RATE_LIMIT_MBPS_MAX: i64 = 1_000_000;
+/// Smallest accepted `rotating_file.max_file_interval` (-1 = rotate on error
+/// only, which is also the C default).
+pub const MAX_FILE_INTERVAL_MIN: i64 = -1;
+/// Largest accepted `rotating_file.max_file_interval`, in seconds (1 year).
+pub const MAX_FILE_INTERVAL_MAX: i64 = 31_536_000;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 /// Task execution model.
 pub enum ExecutionModel {
@@ -637,13 +693,13 @@ struct RawZmq {
     host: String,
     port: u16,
     #[serde(default, deserialize_with = "de_nonnull")]
-    hwm: Option<i32>,
+    hwm: Option<i64>,
     #[serde(default, deserialize_with = "de_nonnull")]
     service_tag: Option<u32>,
     #[serde(default, deserialize_with = "de_nonnull")]
     uuid: Option<String>,
     #[serde(default, deserialize_with = "de_nonnull")]
-    heartbeat_ms: Option<i32>,
+    heartbeat_ms: Option<i64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -655,7 +711,7 @@ struct RawFile {
 struct RawRotatingFile {
     file_root: String,
     #[serde(default, deserialize_with = "de_nonnull")]
-    max_file_interval: Option<i32>,
+    max_file_interval: Option<i64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -664,6 +720,50 @@ struct RawSplit {
     max_payload_size: Option<i64>,
     #[serde(default, deserialize_with = "de_nonnull_bool")]
     recalculate_checksum: bool,
+}
+
+/// Range-check a JSON integer (`serde_json` gives us every number as `i64`).
+///
+/// The error message always names the offending field, because a config file is
+/// shared between operators and the CPM control plane and "invalid number" is
+/// not actionable.
+fn int_in(field: &str, v: i64, min: i64, max: i64) -> Result<i64> {
+    if !(min..=max).contains(&v) {
+        return Err(Error::new(format!(
+            "invalid {field} {v}: must be between {min} and {max}"
+        )));
+    }
+    Ok(v)
+}
+
+/// [`int_in`] plus a lossless conversion to `i32` (AUDIT4 P5-15: never `as i32`).
+fn i32_in(field: &str, v: i64, min: i64, max: i64) -> Result<i32> {
+    let v = int_in(field, v, min, max)?;
+    i32::try_from(v).map_err(|_| {
+        Error::new(format!(
+            "invalid {field} {v}: must be between {min} and {max}"
+        ))
+    })
+}
+
+/// [`int_in`] plus a lossless conversion to `u64`.
+fn u64_in(field: &str, v: i64, min: i64, max: i64) -> Result<u64> {
+    let v = int_in(field, v, min, max)?;
+    u64::try_from(v).map_err(|_| {
+        Error::new(format!(
+            "invalid {field} {v}: must be between {min} and {max}"
+        ))
+    })
+}
+
+/// [`int_in`] plus a lossless conversion to `u16`.
+fn u16_in(field: &str, v: i64, min: i64, max: i64) -> Result<u16> {
+    let v = int_in(field, v, min, max)?;
+    u16::try_from(v).map_err(|_| {
+        Error::new(format!(
+            "invalid {field} {v}: must be between {min} and {max}"
+        ))
+    })
 }
 
 fn parse_pmtudisc(s: &str) -> Result<i32> {
@@ -679,8 +779,7 @@ impl RawSplit {
     fn build(self) -> Result<SplitConfig> {
         let max = match self.max_payload_size {
             None => 0,
-            Some(v) if (0..=65535).contains(&v) => v as u16,
-            _ => return Err(Error::new("invalid max_payload_size: must be 0-65535")),
+            Some(v) => u16_in("vxlan.split.max_payload_size", v, 0, 65535)?,
         };
         Ok(SplitConfig {
             max_payload_size: max,
@@ -691,12 +790,15 @@ impl RawSplit {
 
 impl RawOutput {
     fn build(self) -> Result<OutputConfig> {
-        let rate_limit_mbps = match self.rate_limit_mbps {
-            None => 0,
-            Some(v) if v >= 0 => v as u64,
-            _ => return Err(Error::new("invalid rate_limit_mbps")),
-        };
-        let slice = self.slice.unwrap_or(0) as i32;
+        // AUDIT4 P5-15: every numeric field is range-checked and converted
+        // losslessly; `as` casts used to wrap into absurd running parameters.
+        let rate_limit_mbps = u64_in(
+            "rate_limit_mbps",
+            self.rate_limit_mbps.unwrap_or(0),
+            RATE_LIMIT_MBPS_MIN,
+            RATE_LIMIT_MBPS_MAX,
+        )?;
+        let slice = i32_in("slice", self.slice.unwrap_or(0), SLICE_MIN, SLICE_MAX)?;
 
         let kind = match self.ty.as_str() {
             OUTPUT_TYPE_VXLAN => {
@@ -741,12 +843,19 @@ impl RawOutput {
             }
             OUTPUT_TYPE_ZMQ => {
                 let z = self.zmq.ok_or_else(|| Error::new("missing zmq config"))?;
-                let heartbeat_ms = match z.heartbeat_ms {
-                    None => 0,
-                    Some(v) if (0..=60000).contains(&v) => v,
-                    _ => return Err(Error::new("invalid zmq.heartbeat_ms")),
-                };
-                let hwm = z.hwm.unwrap_or(DEFAULT_ZMQ_HWM);
+                let heartbeat_ms =
+                    i32_in("zmq.heartbeat_ms", z.heartbeat_ms.unwrap_or(0), 0, 60_000)?;
+                let hwm = i32_in(
+                    "zmq.hwm",
+                    z.hwm.unwrap_or(i64::from(DEFAULT_ZMQ_HWM)),
+                    i64::from(ZMQ_HWM_MIN),
+                    i64::from(ZMQ_HWM_MAX),
+                )
+                .map_err(|e| {
+                    Error::new(format!(
+                        "{e} (each queued batch is up to 1 MiB, so hwm bounds the output's memory)"
+                    ))
+                })?;
                 // The pending queue is bounded by `hwm` messages of at most
                 // ZMQ_MAX_BATCH_BUF_SIZE each, so an unbounded hwm is an
                 // unbounded memory promise. Reject it here instead of letting
@@ -775,7 +884,12 @@ impl RawOutput {
                     .ok_or_else(|| Error::new("missing rotating_file config"))?;
                 OutputKind::RotatingFile(RotatingFileConfig {
                     file_root: r.file_root,
-                    max_file_interval: r.max_file_interval.unwrap_or(-1),
+                    max_file_interval: i32_in(
+                        "rotating_file.max_file_interval",
+                        r.max_file_interval.unwrap_or(-1),
+                        MAX_FILE_INTERVAL_MIN,
+                        MAX_FILE_INTERVAL_MAX,
+                    )?,
                 })
             }
             OUTPUT_TYPE_NULL => OutputKind::Null,
@@ -797,21 +911,28 @@ impl RawCapturer {
                 let c = self
                     .libpcap
                     .ok_or_else(|| Error::new("missing libpcap config"))?;
-                let snaplen = c.snaplen.unwrap_or(2048);
-                if snaplen < 0 {
-                    return Err(Error::new("invalid libpcap.snaplen"));
-                }
-                let timeout_ms = c.timeout_ms.unwrap_or(0);
-                if timeout_ms < 0 {
-                    return Err(Error::new("invalid libpcap.timeout_ms"));
-                }
                 CapturerKind::Libpcap(LibpcapConfig {
                     interface: c.interface,
-                    snaplen: snaplen as i32,
+                    snaplen: i32_in(
+                        "libpcap.snaplen",
+                        c.snaplen.unwrap_or(DEFAULT_SNAPLEN),
+                        SNAPLEN_MIN,
+                        SNAPLEN_MAX,
+                    )?,
                     netns: c.netns.unwrap_or_default(),
                     bpf: c.bpf.unwrap_or_default(),
-                    buffer_size_mb: c.buffer_size_mb.unwrap_or(256) as i32,
-                    timeout_ms: timeout_ms as i32,
+                    buffer_size_mb: i32_in(
+                        "libpcap.buffer_size_mb",
+                        c.buffer_size_mb.unwrap_or(DEFAULT_BUFFER_SIZE_MB),
+                        BUFFER_SIZE_MB_MIN,
+                        BUFFER_SIZE_MB_MAX,
+                    )?,
+                    timeout_ms: i32_in(
+                        "libpcap.timeout_ms",
+                        c.timeout_ms.unwrap_or(DEFAULT_TIMEOUT_MS),
+                        TIMEOUT_MS_MIN,
+                        TIMEOUT_MS_MAX,
+                    )?,
                     not_filter_output_hosts: c.not_filter_output_hosts.unwrap_or(false),
                 })
             }
@@ -830,9 +951,19 @@ impl RawCapturer {
                     .ok_or_else(|| Error::new("missing dpdk_pdump config"))?;
                 CapturerKind::DpdkPdump(DpdkPdumpConfig {
                     interface: c.interface,
-                    snaplen: c.snaplen.unwrap_or(2048) as i32,
+                    snaplen: i32_in(
+                        "dpdk_pdump.snaplen",
+                        c.snaplen.unwrap_or(DEFAULT_SNAPLEN),
+                        SNAPLEN_MIN,
+                        SNAPLEN_MAX,
+                    )?,
                     bpf: c.bpf.unwrap_or_default(),
-                    ring_size: c.ring_size.unwrap_or(2048) as i32,
+                    ring_size: i32_in(
+                        "dpdk_pdump.ring_size",
+                        c.ring_size.unwrap_or(DEFAULT_RING_SIZE),
+                        RING_SIZE_MIN,
+                        RING_SIZE_MAX,
+                    )?,
                 })
             }
             other => return Err(Error::new(format!("unknown capturer type: {other}"))),
@@ -901,10 +1032,12 @@ impl RawConfig {
             let p = self
                 .pipeline
                 .ok_or_else(|| Error::new("missing pipeline config"))?;
-            if p.buffer_size_mb <= 0 {
-                return Err(Error::new("invalid pipeline.buffer_size_mb"));
-            }
-            p.buffer_size_mb as i32
+            i32_in(
+                "pipeline.buffer_size_mb",
+                p.buffer_size_mb,
+                PIPELINE_BUFFER_MB_MIN,
+                PIPELINE_BUFFER_MB_MAX,
+            )?
         } else {
             0
         };
@@ -1019,6 +1152,212 @@ mod tests {
         let out = bpf_filter_exclude_task_output_hosts("port 80", &c.tasks);
         assert_eq!(out, "(port 80) and not host 10.0.0.9");
     }
+    /// Build a one-task config whose libpcap capturer carries `kv`.
+    fn with_libpcap(kv: &str) -> Result<Config> {
+        Config::parse_str(&format!(
+            r#"{{"tasks":[{{
+            "capturer": {{"type":"libpcap","libpcap":{{"interface":"eth0",{kv}}}}},
+            "outputs": []
+        }}]}}"#
+        ))
+    }
+
+    /// Build a one-task config whose dpdk_pdump capturer carries `kv`.
+    fn with_dpdk(kv: &str) -> Result<Config> {
+        Config::parse_str(&format!(
+            r#"{{"tasks":[{{
+            "capturer": {{"type":"dpdk_pdump","dpdk_pdump":{{"interface":"eth0",{kv}}}}},
+            "outputs": []
+        }}]}}"#
+        ))
+    }
+
+    /// Build a config with a single `null` output carrying `kv`.
+    fn with_output(kv: &str) -> Result<Config> {
+        Config::parse_str(&format!(
+            r#"{{"tasks":[{{
+            "capturer": {{"type":"libpcap","libpcap":{{"interface":"eth0"}}}},
+            "outputs": [{{"type":"null"{kv}}}]
+        }}]}}"#
+        ))
+    }
+
+    /// Assert `res` is a rejection whose message names `field`.
+    fn assert_rejects(field: &str, res: Result<Config>) {
+        match res {
+            Ok(c) => panic!(
+                "{field}: out-of-range value was accepted ({:?})",
+                c.execution_model
+            ),
+            Err(e) => {
+                let msg = e.to_string();
+                assert!(
+                    msg.contains(field),
+                    "{field}: error should name the field, got: {msg}"
+                );
+            }
+        }
+    }
+
+    /// AUDIT4 P5-15: JSON numbers arrive as `i64` while the runtime structs use
+    /// `i32`. A bare `as i32` wraps silently and the capture plane turns the wrapped
+    /// value into an absurd running parameter:
+    ///
+    /// * `snaplen: 2147483648` -> `i32::MIN` -> `snaplen.max(1)` -> **one byte per
+    ///   packet**: every frame is truncated so hard that no BPF test matches and the
+    ///   task captures nothing;
+    /// * `buffer_size_mb: 4294967296` -> `0` -> `SO_RCVBUF=0` (massive loss);
+    /// * `timeout_ms: 4294967396` -> `100` (not what anyone asked for);
+    /// * `slice: 4294967296` -> `0` (= never truncate, the opposite of the request).
+    ///
+    /// Each of them must be a configuration error that names the field, while the
+    /// in-range boundaries keep being accepted verbatim.
+    #[test]
+    fn numeric_fields_are_range_checked_not_truncated() {
+        // --- libpcap.snaplen ---------------------------------------------------
+        assert_rejects(
+            "libpcap.snaplen",
+            with_libpcap(r#""snaplen":4294967296"#), // wraps to 0 -> 1-byte captures
+        );
+        assert_rejects(
+            "libpcap.snaplen",
+            with_libpcap(r#""snaplen":2147483648"#), // wraps to i32::MIN
+        );
+        assert_rejects("libpcap.snaplen", with_libpcap(r#""snaplen":-1"#));
+        for boundary in [0_i64, 2048, SNAPLEN_MAX] {
+            let c = with_libpcap(&format!(r#""snaplen":{boundary}"#))
+                .unwrap_or_else(|e| panic!("snaplen {boundary} is in range and must stay: {e}"));
+            match &c.tasks[0].capturer.kind {
+                CapturerKind::Libpcap(l) => assert_eq!(l.snaplen, boundary as i32),
+                other => panic!("expected libpcap capturer, got {other:?}"),
+            }
+        }
+
+        // --- libpcap.buffer_size_mb --------------------------------------------
+        assert_rejects(
+            "libpcap.buffer_size_mb",
+            with_libpcap(r#""buffer_size_mb":4294967296"#), // wraps to 0
+        );
+        assert_rejects(
+            "libpcap.buffer_size_mb",
+            with_libpcap(&format!(r#""buffer_size_mb":{}"#, BUFFER_SIZE_MB_MAX + 1)),
+        );
+        let c =
+            with_libpcap(&format!(r#""buffer_size_mb":{BUFFER_SIZE_MB_MAX}"#)).expect("in range");
+        match &c.tasks[0].capturer.kind {
+            CapturerKind::Libpcap(l) => assert_eq!(l.buffer_size_mb, BUFFER_SIZE_MB_MAX as i32),
+            other => panic!("expected libpcap capturer, got {other:?}"),
+        }
+
+        // --- libpcap.timeout_ms -------------------------------------------------
+        assert_rejects(
+            "libpcap.timeout_ms",
+            with_libpcap(r#""timeout_ms":4294967396"#), // wraps to 100
+        );
+        assert_rejects("libpcap.timeout_ms", with_libpcap(r#""timeout_ms":-1"#));
+        let c = with_libpcap(&format!(r#""timeout_ms":{TIMEOUT_MS_MAX}"#)).expect("in range");
+        match &c.tasks[0].capturer.kind {
+            CapturerKind::Libpcap(l) => assert_eq!(l.timeout_ms, TIMEOUT_MS_MAX as i32),
+            other => panic!("expected libpcap capturer, got {other:?}"),
+        }
+
+        // --- dpdk_pdump ---------------------------------------------------------
+        assert_rejects("dpdk_pdump.snaplen", with_dpdk(r#""snaplen":2147483648"#));
+        assert_rejects(
+            "dpdk_pdump.ring_size",
+            with_dpdk(r#""ring_size":4294967304"#), // wraps to 2048
+        );
+        assert_rejects("dpdk_pdump.ring_size", with_dpdk(r#""ring_size":0"#));
+        let c = with_dpdk(&format!(
+            r#""snaplen":{SNAPLEN_MAX},"ring_size":{RING_SIZE_MAX}"#
+        ))
+        .expect("in range");
+        match &c.tasks[0].capturer.kind {
+            CapturerKind::DpdkPdump(d) => {
+                assert_eq!(d.snaplen, SNAPLEN_MAX as i32);
+                assert_eq!(d.ring_size, RING_SIZE_MAX as i32);
+            }
+            other => panic!("expected dpdk_pdump capturer, got {other:?}"),
+        }
+
+        // --- output: slice / rate_limit_mbps ------------------------------------
+        assert_rejects("slice", with_output(r#","slice":4294967296"#)); // wraps to 0
+        assert_rejects("slice", with_output(r#","slice":-1"#));
+        assert_rejects(
+            "slice",
+            with_output(&format!(r#","slice":{}"#, SLICE_MAX + 1)),
+        );
+        assert!(
+            with_output(&format!(r#","slice":{SLICE_MAX}"#)).is_ok(),
+            "SLICE_MAX is in range"
+        );
+        assert_rejects("rate_limit_mbps", with_output(r#","rate_limit_mbps":-1"#));
+        assert_rejects(
+            "rate_limit_mbps",
+            with_output(&format!(
+                r#","rate_limit_mbps":{}"#,
+                RATE_LIMIT_MBPS_MAX + 1
+            )),
+        );
+        assert!(
+            with_output(&format!(r#","rate_limit_mbps":{RATE_LIMIT_MBPS_MAX}"#)).is_ok(),
+            "the maximum rate limit must stay accepted (above it the token bucket overflows)"
+        );
+
+        // --- pipeline.buffer_size_mb --------------------------------------------
+        let pipeline = |mb: i64| {
+            Config::parse_str(&format!(
+                r#"{{"execution_model":"pipeline","pipeline":{{"buffer_size_mb":{mb}}},"tasks":[]}}"#
+            ))
+        };
+        assert_rejects("pipeline.buffer_size_mb", pipeline(4294967360)); // wraps to 64
+        assert_rejects("pipeline.buffer_size_mb", pipeline(0));
+        assert_rejects("pipeline.buffer_size_mb", pipeline(-1));
+        assert_eq!(
+            pipeline(256).expect("in range").pipeline_buffer_size_mb,
+            256
+        );
+
+        // --- rotating_file.max_file_interval ------------------------------------
+        let rotating = |kv: &str| {
+            Config::parse_str(&format!(
+                r#"{{"tasks":[{{
+                "capturer": {{"type":"libpcap","libpcap":{{"interface":"eth0"}}}},
+                "outputs": [{{"type":"rotating_file","rotating_file":{{"file_root":"/tmp"{kv}}}}}]
+            }}]}}"#
+            ))
+        };
+        assert_rejects(
+            "rotating_file.max_file_interval",
+            rotating(r#","max_file_interval":4294967356"#), // wraps to 60
+        );
+        assert_rejects(
+            "rotating_file.max_file_interval",
+            rotating(r#","max_file_interval":-2"#),
+        );
+        assert!(
+            rotating("").is_ok(),
+            "the default max_file_interval (-1) must stay accepted"
+        );
+        assert!(rotating(r#","max_file_interval":-1"#).is_ok());
+
+        // --- vxlan.split.max_payload_size ---------------------------------------
+        // `frag` is appended inside the `vxlan` object.
+        let vxlan = |frag: &str| {
+            Config::parse_str(&format!(
+                r#"{{"tasks":[{{
+                "capturer": {{"type":"libpcap","libpcap":{{"interface":"eth0"}}}},
+                "outputs": [{{"type":"vxlan","vxlan":{{"host":"1.1.1.1","vni1":7{frag}}}}}
+                ]}}]}}"#
+            ))
+        };
+        let split = |v: i64| format!(",\"split\":{{\"max_payload_size\":{v}}}");
+        assert_rejects("max_payload_size", vxlan(&split(65536)));
+        assert_rejects("max_payload_size", vxlan(&split(4294967396))); // wraps to 100
+        assert_rejects("max_payload_size", vxlan(&split(-1)));
+        assert!(vxlan(&split(65535)).is_ok(), "65535 is in range");
+    }
+
     /// AUDIT4 P5-11: `hwm` bounds the pending queue (hwm batches x <=1 MiB), so an
     /// unbounded value is an unbounded memory promise and must be rejected.
     #[test]
