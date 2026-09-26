@@ -235,6 +235,20 @@ cargo test -p cpsim --test dst
 - **一致性**：`poll_packets_batch` 的 `None` 分支改为 `log_error!` + return，与 `start()` 风格一致。
 - **PARITY.md**：测试数 69 → 71；§4 明确“纯 Rust = 不链接 C 库，libc crate 保留”。
 
+## AUDIT3 审查跟进（第三次审计的审查）
+
+AUDIT3 结论 A、事实全部核验属实；作为对审计的审查，补充处理其遗漏的 3 点：
+
+- **收窄 dead_code allow**：移除 `cpdaemon/src/main.rs` 的 crate 级 `#![allow(dead_code)]`，
+  改为逐项 `#[allow(dead_code)]` + 注释（仅覆盖具名的 ported-but-unwired 项：
+  `httpmix` 模块、`models` 常量、`synclog::write`、`syncer::sync_log`/`uuid_file`、
+  `utils::is_unknown_flag_error`、`WorkerCreateResult`、`ResLimit::mem`、
+  `Worker::{name,config_file}`、`OUTPUT_TYPE_FILE`、`parse_log_line`）。
+- **声明 MSRV**：workspace 加 `rust-version = "1.88"`，各成员 `rust-version.workspace = true`。
+  依据：本项目代码需 `as_chunks`（1.88），依赖中最高 MSRV 也恰为 1.88（tonic 0.14 / icu）。
+- **订正 CI 口径**：AUDIT3.md 追加“审查备注”，说明 9 job 中 `coverage`/`dependency-review`
+  为 advisory（且后者仅 PR 运行），硬门禁为 7 个。
+
 ## 注意事项
 
 - 删除 `env_logger` 已复核：`cpdaemon/src/main.rs` 用 `cpgolib::slogx::init_default(level)`

@@ -58,3 +58,19 @@ clippy 零告警且有硬门禁、panic 面收敛、文档与实际严格一致�
 （1 中 4 低）均已整改且经本地验收与 CI 证实，无引入回归。仓库当前的可审计性、可复现性
 （基准/差分/覆盖率/文档）达到系统级开源项目的良好水平。下一里程碑是 P3（移除 C 依赖），
 建议按计划以独立 PR + 差分门禁推进。
+
+---
+
+## 审查备注（维护者，2026-09-26）
+
+原文结论不变，仅对 CI 口径作精确说明，并记录本轮对审计的跟进：
+
+- **第三节“9/9 job 全绿”**：9 个 job 中 `coverage` 与 `dependency-review` 为
+  `continue-on-error: true`（建议性，不阻断）；且 `dependency-review` 仅在
+  `pull_request` 事件运行（push 时为 skipped）。因此硬门禁为其余 7 个 job。
+- **“clippy 零告警且有硬门禁”**：属实，但需限定——`be4c303` 曾在 cpdaemon 使用
+  **crate 级** `#![allow(dead_code)]`，会关闭该 crate 的死代码检查。本轮已将其收窄为
+  逐项 `#[allow(dead_code)]` + 注释（仅限 ported-but-unwired 的具名项）。
+- **未声明 MSRV**：审计未提及。`be4c303` 引入的 `as_chunks::<2>()` 需要 Rust ≥ 1.88；
+  依赖中最高 MSRV 也是 1.88（tonic 0.14 / icu）。本轮已在 workspace 声明
+  `rust-version = "1.88"` 并由各成员继承。
