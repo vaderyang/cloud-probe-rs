@@ -127,7 +127,7 @@
 - 【修复】`hwm` 范围校验；新增 `queued_bytes` 指标；评估把 `fwd_*` 移到"写入 transport 成功后"或明确文档说明口径。
 - 【验收】极端 `hwm` 被拒绝/钳制；指标可观测。
 
-### WP4 — 配置与资源卫生（P2/P3）
+### WP4 — 配置与资源卫生（P2/P3）  ✅ **已完成（M4，见 §6）**
 
 - **P5-15** `config.rs:779-792` i64→i32 统一 `try_into` + 范围校验（snaplen/buffer_size_mb/timeout_ms 等）。
 - **P5-20** pcap reader：校验 linktype（非 EN10MB 明确报错）、`len >= caplen`、单条 `resize` 上限收敛；新增 `pcap_reader` fuzz target（畸形头/截断/错误字节序/跨边界）。
@@ -161,6 +161,14 @@
 2. **测试生成器的组合深度**（P5-01/P5-06/P5-17 类）：小样本差分全绿≠语义等价。→ 对每个差分生成器设"最小组合深度/规模"下限，并在报告中显式声明覆盖的最大规模。
 3. **OS 对参数的静默修正**（P5-02/P5-05/P5-14 类）：`setsockopt`/`getsockopt` 返回 0 但语义被改。→ 所有内核参数"设置即回读 + 断言/告警"；关键 syscall 记入 `PARITY.md`。
 4. **端到端大文件差分**（已由 `read_exact` 教训得出）：所有"替换库"的路径都要有大输入/跨边界端到端对拍。
+   ✅ **强化（M4）**：`pcap_reader` fuzz target 对**同一输入**用 `Cursor` 与 1 字节 `BufReader` 各跑一遍，
+   要求逐记录（时间戳/两个长度字段/payload）完全一致——"解析与源如何分块无关"从口头教训变成机器约束。
+5. **文档承诺也是门禁**（P5-20/P5-22 类）：注释里写的"call flush to fsync"、"校验 linktype"、
+   "上限 256 MiB"同样是接口承诺，只有 grep 能防止它再次变成空头承诺。
+   ✅ **已落地（M4）**：`parity/verify_hygiene.sh` 四条——配置层不得再有截断 `as` 转换（P5-15）、
+   cpworker 库代码不得有 panic 构造（P5-23，`src/bin/` 对拍工具除外）、`pcap_writer` 文档不得再声称
+   flush 会 fsync（P5-22）、`fuzz/Cargo.toml` 声明的 target 必须出现在 `fuzz.sh`（P5-20：写了不跑等于没写）。
+   这四类 `clippy`/`cargo test` 全部看不见；已做反向验证（重新插入违例 → 对应行变 ❌ 且退出码非 0）。
 
 ## 4. 里程碑与排期（建议）
 
@@ -169,7 +177,7 @@
 | **M1（阻塞）** | WP1：P5-01/06/07 + P5-17 门禁 | — | 长链/方向语法与 libpcap 一致；无 abort；`all.sh` 绿 |
 | **M2（数据正确）** | WP2：P5-02/03/05/09 + P5-16 live CI | M1 | 丢包/VLAN/RXBUF 与 libpcap 对齐；live job 入 CI |
 | **M3（数据不丢）** ✅ | WP3：P5-04/10/11 | — | reload 不丢批次；握手超时/重解析有测试 |
-| **M4（卫生）** | WP4 + WP5 的 P3 项 | M1–M3 | clippy/deny/test 全绿；文档一致；MSRV job |
+| **M4（卫生）** ✅ | WP4（P5-15/20/21/22/23 + §3 门禁扩展）已完成；WP5 的 P3 项（P5-24..28）随 M5 | M1–M3 | clippy/deny/test 全绿；MSRV job 待 M5 |
 | **M5（收尾）** | P5-19 基准 + P5-18 文档 + P5-30 流程 | M1–M4 | README/基准更新；流程文件齐备 |
 
 WP2 与 WP3 可并行；M1 必须最先（唯一可能"完全无数据"的缺陷）。
@@ -257,7 +265,73 @@ WP2 与 WP3 可并行；M1 必须最先（唯一可能"完全无数据"的缺陷
   `cargo fmt --all -- --check` 通过；`cargo deny check` 四项 ok；`parity/all.sh` **8/8 绿**；
   `zmtp_client` fuzz 120s / 1.04M runs 无崩溃。
 
+### M4 已完成
+
+- ✅ **P5-15 配置数值 `i64→i32` 静默截断**：所有 "JSON 数字 → 运行时整数" 的转换统一走
+  `int_in()/i32_in()/u16_in()/u64_in()`（显式范围 + 无损 `TryFrom`），越界返回**含字段名**的错误
+  （`invalid libpcap.snaplen 2147483648: must be between 0 and 262144`）。范围以公开常量形式给出
+  （`SNAPLEN_MIN/MAX`、`BUFFER_SIZE_MB_MIN/MAX`、`TIMEOUT_MS_MIN/MAX`、`RING_SIZE_MIN/MAX`、
+  `PIPELINE_BUFFER_MB_MIN/MAX`、`SLICE_MIN/MAX`、`RATE_LIMIT_MBPS_MIN/MAX`、`MAX_FILE_INTERVAL_*`），
+  `zmq.hwm`/`heartbeat_ms`/`rotating_file.max_file_interval` 改用 `i64` 反序列化以便由同一段代码报错。
+  关闭的实际故障：`snaplen:2147483648 → i32::MIN → snaplen.max(1)` = **每包只截 1 字节**（BPF 全不命中，
+  任务静默无数据）、`buffer_size_mb:4294967296 → SO_RCVBUF=0`、`timeout_ms:4294967396 → 100`、
+  `slice:4294967296 → 0`（变成"不截断"，与请求相反）、`ring_size:4294967304 → 2048`；
+  `rate_limit_mbps` 的上限顺带保证 `×1_000_000` 的 token bucket 不再可能溢出。
+  - 红→绿：`config::tests::numeric_fields_are_range_checked_not_truncated`
+    （修复前：`libpcap.snaplen: out-of-range value was accepted`）；边界值（0 / 2048 / 262144 / 8192 /
+    65535 / 1e6）必须被**接受且数值不变**。
+  - 与差分门禁的关系：实测 cJSON 会把越界数字**钳位**到 `INT_MIN/INT_MAX` 后接受，而 Rust 选择报错，
+    因此 `parity/gen_config.py` 仍只产生范围内数值（否则对拍只是在重复验证钳位）；越界判定固化成
+    `parity/verify_config.sh` 的 "AUDIT4 P5-15" 段（22 条合法 JSON 越界向量必须全被拒）。分歧见 `PARITY.md §2.5`。
+- ✅ **P5-20 pcap reader 校验 + fuzz**：`PcapReader` 泛化为 `PcapReader<R: Read>`（新增
+  `from_reader()` 纯字节流入口），补四条硬校验——`linktype == DLT_EN10MB`（错误消息含具体编号与
+  `tcpdump -i any`/SLL2/radiotap 提示）、`version_major <= 2`、`caplen <= orig_len`、
+  `caplen <= MAX_CAPLEN`；`MAX_CAPLEN` 由 **256 MiB 收敛到 262144**（libpcap 自身最大 snaplen），
+  并加 `const _ = assert!` 编译期约束防止回调。记录字段只在检查全部通过后发布；截断 = EOF（不交出说谎的
+  长度）；文件损坏时 `log_error!` 一次并停止回放（原实现会把 payload 当报文继续转发）。
+  - 红→绿（逐个关掉检查，同一批测试即失败）：`rejects_non_ethernet_linktype`、
+    `rejects_caplen_larger_than_orig_len`（修复前损坏记录被投递到 sink）、`bounds_one_record_allocation`
+    （修复前 262145 字节的记录被正常接受、200 MiB 记录会触发同量级 `resize`）、
+    `rejects_unknown_pcap_version`、`truncated_files_stop_without_forwarding_garbage`、
+    `parsing_is_independent_of_read_chunking`、`all_byte_orders_and_timestamp_resolutions_decode`、
+    `corrupt_record_header_leaves_the_previous_record_intact`。
+  - 新增 fuzz target `pcap_reader`（注册进 `fuzz/Cargo.toml` + `fuzz.sh` 的 ALL_TARGETS）：
+    同一输入跑两遍（`Cursor` 与 1 字节 `BufReader`），要求逐记录一致 + 不变量 `data.len() == caplen <= len <= MAX_CAPLEN`；
+    15 条手写种子覆盖畸形全局头/记录头、截断、错误字节序、跨 BufReader 边界、超大 caplen。
+    `./fuzz.sh 30 pcap_reader` → 996 656 runs，无崩溃。
+- ✅ **P5-21 netutil 非 ASCII 破坏**：`bpf_filter_replace_nic` 不再用 `bytes[i] as char` 逐字节重编码
+  （那会把 `网络` 变成 `ç½‘ç»œ`，过滤器再也编译不过），改为字节切片复制 + `find(char::is_whitespace)`
+  结束接口名；解析器抽成可注入 resolver 的 `replace_nic`，回归测试不需要真实网卡。
+  - 红→绿：`non_ascii_text_survives_unchanged`、`non_ascii_around_a_token_is_preserved`、
+    `unicode_whitespace_terminates_the_interface_name`（三条修复前均失败，见 §6 记录）。
+- ✅ **P5-22 文档与静默回退**：
+  - `PcapWriter`：选择**保持 flush 语义**（libpcap `pcap_dump_flush()` 本身就是 `fflush`；每批次一次
+    fsync 会主导转发循环），把"call flush to fsync"的空头承诺改成精确边界：flush 后字节已到 OS、可被其他
+    读者看到（`Output::destroy()` 依赖这一点），但不保证掉电持久。新增
+    `flush_publishes_the_buffer_without_waiting_for_the_writer` 把该边界钉住（flush 前 0 字节、flush 后全量、
+    writer 仍打开），另加 `snaplen_falls_back_to_the_traditional_default`。
+  - `cpdaemon`：`listen.http.port` 解析失败不再静默回退 9022，而是启动失败并指出键名与合法范围
+    （Go 侧把端口字符串直接交给 `net.Listen`，非法端口本来就是致命错误）；空值仍表示默认。
+    顺带接受不带引号的 `"port": 9022`——viper 默认值是数字、官方 `template.json` 也这么写，
+    serde 原本会直接拒绝整个配置文件。
+  - 红→绿：`cpdaemon tests::bad_http_port_is_a_fatal_error`、`config::tests::http_port_accepts_strings_and_numbers`
+    （修复前分别失败：静默回退 / 配置文件根本加载不了）。
+- ✅ **P5-23 panic 面**：消除库代码里全部 panic 构造 —— `bpf::or_all` 的 `expect`（改为 `Result`，
+  `lower_port` 随之返回 `Result`：过滤器编译路径由配置文件/CPM 下发/SIGHUP 重载驱动，abort 会带走整个 worker）、
+  `zmtp::flush_pending` 的 `self.conn.as_mut().unwrap()`（改为一次性 `take()` 出连接，保留旁边的单一 FIFO
+  `debug_assert!`）、`rotating_file` 命名文件时的 `timestamp_opt(..).unwrap()`（改为 dumper 错误，
+  调用方已有 `error_drop_*` 计数路径）、`packet.rs` 四处定长切片 `try_into().unwrap()`（改为可失败切片辅助）。
+  `panic = "abort"` **保留**，边界写进根 `Cargo.toml` 与 `PARITY.md §4`：由输入决定的失败一律是 `Result`，
+  panic 只留给 `debug_assert!` 表达的程序自身不变量违例；`cargo test` 走 unwind 的 `test` profile 不受影响。
+  - 红→绿：`bpf::compiler::tests::or_all_rejects_an_empty_alternative_list_without_panicking`、
+    `output::rotating_file::tests::out_of_range_file_time_is_an_error_not_a_panic`（修复前均 panic）。
+    `zmtp` 那处的"不可达"无法用测试证伪，故改由下面的 grep 门禁守着。
+- ✅ **门禁强化 §3 扩展**：新增 `parity/verify_hygiene.sh`（4 条，已接入 `parity/all.sh` 第 9 项与 CI `test` job）：
+  config.rs 不得再有截断 `as` 转换；cpworker 库代码不得有 panic 构造（`src/bin/` 对拍工具除外）；
+  `pcap_writer` 文档不得再声称 flush 会 fsync；`fuzz/Cargo.toml` 声明的每个 target 必须出现在 `fuzz.sh`。
+  四条都已做反向验证：把对应违例重新插入一处，该行即变 ❌ 且脚本退出 1。
+
 ### 下一步
 
-- **M4**：卫生（WP4：P5-15/20/21/22/23 + WP5 的 P3 项）。
+- **M5**：收尾（P5-19 基准重跑 + P5-18 文档一致性 + WP5 剩余 P3 项 P5-24..P5-30）。
 

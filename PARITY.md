@@ -54,7 +54,7 @@
 | cpgolib / cpctl 纯函数测试 | ✅ |
 | 其余 C/Go 测试文件 | ⚠️ 部分未移植 |
 
-当前 `cargo test --workspace`：**71 个测试全部通过**（含 `cpsim` 的 11 个 DST 测试）。
+当前 `cargo test --workspace`：**160 个测试全部通过**（含 `cpsim` 的 DST 测试），另有 2 个需要 `CAP_NET_RAW` 的实时抓包测试标记为 `#[ignore]`，由 CI 的 privileged job 运行。
 
 ### 1.4 Deterministic Simulation Testing（`crates/sim`）
 
@@ -69,7 +69,7 @@ collector 解码并对账。同一 seed 跨进程 trace 摘要一致，可精确
 
 ### 1.5 覆盖率引导的 Fuzz（cargo-fuzz / libFuzzer）
 
-`crates/cpworker/fuzz/` 下有 9 个 fuzz target（nightly + ASAN + libFuzzer）：
+`crates/cpworker/fuzz/` 下有 10 个 fuzz target（nightly + ASAN + libFuzzer）：
 
 | target | 对象 |
 |---|---|
@@ -84,6 +84,7 @@ collector 解码并对账。同一 seed 跨进程 trace 摘要一致，可精确
 | `diff_oracle` | C/Go 差分（见 §1.6，由 `parity/difffuzz.sh` 驱动） |
 
 * 运行：`fuzz.sh [秒数] [target|all]`；CI 烟雾：`fuzz.sh --check`
+* **门禁**：`parity/verify_hygiene.sh` 要求 `fuzz/Cargo.toml` 里声明的每个 target 都必须出现在 `fuzz.sh` 的执行列表中（`diff_oracle` 是唯一显式豁免）——"写了但从不运行"的 fuzz target 等于没有（AUDIT4 §3.2 的又一形态）
 * 复现：`fuzz.sh repro zmq_batch <artifact>`
 * 详见 `crates/cpworker/fuzz/README.md`
 
@@ -146,8 +147,8 @@ parity/run.sh 5000 42     # packet_split: C vs Rust
 | **协议：GRE/VXLAN/ZMQ batch 线格式** | C 真实输出代码（`--wrap=sendto/zmq_send` 拦截）vs Rust | 8 种子 × 150 用例（每用例最多 400 包，含分片/翻页/flush 边界/VLAN/MPLS） | ✅ 逐字节一致 |
 | **协议：Unix JSON-RPC** | 真实 C `unix-manager.c` 服务器 vs Rust 服务器，真实 socket | 17 个用例（握手/命令/错误/超时） | ✅ 一致（JSON 归一化后） |
 
-复现：`parity/all.sh`（或单独的 `run.sh`、`verify_config.sh`、
-`verify_req.sh`、`fuzz_proto.sh`、`fuzz_rpc.sh`）。
+复现：`parity/all.sh`（9 项，含 `verify_liveness.sh`（§3.1）与 `verify_hygiene.sh`（§3/§3.2/§3.4）两个防复发
+门禁；也可单独跑 `run.sh`、`verify_config.sh`、`verify_req.sh`、`fuzz_proto.sh`、`fuzz_rpc.sh`）。
 
 ### 2.1 协议 fuzz 方法
 
@@ -218,6 +219,25 @@ ZMQ 输出用纯 Rust ZMTP 客户端替代 libzmq，因此"C 的行为"= **libzm
 | 待发队列上限 | 仅按消息数（hwm） | 双重上限：`hwm` 条 **且** `min(hwm × 1 MiB, 64 MiB)` 字节（`DEFAULT_MAX_QUEUED_BYTES`）；超限按 libzmq `EAGAIN` 语义丢弃并计入 `error_drop_*` | **有意分歧**：慢/失联 collector 不能把 RSS 撑到 OOM（被 OOM killer 杀掉的是采集进程本身） |
 | `fwd_bytes` / `fwd_packets` 口径 | `zmq_send(ZMQ_DONTWAIT)` 返回 0（=进入 libzmq pipe）即计数 | **保持不变**：批次被 transport 接收即计数 | 与 C 一致（不静默改变对外数字）。积压与丢弃改由新指标观测：`output.zmtp_queued_batches` / `output.zmtp_queued_bytes`（gauge，见 `collect_stats_summary` 与 `cpctl stats`）+ `error_drop_*` |
 
+## 2.5 配置与输入校验的有意分歧（AUDIT4 M4：P5-15 / P5-20 / P5-21 / P5-22）
+
+M4 的问题大多不是"移植错了"，而是"移植得比原实现更宽松、更沉默"。下面每一项都**用 oracle
+实测确认了原实现的行为**（C harness / 系统 libpcap 1.10 探针），分歧处按上表说明：
+
+| 项 | C / libpcap 实测行为 | Rust 行为 | 性质 |
+|---|---|---|---|
+| 配置数值越界（`snaplen` / `buffer_size_mb` / `timeout_ms` / `ring_size` / `slice` / `pipeline.buffer_size_mb` / `max_payload_size`） | cJSON 把数字**钳位**到 `INT_MIN/INT_MAX` 后接受：实测 C harness 对 `snaplen:2147483648` 输出 `snaplen=2147483647`，对 `slice:4294967296` 输出 `slice=2147483647` | **报错**并给出字段名与允许范围，如 `invalid libpcap.snaplen 2147483648: must be between 0 and 262144` | **有意分歧（更严）**：Rust 原来是 `as i32` 截断，`2147483648` 变成 `i32::MIN`，再被 `snaplen.max(1)` 变成**每包 1 字节**——任务静默抓不到任何包；`buffer_size_mb:4294967296` 变成 `SO_RCVBUF=0`。钳位后的 C 仍带着荒谬参数继续跑 |
+| pcap 文件 linktype 非 EN10MB（`tcpdump -i any` 的 DLT_LINUX_SLL 113 / SLL2 276、DLT_NULL、DLT_RAW、radiotap） | `pcap_open_offline` **照常打开**（实测 `datalink=113` 成功），`pcap_compile` 按该 DLT 编译，`pcap_next_ex` 正常返回记录 | **明确拒绝**：`unsupported pcap linktype 113: only Ethernet (DLT_EN10MB = 1) can be replayed; produced by tcpdump -i any; re-capture on a single interface` | **有意分歧**：本项目 BPF 后端只实现 Ethernet 布局，把 SLL 帧按 Ethernet 解析会让每一帧错位 4 字节后转发进 GRE/VXLAN/ZMQ —— 静默的数据破坏，宁缺勿错 |
+| pcap 记录 `caplen > orig_len` | libpcap **不校验**：实测返回 `caplen=20 origlen=10` 并交出 20 字节 | **报错** `caplen 20 exceeds orig_len 10 (corrupt file)`，该记录不进入输出 | **有意分歧**：真实抓包不可能出现该组合，出现即文件损坏 |
+| pcap `version_major > 2` | libpcap 拒绝：`unsupported pcap savefile version 3.4` | 同样拒绝并打印版本号 | **一致**（对齐 libpcap） |
+| 单条记录 caplen 上限 | 受文件实际长度约束 | `MAX_CAPLEN = 262144`（libpcap 自身的最大 snaplen），超限按损坏处理；另有 `const _ = assert!` 编译期约束 | **有意收敛**：原上限 256 MiB，一条畸形记录就能让 reader 一次 `resize` 预留 256 MB 并长期持有（进程基线 RSS 仅 6.5 MB） |
+| `nic.<ifname>` 过滤器替换（`bpf_filter_replace_nic`） | C 按 `char *` 逐字节处理，UTF-8 序列**原样透传** | 曾用 `bytes[i] as char` 逐字节重编码，非 ASCII 过滤器被改成 Latin-1 乱码；现按**字节切片复制**，非 ASCII 空白（U+3000）也能正确结束接口名 | **修复回归**（现在与 C 一致） |
+| `PcapWriter::flush()` | libpcap `pcap_dump_flush()` 就是 `fflush`：到 OS，不 fsync | 行为**不变**；文档改为如实描述（flush 后字节已到 OS、可被其他读者看到；不保证掉电持久） | **文档修复**：原注释"call flush to fsync"是空头承诺，现在有 grep 门禁 |
+| `cpdaemon` HTTP 端口解析 | Go 把端口字符串直接交给 `net.Listen` / `http.Server.Addr`，端口非法 → **启动失败** | 原来 `parse::<u16>().unwrap_or(9022)` 静默换端口；现返回错误并指明键名与合法范围；空值仍表示默认 9022 | **修复回归**（现在与 Go 一致）。同时接受不带引号的 `"port": 9022`：viper 默认值就是数字、官方 template.json 也这么写，serde 原本会直接拒绝该配置文件 |
+
+差分向量分配：`parity/gen_config.py` **只产生范围内的数值**——范围外两侧定义上就分歧，比较它只会重复验证
+钳位；22 条越界的合法 JSON 向量固化在 `parity/verify_config.sh` 的 "AUDIT4 P5-15" 段，断言 Rust 侧全部拒绝。
+
 ## 3. 关键一致性向量（已通过）
 
 * `workerTaskBuilder` 产出的 task fingerprint（含 Go 反射标签算法的怪异 `UUID()`
@@ -235,7 +255,7 @@ ZMQ 输出用纯 Rust ZMTP 客户端替代 libzmq，因此"C 的行为"= **libzm
 |---|---|
 | **libpcap**（实时抓包） | ✅ 裸 `AF_PACKET`（`capturer/af_packet.rs`）：`SOCK_RAW` + `SO_RCVBUF`/`SO_RCVBUFFORCE`（回读+告警）+ `SO_TIMESTAMPNS` + `PACKET_AUXDATA`（VLAN）+ `PACKET_STATISTICS`；**先挂 BPF 再 bind** |
 | **libpcap**（BPF 编译/挂载） | ✅ 自研 tcpdump 子集编译器（`bpf/`），Linux 用 `SO_ATTACH_FILTER` |
-| **libpcap**（pcap 文件读/写） | ✅ 纯 Rust（`capturer/pcap_file.rs`、`output/pcap_writer.rs`）|
+| **libpcap**（pcap 文件读/写） | ✅ 纯 Rust（`capturer/pcap_file.rs`、`output/pcap_writer.rs`）；reader 泛化到 `impl Read`，畸形输入可在无文件系统的条件下 fuzz/单测 |
 | **libzmq**（ZMQ 输出） | ✅ 纯 Rust ZMTP 3.x `PUSH`（`zmtp/`）|
 | libc / nix（syscall 绑定） | 保留（不是任务 C 代码）|
 
@@ -249,6 +269,35 @@ ZMQ 输出用纯 Rust ZMTP 客户端替代 libzmq，因此"C 的行为"= **libzm
   并用 `getsockopt` 回读实际值，被 `net.core.rmem_max` 截断时告警。
 * **启动无空窗**：socket 以协议 0 创建 → 挂 BPF → 再 `bind(ETH_P_ALL, ifindex)`，
   避免 bind/挂过滤器之前收到未过滤流量。
+
+### pcap 文件读取（AUDIT4 P5-20）
+
+`capturer/pcap_file.rs` 的 `PcapReader<R: Read>` 是**校验型**读取器，四条硬规则：
+
+* magic 必须是四种已知变体（LE/BE × µs/ns）之一；
+* `version_major <= 2`（与 libpcap 实测行为一致）；
+* `linktype` 必须是 `DLT_EN10MB`，否则报错并提示常见来源（`tcpdump -i any` 的 SLL/SLL2）；
+* 每条记录满足 `caplen <= orig_len` 且 `caplen <= MAX_CAPLEN = 262144`。
+
+记录字段只在全部检查通过后发布（被拒绝的记录不会覆盖上一次结果）；截断只意味着 EOF，
+绝不会交出"长度说谎"的包；文件损坏时 `log_error!` 一次并停止回放，不再把 payload 当报文继续转发。
+解析与"源如何分块"无关：单测与 `pcap_reader` fuzz target 都会再用 1 字节 `BufReader` 跑一遍并要求
+逐记录一致——这正是 `read_exact` 失步教训的固化（IMPROVEMENT_PLAN_AUDIT4 §3.4）。
+
+### 崩溃面与 `panic = "abort"`（AUDIT4 P5-23）
+
+release profile 用 `panic = "abort"`：**panic 是致命事件，不是可恢复错误**——一个线程里的 panic 会带走
+整个 worker 及其所有 task。边界因此这样划：
+
+* 凡由**输入**决定的失败一律是 `Result` 或提前返回：配置 JSON、CPM 任务下发、SIGHUP 重载、BPF 表达式、
+  pcap 文件、ZMTP 对端字节、报文帧；
+* panic 只留给**程序自身的不变量违例**，用 `debug_assert!` 表达（写缓冲单一 FIFO 相位、ring buffer 记账），
+  测试/debug 会炸、release 编译掉；
+* 原先那几处"可证不可达"的 `expect`/`unwrap`（`bpf::or_all`、`zmtp::flush_pending`、`rotating_file`
+  的时间戳、`packet.rs` 的定长切片）已全部消除——"可证"依赖调用点纪律，纪律会随改动流失，而 abort 不可恢复；
+* `cargo test` 走 `test` profile（`panic = unwind`），`#[should_panic]` 与断言报告不受影响；
+* 回归网：`parity/verify_hygiene.sh` 直接 grep 掉 cpworker 库代码（`src/bin/` 对拍工具除外）中的 panic
+  构造——这是 clippy 与单测都看不见的盲区。
 
 ### BPF 子集（`crates/cpworker/src/bpf/`）
 
