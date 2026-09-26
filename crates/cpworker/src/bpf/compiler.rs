@@ -116,6 +116,11 @@ fn lower(ast: &Ast) -> Result<NExpr> {
         Ast::Or(a, b) => or(lower(a)?, lower(b)?),
         Ast::Not(a) => NExpr::Not(Box::new(lower(a)?)),
         Ast::Proto(p) => lower_proto(*p),
+        Ast::IpProto { v6, num } => t(Test::L4Proto {
+            v6: *v6,
+            proto: *num,
+            frag: *v6,
+        }),
         Ast::EtherHost { dir, mac } => lower_ether(*dir, *mac),
         Ast::Host { dir, proto, addr } => lower_host(*dir, *proto, *addr)?,
         Ast::Net {
@@ -397,22 +402,12 @@ fn w16(b: &[u8; 16], i: usize) -> u32 {
 
 type Label = usize;
 
-#[derive(Clone, Copy)]
-enum Field {
-    Jt,
-    Jf,
-}
-
-struct Fixup {
-    idx: usize,
-    field: Field,
-    label: Label,
-}
-
 #[derive(Default)]
 struct Builder {
     insns: Vec<Insn>,
-    fixups: Vec<Fixup>,
+    /// For each instruction, the `(jt, jf)` target labels when it is a
+    /// conditional jump (parallel to `insns`).
+    branches: Vec<Option<(Label, Label)>>,
     labels: Vec<Option<usize>>,
 }
 
@@ -433,39 +428,30 @@ impl Builder {
             jf: 0,
             k,
         });
+        self.branches.push(None);
         self.insns.len() - 1
     }
 
-    fn jump(&mut self, op: u16, k: u32, jt: Label, jf: Label) -> usize {
-        let idx = self.emit(op, k);
-        self.fixups.push(Fixup {
-            idx,
-            field: Field::Jt,
-            label: jt,
+    /// Emit a conditional jump with two target labels.
+    fn branch(&mut self, op: u16, k: u32, jt: Label, jf: Label) {
+        self.insns.push(Insn {
+            code: op,
+            jt: 0,
+            jf: 0,
+            k,
         });
-        self.fixups.push(Fixup {
-            idx,
-            field: Field::Jf,
-            label: jf,
-        });
-        idx
+        self.branches.push(Some((jt, jf)));
+    }
+
+    fn jump(&mut self, op: u16, k: u32, jt: Label, jf: Label) {
+        self.branch(op, k, jt, jf);
     }
 
     /// Emit a conditional that falls through when `A == k` and jumps to `fail`
     /// otherwise.
     fn test_eq(&mut self, k: u32, fail: Label) {
         let cont = self.new_label();
-        let idx = self.emit(JMP_JEQ_K, k);
-        self.fixups.push(Fixup {
-            idx,
-            field: Field::Jt,
-            label: cont,
-        });
-        self.fixups.push(Fixup {
-            idx,
-            field: Field::Jf,
-            label: fail,
-        });
+        self.branch(JMP_JEQ_K, k, cont, fail);
         self.bind(cont);
     }
 
@@ -473,17 +459,7 @@ impl Builder {
     /// and jumps to `fail` otherwise.
     fn test_clear(&mut self, mask: u32, fail: Label) {
         let cont = self.new_label();
-        let idx = self.emit(JMP_JSET_K, mask);
-        self.fixups.push(Fixup {
-            idx,
-            field: Field::Jt,
-            label: fail,
-        });
-        self.fixups.push(Fixup {
-            idx,
-            field: Field::Jf,
-            label: cont,
-        });
+        self.branch(JMP_JSET_K, mask, fail, cont);
         self.bind(cont);
     }
 
@@ -625,28 +601,107 @@ impl Builder {
         Ok(())
     }
 
-    fn finish(mut self) -> Result<Program> {
-        // Copy fixups out so we can mutate `self.insns` while iterating.
-        let fixups = std::mem::take(&mut self.fixups);
-        for f in fixups {
-            let target =
-                self.labels[f.label].ok_or_else(|| Error::new("bpf: unbound jump label"))?;
-            if target < f.idx + 1 {
+    fn finish(self) -> Result<Program> {
+        let n = self.insns.len();
+        let mut label_old = Vec::with_capacity(self.labels.len());
+        for l in &self.labels {
+            label_old.push(l.ok_or_else(|| Error::new("bpf: unbound jump label"))?);
+        }
+
+        // Reverse-assemble. `rev` holds the program reversed: a rev index `r`
+        // maps to final index `len - 1 - r`. Conditional branches reach at most
+        // 255 instructions, so any longer branch is routed through an
+        // unconditional `JMP_JA` trampoline (32-bit reach) placed immediately
+        // after it in the final program. Because everything only jumps forward,
+        // a target processed earlier (higher old index) already has its final
+        // rev index, so distances are exact.
+        let mut rev: Vec<Insn> = Vec::with_capacity(n + 16);
+        let mut rev_index: Vec<isize> = vec![0; n + 1];
+        rev_index[n] = -1; // one-past-the-end
+
+        for i in (0..n).rev() {
+            let Some((jt_l, jf_l)) = self.branches[i] else {
+                rev_index[i] = rev.len() as isize;
+                rev.push(self.insns[i]);
+                continue;
+            };
+            let jt_old = label_old[jt_l];
+            let jf_old = label_old[jf_l];
+            if jt_old <= i || jf_old <= i {
                 return Err(Error::new("bpf: backward jump not supported"));
             }
-            let off = target - (f.idx + 1);
-            match f.field {
-                Field::Jt => {
-                    self.insns[f.idx].jt = u8::try_from(off)
-                        .map_err(|_| Error::new("bpf: filter too complex (jt > 255)"))?;
+
+            let p0 = rev.len() as isize;
+            let jt_dist = p0 - rev_index[jt_old] - 1;
+            let jf_dist = p0 - rev_index[jf_old] - 1;
+            if jt_dist < 0 || jf_dist < 0 {
+                return Err(Error::new("bpf: backward jump not supported"));
+            }
+
+            // Decide which fields need a trampoline. Inserting one increases the
+            // other field's distance, so re-check until stable.
+            let mut need_jt = jt_dist > 255;
+            let mut need_jf = jf_dist > 255;
+            loop {
+                let t = need_jt as isize + need_jf as isize;
+                let jt_ok = need_jt || jt_dist + t <= 255;
+                let jf_ok = need_jf || jf_dist + t <= 255;
+                if jt_ok && jf_ok {
+                    break;
                 }
-                Field::Jf => {
-                    self.insns[f.idx].jf = u8::try_from(off)
-                        .map_err(|_| Error::new("bpf: filter too complex (jf > 255)"))?;
+                if !jt_ok {
+                    need_jt = true;
+                }
+                if !jf_ok {
+                    need_jf = true;
                 }
             }
+
+            let mut jt_tramp = None;
+            let mut jf_tramp = None;
+            if need_jt {
+                let tp = rev.len() as isize;
+                let k = u32::try_from(tp - rev_index[jt_old] - 1)
+                    .map_err(|_| Error::new("bpf: jump offset overflow"))?;
+                rev.push(Insn {
+                    code: JMP_JA,
+                    jt: 0,
+                    jf: 0,
+                    k,
+                });
+                jt_tramp = Some(tp);
+            }
+            if need_jf {
+                let tp = rev.len() as isize;
+                let k = u32::try_from(tp - rev_index[jf_old] - 1)
+                    .map_err(|_| Error::new("bpf: jump offset overflow"))?;
+                rev.push(Insn {
+                    code: JMP_JA,
+                    jt: 0,
+                    jf: 0,
+                    k,
+                });
+                jf_tramp = Some(tp);
+            }
+
+            let p = rev.len() as isize;
+            let mut ins = self.insns[i];
+            ins.jt = u8::try_from(match jt_tramp {
+                Some(tp) => p - tp - 1,
+                None => p - rev_index[jt_old] - 1,
+            })
+            .map_err(|_| Error::new("bpf: filter too complex (jt > 255)"))?;
+            ins.jf = u8::try_from(match jf_tramp {
+                Some(tp) => p - tp - 1,
+                None => p - rev_index[jf_old] - 1,
+            })
+            .map_err(|_| Error::new("bpf: filter too complex (jf > 255)"))?;
+            rev_index[i] = p;
+            rev.push(ins);
         }
-        Ok(Program { insns: self.insns })
+
+        rev.reverse();
+        Ok(Program { insns: rev })
     }
 }
 
@@ -708,5 +763,41 @@ mod tests {
         let pkt = vec![0u8; 4];
         assert!(!build("host 10.0.0.1").apply(&pkt));
         assert!(!build("udp port 53").apply(&pkt));
+    }
+
+    #[test]
+    fn long_not_host_chain_uses_trampolines_and_matches() {
+        // 11+ hosts used to fail with "filter too complex (jt > 255)"; this is
+        // the shape the config layer auto-generates for output-host exclusion.
+        let expr = (0..50u8)
+            .map(|i| format!("not host 10.9.0.{i}"))
+            .collect::<Vec<_>>()
+            .join(" and ");
+        let p = build(&expr);
+        // The program must contain at least one JA trampoline.
+        assert!(
+            p.insns.iter().any(|i| i.code == JMP_JA),
+            "expected a JA trampoline"
+        );
+        let excluded = eth_ipv4_tcp([10, 0, 0, 1], [10, 9, 0, 7], 1, 2);
+        let allowed = eth_ipv4_tcp([10, 0, 0, 1], [10, 9, 0, 200], 1, 2);
+        assert!(!p.apply(&excluded));
+        assert!(p.apply(&allowed));
+    }
+
+    #[test]
+    fn long_port_or_chain_compiles() {
+        let p = build("port 1000 or port 1001 or port 1002 or port 1003 or port 1004");
+        let hit = eth_ipv4_tcp([1, 1, 1, 1], [2, 2, 2, 2], 5, 1002);
+        assert!(p.apply(&hit));
+        let miss = eth_ipv4_tcp([1, 1, 1, 1], [2, 2, 2, 2], 5, 1005);
+        assert!(!p.apply(&miss));
+    }
+
+    #[test]
+    fn ip_proto_matches() {
+        let pkt = eth_ipv4_tcp([1, 1, 1, 1], [2, 2, 2, 2], 1, 2);
+        assert!(build("ip proto 6").apply(&pkt));
+        assert!(!build("ip proto 17").apply(&pkt));
     }
 }

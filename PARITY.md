@@ -225,15 +225,18 @@ parity/run.sh 5000 42     # packet_split: C vs Rust
 
 ### BPF 子集（`crates/cpworker/src/bpf/`）
 
-* `parser.rs` → `compiler.rs`：`host`/`net`/`port`/`portrange`/`ether host`、`src`/`dst`、
-  `ip`/`ip6`/`arp`/`rarp`/`tcp`/`udp`/`icmp`/`icmp6`、`and`/`or`/`not`/括号。
-  语义对齐 tcpdump（IPv6 分片头 `0x2c`、IPv4 分片偏移、bare `port` 含 SCTP、`net` 掩码）。
-  不支持的关键字（`vlan` 等）**明确报错**。
-* `interp.rs`：安全 cBPF 解释器（越界 load → drop，无 `unsafe`），用于离线过滤与对拍。
-* `linux.rs`：`SO_ATTACH_FILTER`（唯一 OS 相关部分；编译器本身平台无关）。
-* 对拍：`parity/verify_bpf.sh` 用 **libpcap `pcap_offline_filter`** 在同一批随机
-  表达式/报文上逐包比较决策（`parity/c_bpf.c` + `bpf_eval`）。
-* fuzz：`bpf` target（任意表达式 + 任意报文，不得 panic）。
+* **支持**：`host`/`net`/`port`/`portrange`/`ether host`；`src`/`dst`（含 `tcp dst port 80`、
+  `udp src port 53`、`ip src host X`、`ether src host MAC`）；
+  `ip`/`ip6`/`arp`/`rarp`/`tcp`/`udp`/`icmp`/`icmp6`；`ip proto N`/`ip6 proto N`；
+  `and`/`or`/`not`/括号。
+* **语义对齐 tcpdump**：IPv6 分片头 `0x2c`、IPv4 分片偏移、bare `port` 含 SCTP、`net` 掩码。
+* **限制**：表达式 ≤ 8 KiB、嵌套 ≤ 256、节点 ≤ 4096；超限**明确报错**（不会栈溢出）。
+* **长跳转**：条件跳转仅 255 指令距离，超出时由 `JA` 跳转中继（jump-around，32 位 k）
+  自动处理，因此 `not host` 长链 / 多项 `port`/`host` 或链不再受此限制。
+* **不支持（明确报错）**：`vlan`/`mpls`/`pppoes`、`greater`/`less`/`len`、`protochain`、算术、
+  原始偏移（`byte`/`ether proto` 之外的偏移）、以及方向作用于 proto 之前的写法（`src tcp`）。
+* **对拍**：`parity/verify_bpf.sh` 用 libpcap `pcap_offline_filter` 在同一批随机
+  表达式/报文上逐包比较决策（`parity/c_bpf.c` + `bpf_eval`），生成器包含长链/方向语法用例。
 
 ### ZMTP（`crates/cpworker/src/zmtp/`）
 

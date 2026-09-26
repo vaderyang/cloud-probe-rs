@@ -122,8 +122,32 @@ def gen_exprs(r, v4s, v6s, ports, macs):
         f"host {a6} and udp",
         f"udp and not host {b}",
         f"(net {net}) and not host {a}",
+        f"tcp dst port {p}",
+        f"udp src port {p}",
+        f"tcp dst portrange {p1}-{p2}",
+        f"ether src host {m}",
+        f"ether dst host {m}",
+        f"ip proto {r.choice([6, 17, 1, 132])}",
+        f"ip6 proto {r.choice([6, 17, 58])}",
+        f"ip src host {a}",
     ]
     return templates
+
+
+def gen_long(ports):
+    """Long/complex expressions that exercise jump trampolines and deep chains
+    (these used to fail with 'filter too complex' and were absent from the gate)."""
+    out = []
+    for n in (3, 8, 20, 50):
+        out.append(" or ".join(f"port {1000 + i}" for i in range(n)))
+    for n in (11, 20, 50, 100):
+        out.append(" and ".join(f"not host 10.9.{i // 256}.{i % 256}" for i in range(n)))
+    for n in (12, 30, 64):
+        out.append(" or ".join(f"host 10.8.{i // 256}.{i % 256}" for i in range(n)))
+    out.append(" or ".join(f"tcp dst port {80 + i}" for i in range(10)))
+    out.append(" and ".join("udp" if i % 2 else f"host 10.9.0.{i % 4}" for i in range(64)))
+    _ = ports
+    return out
 
 
 def main():
@@ -138,13 +162,16 @@ def main():
 
     v4 = [bytes(r.randbytes(4)) for _ in range(5)]
     v4 += [bytes([10, 0, 0, 1]), bytes([10, 0, 0, 9]), bytes([192, 168, 1, 1])]
+    v4 += [bytes([10, 9, 0, i]) for i in range(4)]
+    v4 += [bytes([10, 8, 0, i]) for i in range(4)]
     v6 = [r.randbytes(16) for _ in range(3)]
     v6 += [bytes([0xFE, 0x80] + [0] * 13 + [1]), bytes(16)]
     ports = [53, 80, 443, 1234, 8080, 65535, 0, 100]
+    ports += [1000 + i for i in range(6)]
     macs = [mac(r) for _ in range(3)]
     macs += ["00:11:22:33:44:55"]
 
-    exprs = gen_exprs(r, v4, v6, ports, macs)
+    exprs = gen_long(ports) + gen_exprs(r, v4, v6, ports, macs)
     while len(exprs) < nexprs:
         exprs.extend(gen_exprs(r, v4, v6, ports, macs))
     exprs = exprs[:nexprs]

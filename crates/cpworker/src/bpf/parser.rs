@@ -25,6 +25,13 @@ use std::str::FromStr;
 
 use crate::error::{Error, Result};
 
+/// Maximum filter expression length in bytes.
+const MAX_FILTER_LEN: usize = 8192;
+/// Maximum nesting depth (`not` / parentheses).
+const MAX_DEPTH: usize = 256;
+/// Maximum number of boolean/term nodes (bounds AST/lowering recursion).
+const MAX_NODES: usize = 4096;
+
 /// Direction qualifier (`src`, `dst`, or unspecified = either).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Dir {
@@ -124,6 +131,13 @@ pub enum Ast {
         /// Port spec.
         spec: PortSpec,
     },
+    /// `ip proto NUM` / `ip6 proto NUM`
+    IpProto {
+        /// True for IPv6 (`ip6 proto`).
+        v6: bool,
+        /// IP protocol number.
+        num: u8,
+    },
 }
 
 /// Parse a filter expression string into an [`Ast`].
@@ -132,11 +146,22 @@ pub enum Ast {
 /// Returns an error for unknown keywords, malformed addresses, unresolvable
 /// host names, or trailing garbage.
 pub fn parse(input: &str) -> Result<Ast> {
+    if input.len() > MAX_FILTER_LEN {
+        return Err(Error::new(format!(
+            "filter expression too long ({} > {MAX_FILTER_LEN} bytes)",
+            input.len()
+        )));
+    }
     let toks = tokenize(input);
     if toks.is_empty() {
         return Err(Error::new("empty filter expression"));
     }
-    let mut p = Parser { toks, pos: 0 };
+    let mut p = Parser {
+        toks,
+        pos: 0,
+        depth: 0,
+        nodes: 0,
+    };
     let ast = p.parse_or()?;
     if p.pos != p.toks.len() {
         return Err(Error::new(format!(
@@ -195,9 +220,34 @@ fn tokenize(s: &str) -> Vec<String> {
 struct Parser {
     toks: Vec<String>,
     pos: usize,
+    depth: usize,
+    nodes: usize,
 }
 
 impl Parser {
+    /// Account for one more nesting level, rejecting overly deep expressions
+    /// (which would otherwise overflow the stack during parse/lower/compile).
+    fn enter(&mut self) -> Result<()> {
+        self.depth += 1;
+        if self.depth > MAX_DEPTH {
+            return Err(Error::new(format!(
+                "filter expression nesting too deep (> {MAX_DEPTH})"
+            )));
+        }
+        Ok(())
+    }
+
+    /// Account for one more AST node, bounding total expression size.
+    fn bump(&mut self) -> Result<()> {
+        self.nodes += 1;
+        if self.nodes > MAX_NODES {
+            return Err(Error::new(format!(
+                "filter expression too complex (> {MAX_NODES} terms)"
+            )));
+        }
+        Ok(())
+    }
+
     fn peek(&self) -> Option<&str> {
         self.toks.get(self.pos).map(String::as_str)
     }
@@ -224,6 +274,7 @@ impl Parser {
         while self.peek() == Some("or") || self.peek() == Some("||") {
             self.pos += 1;
             let right = self.parse_and()?;
+            self.bump()?;
             left = Ast::Or(Box::new(left), Box::new(right));
         }
         Ok(left)
@@ -234,6 +285,7 @@ impl Parser {
         while self.peek() == Some("and") || self.peek() == Some("&&") {
             self.pos += 1;
             let right = self.parse_unary()?;
+            self.bump()?;
             left = Ast::And(Box::new(left), Box::new(right));
         }
         Ok(left)
@@ -242,14 +294,20 @@ impl Parser {
     fn parse_unary(&mut self) -> Result<Ast> {
         if self.peek() == Some("not") || self.peek() == Some("!") {
             self.pos += 1;
-            return Ok(Ast::Not(Box::new(self.parse_unary()?)));
+            self.enter()?;
+            self.bump()?;
+            let inner = self.parse_unary()?;
+            self.depth -= 1;
+            return Ok(Ast::Not(Box::new(inner)));
         }
         self.parse_primary()
     }
 
     fn parse_primary(&mut self) -> Result<Ast> {
         if self.eat("(") {
+            self.enter()?;
             let e = self.parse_or()?;
+            self.depth -= 1;
             if !self.eat(")") {
                 return Err(Error::new("missing ')' in filter"));
             }
@@ -304,11 +362,18 @@ impl Parser {
                 if has_dir {
                     return Err(Error::new("src/dst not valid before 'ether'"));
                 }
+                let edir = if self.eat("src") {
+                    Dir::Src
+                } else if self.eat("dst") {
+                    Dir::Dst
+                } else {
+                    Dir::Either
+                };
                 if !self.eat("host") {
                     return Err(Error::new("expected 'host' after 'ether'"));
                 }
                 Ok(Ast::EtherHost {
-                    dir,
+                    dir: edir,
                     mac: self.parse_mac()?,
                 })
             }
@@ -327,20 +392,45 @@ impl Parser {
     }
 
     fn parse_proto_qualified(&mut self, proto: Proto) -> Result<Ast> {
+        // Optional inline direction, e.g. `tcp dst port 80`, `ip src host X`.
+        let (dir, has_dir) = if self.eat("src") {
+            (Dir::Src, true)
+        } else if self.eat("dst") {
+            (Dir::Dst, true)
+        } else {
+            (Dir::Either, false)
+        };
+
         match self.peek() {
-            Some("host") => {
+            Some("proto") => {
+                if has_dir {
+                    return Err(Error::new("src/dst not valid before 'proto'"));
+                }
+                if !matches!(proto, Proto::Ip | Proto::Ip6) {
+                    return Err(Error::new("'proto' is only valid after 'ip'/'ip6'"));
+                }
+                self.pos += 1;
+                let num = self.parse_u16("protocol")?;
+                let num = u8::try_from(num)
+                    .map_err(|_| Error::new(format!("IP protocol {num} out of range")))?;
+                Ok(Ast::IpProto {
+                    v6: proto == Proto::Ip6,
+                    num,
+                })
+            }
+            Some("host") if matches!(proto, Proto::Ip | Proto::Ip6 | Proto::Arp | Proto::Rarp) => {
                 self.pos += 1;
                 Ok(Ast::Host {
-                    dir: Dir::Either,
+                    dir,
                     proto: Some(proto),
                     addr: self.parse_addr()?,
                 })
             }
-            Some("net") => {
+            Some("net") if matches!(proto, Proto::Ip | Proto::Ip6 | Proto::Arp | Proto::Rarp) => {
                 self.pos += 1;
                 let (addr, mask) = self.parse_net()?;
                 Ok(Ast::Net {
-                    dir: Dir::Either,
+                    dir,
                     proto: Some(proto),
                     addr,
                     mask,
@@ -354,7 +444,7 @@ impl Parser {
                     L4::Udp
                 };
                 Ok(Ast::Port {
-                    dir: Dir::Either,
+                    dir,
                     l4,
                     spec: PortSpec::One(self.parse_u16("port")?),
                 })
@@ -367,12 +457,19 @@ impl Parser {
                     L4::Udp
                 };
                 Ok(Ast::Port {
-                    dir: Dir::Either,
+                    dir,
                     l4,
                     spec: self.parse_range()?,
                 })
             }
-            _ => Ok(Ast::Proto(proto)),
+            _ => {
+                if has_dir {
+                    return Err(Error::new(format!(
+                        "unexpected src/dst after protocol '{proto:?}'"
+                    )));
+                }
+                Ok(Ast::Proto(proto))
+            }
         }
     }
 
@@ -599,5 +696,69 @@ mod tests {
         assert!(parse("host").is_err());
         assert!(parse("udp and").is_err());
         assert!(parse("(udp").is_err());
+    }
+
+    #[test]
+    fn parses_direction_and_proto_syntax() {
+        assert!(matches!(
+            parse("tcp dst port 80").unwrap(),
+            Ast::Port {
+                dir: Dir::Dst,
+                l4: L4::Tcp,
+                spec: PortSpec::One(80)
+            }
+        ));
+        assert!(matches!(
+            parse("udp src port 53").unwrap(),
+            Ast::Port {
+                dir: Dir::Src,
+                l4: L4::Udp,
+                ..
+            }
+        ));
+        assert!(matches!(
+            parse("tcp dst portrange 100-200").unwrap(),
+            Ast::Port {
+                dir: Dir::Dst,
+                spec: PortSpec::Range(100, 200),
+                ..
+            }
+        ));
+        assert!(matches!(
+            parse("ether src host 00:11:22:33:44:55").unwrap(),
+            Ast::EtherHost { dir: Dir::Src, .. }
+        ));
+        assert!(matches!(
+            parse("ether dst host 00:11:22:33:44:55").unwrap(),
+            Ast::EtherHost { dir: Dir::Dst, .. }
+        ));
+        assert!(matches!(
+            parse("ip proto 6").unwrap(),
+            Ast::IpProto { v6: false, num: 6 }
+        ));
+        assert!(matches!(
+            parse("ip6 proto 17").unwrap(),
+            Ast::IpProto { v6: true, num: 17 }
+        ));
+        assert!(matches!(
+            parse("ip src host 10.0.0.1").unwrap(),
+            Ast::Host {
+                dir: Dir::Src,
+                proto: Some(Proto::Ip),
+                ..
+            }
+        ));
+        // `src ether host` is invalid, like tcpdump.
+        assert!(parse("src ether host 00:11:22:33:44:55").is_err());
+    }
+
+    #[test]
+    fn rejects_over_long_or_deep() {
+        assert!(parse(&("not ".repeat(1000) + "ip")).is_err());
+        let paren = "(".repeat(2000) + "ip" + &")".repeat(2000);
+        assert!(parse(&paren).is_err());
+        assert!(parse(&("ip and ".repeat(2000) + "ip")).is_err());
+        // A deep-but-legal expression still parses.
+        assert!(parse(&("not ".repeat(100) + "ip")).is_ok());
     }
 }
