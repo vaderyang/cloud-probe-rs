@@ -217,3 +217,19 @@ fn harsh_network_determinism() {
         assert_eq!(a.stats.duplicated, b.stats.duplicated);
     }
 }
+
+/// Regression: found by the `sim_dst` cargo-fuzz target
+/// (`crash-3c54b0f6b077cbf73f5f64b1218f71bc22a91662`). A corrupted frame that
+/// is also duplicated produces two malformed deliveries, so the old
+/// `decode_errors <= corrupted` invariant was wrong; only *uncorrupted* frames
+/// are required to decode.
+#[test]
+fn regression_corrupt_dup_decode_accounting() {
+    let seed = 0xFFFF_FFFF_FFFF_202A;
+    let mut cfg = base(seed, Out::Gre);
+    cfg.chaos = Chaos::harsh();
+    cfg.num_packets = 256;
+    cfg.probe.slice = 1;
+    let r = run(cfg);
+    r.check();
+}

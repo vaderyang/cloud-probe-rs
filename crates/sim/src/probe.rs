@@ -109,6 +109,7 @@ impl Probe {
             kind,
             pkt_count,
             bytes,
+            corrupted: false,
         }
     }
 

@@ -108,6 +108,9 @@ pub struct Message {
     /// Logical packets represented (1 for gre/vxlan, N for a zmq batch).
     pub pkt_count: u16,
     pub bytes: Vec<u8>,
+    /// Whether the link flipped a bit in this frame (such frames may fail to
+    /// decode; uncorrupted frames must always decode).
+    pub corrupted: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -343,6 +346,7 @@ impl Sim {
                 kind: msg.kind,
                 pkt_count: msg.pkt_count,
                 bytes: msg.bytes.clone(),
+                corrupted,
             }),
         );
         if self.rng.chance(self.cfg.chaos.dup) {
@@ -356,10 +360,10 @@ impl Sim {
                     kind: msg.kind,
                     pkt_count: msg.pkt_count,
                     bytes: msg.bytes,
+                    corrupted,
                 }),
             );
         }
-        let _ = corrupted;
     }
 
     fn deliver(&mut self, msg: Message) {
@@ -378,8 +382,14 @@ impl Sim {
                     );
                 }
             }
-            Err(_) => {
+            Err(reason) => {
                 self.stats.decode_errors += 1;
+                // A frame the link did not corrupt must always decode.
+                assert!(
+                    msg.corrupted,
+                    "uncorrupted frame {serial} failed to decode: {reason}",
+                    serial = msg.serial
+                );
             }
         }
     }
@@ -411,13 +421,10 @@ impl SimResult {
             "delivery accounting mismatch: {:#?}",
             self.stats
         );
-        // Only frames the link corrupted may fail to decode.
-        assert!(
-            self.stats.decode_errors <= self.stats.corrupted,
-            "decode errors ({}) exceed corrupted frames ({})",
-            self.stats.decode_errors,
-            self.stats.corrupted
-        );
+        // Only frames the link corrupted may fail to decode; every uncorrupted
+        // frame is asserted to decode in `deliver`. (A corrupted frame that is
+        // also duplicated produces two malformed deliveries, so the raw counts
+        // are not directly comparable.)
         // Every delivered frame reconciles with the journal.
         for d in &self.collector.frames {
             if let Decode::Ok { pkt_count, .. } = &d.decode {
