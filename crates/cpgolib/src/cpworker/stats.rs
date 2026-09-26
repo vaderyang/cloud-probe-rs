@@ -97,7 +97,11 @@ impl BytesStats {
     /// (the difference is then the absolute value).
     pub fn sub(&self, other: &BytesStats) -> (BytesStats, bool) {
         let is_less = self.compare(other) < 0;
-        let (x, y) = if is_less { (other, self) } else { (self, other) };
+        let (x, y) = if is_less {
+            (other, self)
+        } else {
+            (self, other)
+        };
 
         let mut eib = x.eib - y.eib;
         let bytes = if x.bytes < y.bytes {
@@ -133,7 +137,11 @@ impl PacketsStats {
 
     pub fn sub(&self, other: &PacketsStats) -> (PacketsStats, bool) {
         let is_less = self.compare(other) < 0;
-        let (x, y) = if is_less { (other, self) } else { (self, other) };
+        let (x, y) = if is_less {
+            (other, self)
+        } else {
+            (self, other)
+        };
 
         let mut peta = x.peta - y.peta;
         let packets = if x.packets < y.packets {
@@ -170,8 +178,14 @@ mod tests {
 
     #[test]
     fn packets_sub_borrow() {
-        let a = PacketsStats { packets: 1, peta: 0 };
-        let b = PacketsStats { packets: 3, peta: 0 };
+        let a = PacketsStats {
+            packets: 1,
+            peta: 0,
+        };
+        let b = PacketsStats {
+            packets: 3,
+            peta: 0,
+        };
         let (d, less) = a.sub(&b);
         assert_eq!(d.packets, 2);
         assert_eq!(d.peta, 0);

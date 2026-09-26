@@ -4,9 +4,7 @@
 //! GCC 4.8 compatibility. In Rust we let the compiler auto-vectorize a clean
 //! RFC 1071 implementation.
 
-use crate::packet::{
-    be16, be32, put_be16, put_be32, PacketParseResult, IPPROTO_TCP, IPPROTO_UDP,
-};
+use crate::packet::{be16, be32, put_be16, put_be32, PacketParseResult, IPPROTO_TCP, IPPROTO_UDP};
 
 /// Fold a 32-bit partial one's-complement sum into a 16-bit result.
 #[inline]
@@ -68,7 +66,12 @@ fn pseudo_header_sum_v6(ip_hdr: &[u8], protocol: u8, l4_len: u16) -> u32 {
 }
 
 /// TCP checksum using the appropriate pseudo-header.
-pub fn calculate_tcp_checksum(ipv4: Option<&[u8]>, ipv6: Option<&[u8]>, tcp: &[u8], tcp_len: u16) -> u16 {
+pub fn calculate_tcp_checksum(
+    ipv4: Option<&[u8]>,
+    ipv6: Option<&[u8]>,
+    tcp: &[u8],
+    tcp_len: u16,
+) -> u16 {
     let sum = if let Some(ip) = ipv4 {
         pseudo_header_sum_v4(ip, IPPROTO_TCP, tcp_len)
     } else if let Some(ip) = ipv6 {
@@ -80,7 +83,12 @@ pub fn calculate_tcp_checksum(ipv4: Option<&[u8]>, ipv6: Option<&[u8]>, tcp: &[u
 }
 
 /// UDP checksum using the appropriate pseudo-header.
-pub fn calculate_udp_checksum(ipv4: Option<&[u8]>, ipv6: Option<&[u8]>, udp: &[u8], udp_len: u16) -> u16 {
+pub fn calculate_udp_checksum(
+    ipv4: Option<&[u8]>,
+    ipv6: Option<&[u8]>,
+    udp: &[u8],
+    udp_len: u16,
+) -> u16 {
     let sum = if let Some(ip) = ipv4 {
         pseudo_header_sum_v4(ip, IPPROTO_UDP, udp_len)
     } else if let Some(ip) = ipv6 {
@@ -133,8 +141,9 @@ pub fn build_fragment(
     }
 
     output_buf[..header_len].copy_from_slice(&pkt_data[..header_len]);
-    output_buf[header_len..total_len]
-        .copy_from_slice(&pkt_data[header_len + payload_offset..header_len + payload_offset + frag_payload_size]);
+    output_buf[header_len..total_len].copy_from_slice(
+        &pkt_data[header_len + payload_offset..header_len + payload_offset + frag_payload_size],
+    );
 
     if r.is_ipv4 {
         let new_total = (r.ip_hdr_len + r.l4_hdr_len + frag_payload_size) as u16;
@@ -152,7 +161,10 @@ pub fn build_fragment(
 
     if r.is_tcp {
         let seq = be32(&output_buf[r.l4_offset + 4..]);
-        put_be32(&mut output_buf[r.l4_offset + 4..], seq.wrapping_add(payload_offset as u32));
+        put_be32(
+            &mut output_buf[r.l4_offset + 4..],
+            seq.wrapping_add(payload_offset as u32),
+        );
         if recalculate_checksum {
             let tcp_len = (r.l4_hdr_len + frag_payload_size) as u16;
             output_buf[r.l4_offset + 16] = 0;

@@ -6,9 +6,7 @@
 
 use std::collections::BTreeMap;
 
-use crate::worker_config::{
-    CapturerConfig, OutputConfig, ReqPatternConfig, TaskConfig,
-};
+use crate::worker_config::{CapturerConfig, OutputConfig, ReqPatternConfig, TaskConfig};
 
 const OFFSET64: u64 = 14695981039346656037;
 const PRIME64: u64 = 1099511628211;
@@ -115,11 +113,23 @@ fn capturer_labels(l: &mut BTreeMap<String, String>, prefix: &str, c: &CapturerC
     b(l, &format!("{prefix}type"), &c.ty);
     if let Some(lp) = &c.libpcap {
         b(l, &format!("{prefix}libpcap.interface"), &lp.interface);
-        opt_i64(l, &format!("{prefix}libpcap.snaplen"), lp.snaplen.map(|v| v as i64));
+        opt_i64(
+            l,
+            &format!("{prefix}libpcap.snaplen"),
+            lp.snaplen.map(|v| v as i64),
+        );
         opt_str(l, &format!("{prefix}libpcap.netns"), lp.netns.as_deref());
         opt_str(l, &format!("{prefix}libpcap.bpf"), lp.bpf.as_deref());
-        opt_u64(l, &format!("{prefix}libpcap.buffer_size_mb"), lp.buffer_size_mb);
-        opt_i64(l, &format!("{prefix}libpcap.timeout_ms"), lp.timeout_ms.map(|v| v as i64));
+        opt_u64(
+            l,
+            &format!("{prefix}libpcap.buffer_size_mb"),
+            lp.buffer_size_mb,
+        );
+        opt_i64(
+            l,
+            &format!("{prefix}libpcap.timeout_ms"),
+            lp.timeout_ms.map(|v| v as i64),
+        );
         opt_bool(
             l,
             &format!("{prefix}libpcap.not_filter_output_hosts"),
@@ -151,13 +161,21 @@ fn output_labels(l: &mut BTreeMap<String, String>, prefix: &str, o: &OutputConfi
                 &format!("{p}split.max_payload_size"),
                 s.max_payload_size.map(|x| x as i64),
             );
-            opt_bool(l, &format!("{p}split.recalculate_checksum"), s.recalculate_checksum);
+            opt_bool(
+                l,
+                &format!("{p}split.recalculate_checksum"),
+                s.recalculate_checksum,
+            );
         }
     }
     if let Some(v) = &o.gre {
         let p = format!("{prefix}gre.");
         b(l, &format!("{p}host"), &v.host);
-        opt_u64(l, &format!("{p}service_tag"), v.service_tag.map(|x| x as u64));
+        opt_u64(
+            l,
+            &format!("{p}service_tag"),
+            v.service_tag.map(|x| x as u64),
+        );
         opt_str(l, &format!("{p}bind_device"), v.bind_device.as_deref());
         opt_str(l, &format!("{p}pmtudisc"), v.pmtudisc.as_deref());
     }
@@ -167,10 +185,18 @@ fn output_labels(l: &mut BTreeMap<String, String>, prefix: &str, o: &OutputConfi
         // Zmq.Port is a plain int in Go -> always emitted.
         b(l, &format!("{p}port"), &v.port.to_string());
         opt_i64(l, &format!("{p}hwm"), v.hwm.map(|x| x as i64));
-        opt_u64(l, &format!("{p}service_tag"), v.service_tag.map(|x| x as u64));
+        opt_u64(
+            l,
+            &format!("{p}service_tag"),
+            v.service_tag.map(|x| x as u64),
+        );
         // Uuid is a plain string -> always emitted.
         b(l, &format!("{p}uuid"), &v.uuid);
-        opt_i64(l, &format!("{p}heartbeat_ms"), v.heartbeat_ms.map(|x| x as i64));
+        opt_i64(
+            l,
+            &format!("{p}heartbeat_ms"),
+            v.heartbeat_ms.map(|x| x as i64),
+        );
     }
     if let Some(v) = &o.file {
         b(l, &format!("{prefix}file.name"), &v.name);
@@ -178,6 +204,10 @@ fn output_labels(l: &mut BTreeMap<String, String>, prefix: &str, o: &OutputConfi
     if let Some(v) = &o.rotating_file {
         let p = format!("{prefix}rotating_file.");
         b(l, &format!("{p}file_root"), &v.file_root);
-        opt_i64(l, &format!("{p}max_file_interval"), v.max_file_interval.map(|x| x as i64));
+        opt_i64(
+            l,
+            &format!("{p}max_file_interval"),
+            v.max_file_interval.map(|x| x as i64),
+        );
     }
 }

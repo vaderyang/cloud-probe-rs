@@ -129,8 +129,8 @@ impl UnixClient {
         let data = serde_json::to_vec(&json!({"version": "v1"})).unwrap();
         self.send_raw(timeout, &data)?;
         let resp = self.recv_raw(timeout)?;
-        let v: Value = serde_json::from_slice(&resp)
-            .map_err(|e| Error::InvalidResponse(e.to_string()))?;
+        let v: Value =
+            serde_json::from_slice(&resp).map_err(|e| Error::InvalidResponse(e.to_string()))?;
         if v.get("status").and_then(Value::as_str) != Some("OK") {
             return Err(Error::NotOk(format!("{v}")));
         }

@@ -31,7 +31,10 @@ impl RotatingFileOutput {
         let meta = std::fs::metadata(&root)
             .map_err(|e| Error::new(format!("stat file_root {} error: {e}", cfg.file_root)))?;
         if !meta.is_dir() {
-            return Err(Error::new(format!("file_root {} is not a directory", cfg.file_root)));
+            return Err(Error::new(format!(
+                "file_root {} is not a directory",
+                cfg.file_root
+            )));
         }
         Ok(RotatingFileOutput {
             stats,
@@ -53,7 +56,7 @@ impl RotatingFileOutput {
 
     /// Port of `generate_path` + `create_dumper`.
     fn create_writer(&mut self) -> Result<()> {
-        use chrono::{Datelike, Timelike, TimeZone};
+        use chrono::{Datelike, TimeZone, Timelike};
         let dt = chrono::Local.timestamp_opt(self.file_time, 0).unwrap();
         let date = format!(
             "{:04}{:02}{:02}{:02}{:02}{:02}",

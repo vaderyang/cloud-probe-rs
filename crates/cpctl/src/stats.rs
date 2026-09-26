@@ -62,18 +62,66 @@ fn rates_map(s: &StatsSummary, last: &StatsSummary, secs: f64) -> serde_json::Va
         }};
     }
 
-    add_bytes!("cap_bytes_per_sec", s.capture.cap_bytes, last.capture.cap_bytes);
-    add_packets!("cap_packets_per_sec", s.capture.cap_packets, last.capture.cap_packets);
-    add_packets!("drop_packets_per_sec", s.capture.drop_packets, last.capture.drop_packets);
-    add_packets!("ifdrop_packets_per_sec", s.capture.ifdrop_packets, last.capture.ifdrop_packets);
-    add_bytes!("fwd_bytes_per_sec", s.output.fwd_bytes, last.output.fwd_bytes);
-    add_packets!("fwd_packets_per_sec", s.output.fwd_packets, last.output.fwd_packets);
-    add_bytes!("direction_drop_bytes_per_sec", s.output.direction_drop_bytes, last.output.direction_drop_bytes);
-    add_packets!("direction_drop_packets_per_sec", s.output.direction_drop_packets, last.output.direction_drop_packets);
-    add_bytes!("error_drop_bytes_per_sec", s.output.error_drop_bytes, last.output.error_drop_bytes);
-    add_packets!("error_drop_packets_per_sec", s.output.error_drop_packets, last.output.error_drop_packets);
-    add_bytes!("ratelimit_drop_bytes_per_sec", s.output.ratelimit_drop_bytes, last.output.ratelimit_drop_bytes);
-    add_packets!("ratelimit_drop_packets_per_sec", s.output.ratelimit_drop_packets, last.output.ratelimit_drop_packets);
+    add_bytes!(
+        "cap_bytes_per_sec",
+        s.capture.cap_bytes,
+        last.capture.cap_bytes
+    );
+    add_packets!(
+        "cap_packets_per_sec",
+        s.capture.cap_packets,
+        last.capture.cap_packets
+    );
+    add_packets!(
+        "drop_packets_per_sec",
+        s.capture.drop_packets,
+        last.capture.drop_packets
+    );
+    add_packets!(
+        "ifdrop_packets_per_sec",
+        s.capture.ifdrop_packets,
+        last.capture.ifdrop_packets
+    );
+    add_bytes!(
+        "fwd_bytes_per_sec",
+        s.output.fwd_bytes,
+        last.output.fwd_bytes
+    );
+    add_packets!(
+        "fwd_packets_per_sec",
+        s.output.fwd_packets,
+        last.output.fwd_packets
+    );
+    add_bytes!(
+        "direction_drop_bytes_per_sec",
+        s.output.direction_drop_bytes,
+        last.output.direction_drop_bytes
+    );
+    add_packets!(
+        "direction_drop_packets_per_sec",
+        s.output.direction_drop_packets,
+        last.output.direction_drop_packets
+    );
+    add_bytes!(
+        "error_drop_bytes_per_sec",
+        s.output.error_drop_bytes,
+        last.output.error_drop_bytes
+    );
+    add_packets!(
+        "error_drop_packets_per_sec",
+        s.output.error_drop_packets,
+        last.output.error_drop_packets
+    );
+    add_bytes!(
+        "ratelimit_drop_bytes_per_sec",
+        s.output.ratelimit_drop_bytes,
+        last.output.ratelimit_drop_bytes
+    );
+    add_packets!(
+        "ratelimit_drop_packets_per_sec",
+        s.output.ratelimit_drop_packets,
+        last.output.ratelimit_drop_packets
+    );
 
     serde_json::Value::Object(m)
 }
@@ -88,16 +136,40 @@ fn print_raw_text(s: &StatsSummary) {
     let rows: Vec<(&str, String)> = vec![
         ("Cap Bytes", format_bytes_stats(&s.capture.cap_bytes)),
         ("Cap Packets", format_packets_stats(&s.capture.cap_packets)),
-        ("Drop Packets", format_packets_stats(&s.capture.drop_packets)),
-        ("Ifdrop Packets", format_packets_stats(&s.capture.ifdrop_packets)),
+        (
+            "Drop Packets",
+            format_packets_stats(&s.capture.drop_packets),
+        ),
+        (
+            "Ifdrop Packets",
+            format_packets_stats(&s.capture.ifdrop_packets),
+        ),
         ("Fwd Bytes", format_bytes_stats(&s.output.fwd_bytes)),
         ("Fwd Packets", format_packets_stats(&s.output.fwd_packets)),
-        ("Direction Drop Bytes", format_bytes_stats(&s.output.direction_drop_bytes)),
-        ("Direction Drop Packets", format_packets_stats(&s.output.direction_drop_packets)),
-        ("Error Drop Bytes", format_bytes_stats(&s.output.error_drop_bytes)),
-        ("Error Drop Packets", format_packets_stats(&s.output.error_drop_packets)),
-        ("Ratelimit Drop Bytes", format_bytes_stats(&s.output.ratelimit_drop_bytes)),
-        ("Ratelimit Drop Packets", format_packets_stats(&s.output.ratelimit_drop_packets)),
+        (
+            "Direction Drop Bytes",
+            format_bytes_stats(&s.output.direction_drop_bytes),
+        ),
+        (
+            "Direction Drop Packets",
+            format_packets_stats(&s.output.direction_drop_packets),
+        ),
+        (
+            "Error Drop Bytes",
+            format_bytes_stats(&s.output.error_drop_bytes),
+        ),
+        (
+            "Error Drop Packets",
+            format_packets_stats(&s.output.error_drop_packets),
+        ),
+        (
+            "Ratelimit Drop Bytes",
+            format_bytes_stats(&s.output.ratelimit_drop_bytes),
+        ),
+        (
+            "Ratelimit Drop Packets",
+            format_packets_stats(&s.output.ratelimit_drop_packets),
+        ),
     ];
     let max_len = rows.iter().map(|r| r.0.len()).max().unwrap_or(0);
     for (header, value) in rows {
@@ -136,17 +208,57 @@ fn print_summary_stats(stats: &StatsSummary, last: &StatsSummary) {
     }
 
     add_bytes!("Cap Bytes", stats.capture.cap_bytes, last.capture.cap_bytes);
-    add_packets!("Cap Packets", stats.capture.cap_packets, last.capture.cap_packets);
-    add_packets!("Drop Packets", stats.capture.drop_packets, last.capture.drop_packets);
-    add_packets!("Ifdrop Packets", stats.capture.ifdrop_packets, last.capture.ifdrop_packets);
+    add_packets!(
+        "Cap Packets",
+        stats.capture.cap_packets,
+        last.capture.cap_packets
+    );
+    add_packets!(
+        "Drop Packets",
+        stats.capture.drop_packets,
+        last.capture.drop_packets
+    );
+    add_packets!(
+        "Ifdrop Packets",
+        stats.capture.ifdrop_packets,
+        last.capture.ifdrop_packets
+    );
     add_bytes!("Fwd Bytes", stats.output.fwd_bytes, last.output.fwd_bytes);
-    add_packets!("Fwd Packets", stats.output.fwd_packets, last.output.fwd_packets);
-    add_bytes!("Direction Drop Bytes", stats.output.direction_drop_bytes, last.output.direction_drop_bytes);
-    add_packets!("Direction Drop Packets", stats.output.direction_drop_packets, last.output.direction_drop_packets);
-    add_bytes!("Error Drop Bytes", stats.output.error_drop_bytes, last.output.error_drop_bytes);
-    add_packets!("Error Drop Packets", stats.output.error_drop_packets, last.output.error_drop_packets);
-    add_bytes!("Ratelimit Drop Bytes", stats.output.ratelimit_drop_bytes, last.output.ratelimit_drop_bytes);
-    add_packets!("Ratelimit Drop Packets", stats.output.ratelimit_drop_packets, last.output.ratelimit_drop_packets);
+    add_packets!(
+        "Fwd Packets",
+        stats.output.fwd_packets,
+        last.output.fwd_packets
+    );
+    add_bytes!(
+        "Direction Drop Bytes",
+        stats.output.direction_drop_bytes,
+        last.output.direction_drop_bytes
+    );
+    add_packets!(
+        "Direction Drop Packets",
+        stats.output.direction_drop_packets,
+        last.output.direction_drop_packets
+    );
+    add_bytes!(
+        "Error Drop Bytes",
+        stats.output.error_drop_bytes,
+        last.output.error_drop_bytes
+    );
+    add_packets!(
+        "Error Drop Packets",
+        stats.output.error_drop_packets,
+        last.output.error_drop_packets
+    );
+    add_bytes!(
+        "Ratelimit Drop Bytes",
+        stats.output.ratelimit_drop_bytes,
+        last.output.ratelimit_drop_bytes
+    );
+    add_packets!(
+        "Ratelimit Drop Packets",
+        stats.output.ratelimit_drop_packets,
+        last.output.ratelimit_drop_packets
+    );
 
     let max_header = headers.iter().map(|h| h.len()).max().unwrap_or(0);
     for (i, h) in headers.iter().enumerate() {

@@ -33,11 +33,17 @@ mod imp {
                 let calt = CString::new(alt).unwrap();
                 let fd = unsafe { libc::open(calt.as_ptr(), libc::O_RDONLY) };
                 if fd < 0 {
-                    return Err(Error::new(format!("open netns {ns_path} error: {}", errno())));
+                    return Err(Error::new(format!(
+                        "open netns {ns_path} error: {}",
+                        errno()
+                    )));
                 }
                 return setns_fd(fd);
             }
-            return Err(Error::new(format!("open netns {ns_path} error: {}", errno())));
+            return Err(Error::new(format!(
+                "open netns {ns_path} error: {}",
+                errno()
+            )));
         }
         setns_fd(fd)
     }

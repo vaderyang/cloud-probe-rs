@@ -134,7 +134,13 @@ impl WorkerTaskBuilder {
         }
     }
 
-    fn add_container_id(&mut self, strategy: &StrategyEntry, host_pid: i32, nic: &str, obs_idx: usize) {
+    fn add_container_id(
+        &mut self,
+        strategy: &StrategyEntry,
+        host_pid: i32,
+        nic: &str,
+        obs_idx: usize,
+    ) {
         let item = TaskItem {
             typ: TaskType::Container,
             nic_name: nic.to_string(),
@@ -148,7 +154,12 @@ impl WorkerTaskBuilder {
         }
     }
 
-    fn add_interface_name(&mut self, strategy: &StrategyEntry, interface_name: &str, obs_idx: usize) {
+    fn add_interface_name(
+        &mut self,
+        strategy: &StrategyEntry,
+        interface_name: &str,
+        obs_idx: usize,
+    ) {
         let item = TaskItem {
             typ: TaskType::Interface,
             nic_name: interface_name.to_string(),
@@ -164,8 +175,9 @@ impl WorkerTaskBuilder {
 
     fn add_instance_name(&mut self, strategy: &StrategyEntry, instance_name: &str, obs_idx: usize) {
         if !self.active_instances.iter().any(|i| i == instance_name) {
-            self.warnings
-                .push(Error::new(format!("instance name not found: {instance_name}")));
+            self.warnings.push(Error::new(format!(
+                "instance name not found: {instance_name}"
+            )));
             return;
         }
         let ifs = match self.tool.get_kvm_instance_nics(instance_name) {
@@ -176,8 +188,9 @@ impl WorkerTaskBuilder {
             }
         };
         if ifs.is_empty() {
-            self.warnings
-                .push(Error::new(format!("instance {instance_name} has no interfaces")));
+            self.warnings.push(Error::new(format!(
+                "instance {instance_name} has no interfaces"
+            )));
             return;
         }
         let item = TaskItem {
@@ -319,7 +332,12 @@ impl WorkerTaskBuilder {
                     },
                 };
 
-                if strategy.api_version.as_deref().map(|v| v == "v1").unwrap_or(true) {
+                if strategy
+                    .api_version
+                    .as_deref()
+                    .map(|v| v == "v1")
+                    .unwrap_or(true)
+                {
                     if strategy.has_service_tag {
                         if let Some(tag) = strategy.service_tag {
                             vx.vni1 = Some(tag as u32);
@@ -436,7 +454,10 @@ impl WorkerTaskBuilder {
                 seq += 1;
             }
         }
-        (std::mem::take(&mut self.tasks), std::mem::take(&mut self.warnings))
+        (
+            std::mem::take(&mut self.tasks),
+            std::mem::take(&mut self.warnings),
+        )
     }
 }
 
@@ -505,14 +526,46 @@ struct FlagDef {
 }
 
 const FLAG_DEFS: &[FlagDef] = &[
-    FlagDef { long: "snaplen", short: Some('s'), kind: FlagKind::Int },
-    FlagDef { long: "timeout", short: Some('t'), kind: FlagKind::Int },
-    FlagDef { long: "bind_device", short: Some('B'), kind: FlagKind::Str },
-    FlagDef { long: "pmtudisc_option", short: Some('M'), kind: FlagKind::Str },
-    FlagDef { long: "zmq_hwm", short: None, kind: FlagKind::Int },
-    FlagDef { long: "nofilter", short: None, kind: FlagKind::Bool },
-    FlagDef { long: "priority", short: Some('p'), kind: FlagKind::Bool },
-    FlagDef { long: "cpu", short: None, kind: FlagKind::Int },
+    FlagDef {
+        long: "snaplen",
+        short: Some('s'),
+        kind: FlagKind::Int,
+    },
+    FlagDef {
+        long: "timeout",
+        short: Some('t'),
+        kind: FlagKind::Int,
+    },
+    FlagDef {
+        long: "bind_device",
+        short: Some('B'),
+        kind: FlagKind::Str,
+    },
+    FlagDef {
+        long: "pmtudisc_option",
+        short: Some('M'),
+        kind: FlagKind::Str,
+    },
+    FlagDef {
+        long: "zmq_hwm",
+        short: None,
+        kind: FlagKind::Int,
+    },
+    FlagDef {
+        long: "nofilter",
+        short: None,
+        kind: FlagKind::Bool,
+    },
+    FlagDef {
+        long: "priority",
+        short: Some('p'),
+        kind: FlagKind::Bool,
+    },
+    FlagDef {
+        long: "cpu",
+        short: None,
+        kind: FlagKind::Int,
+    },
 ];
 
 fn find_long(name: &str) -> Option<&'static FlagDef> {
@@ -544,7 +597,10 @@ pub fn parse_startup(startup: &str, ignore_unknown: bool) -> Result<StartupArgs>
             }
             FlagKind::Int => {
                 let Some(s) = value else {
-                    return Err(Error::new(format!("flag needs an argument: --{}", def.long)));
+                    return Err(Error::new(format!(
+                        "flag needs an argument: --{}",
+                        def.long
+                    )));
                 };
                 let v: i32 = s
                     .parse()
@@ -559,7 +615,10 @@ pub fn parse_startup(startup: &str, ignore_unknown: bool) -> Result<StartupArgs>
             }
             FlagKind::Str => {
                 let Some(s) = value else {
-                    return Err(Error::new(format!("flag needs an argument: --{}", def.long)));
+                    return Err(Error::new(format!(
+                        "flag needs an argument: --{}",
+                        def.long
+                    )));
                 };
                 match def.long {
                     "bind_device" => res.bind_device = Some(s.to_string()),
@@ -735,12 +794,14 @@ mod tests {
     fn dedup_fingerprint() {
         let mut tb = WorkerTaskBuilder::new(Tool::default(), "u".into(), vec![], 256);
         // two structurally identical interface strategies resolve to distinct fingerprints
-        let s1: crate::cpm::models::StrategyEntry =
-            serde_json::from_str(r#"{"packetChannelType":"GRE","address":"2.2.2.2","interfaceNames":["eth0"]}"#)
-                .unwrap();
-        let s2: crate::cpm::models::StrategyEntry =
-            serde_json::from_str(r#"{"packetChannelType":"GRE","address":"2.2.2.2","interfaceNames":["eth0"]}"#)
-                .unwrap();
+        let s1: crate::cpm::models::StrategyEntry = serde_json::from_str(
+            r#"{"packetChannelType":"GRE","address":"2.2.2.2","interfaceNames":["eth0"]}"#,
+        )
+        .unwrap();
+        let s2: crate::cpm::models::StrategyEntry = serde_json::from_str(
+            r#"{"packetChannelType":"GRE","address":"2.2.2.2","interfaceNames":["eth0"]}"#,
+        )
+        .unwrap();
         tb.add_strategy(&s1);
         tb.add_strategy(&s2);
         let (tasks, _) = tb.build();
@@ -816,7 +877,11 @@ mod tests {
                 "1234567890abcdef",
                 vec!["eth0", "eth1"],
             ),
-            ("docker://1234567890abcdef", "1234567890abcdef", vec!["eth0"]),
+            (
+                "docker://1234567890abcdef",
+                "1234567890abcdef",
+                vec!["eth0"],
+            ),
             (
                 "docker://1234567890abcdef_eth1",
                 "1234567890abcdef",

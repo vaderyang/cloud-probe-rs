@@ -29,9 +29,8 @@ impl PcapFileCapturer {
         let req_pattern = ReqPattern::new_from_cfg(&task.req_pattern, "")
             .map_err(|e| Error::new(format!("create req_pattern_t error: {e}")))?;
 
-        let mut cap = pcap::Capture::from_file(&cfg.file_name).map_err(|e| {
-            Error::new(format!("could not load file {}: {e}", cfg.file_name))
-        })?;
+        let mut cap = pcap::Capture::from_file(&cfg.file_name)
+            .map_err(|e| Error::new(format!("could not load file {}: {e}", cfg.file_name)))?;
 
         let bpf = bpf_filter_exclude_task_output_hosts(&cfg.bpf, tasks);
         if !bpf.is_empty() {

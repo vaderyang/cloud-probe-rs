@@ -70,7 +70,10 @@ fn test_bpf_filter_exclude_task_output_hosts_1() {
 fn test_bpf_filter_exclude_task_output_hosts_2() {
     let c = parse(CONFIG_LIBPCAP_GRE);
     let bpf = bpf_filter_exclude_task_output_hosts("host 10.1.1.1 and port 8011", &c.tasks);
-    assert_eq!(bpf, "(host 10.1.1.1 and port 8011) and not host 172.16.1.201");
+    assert_eq!(
+        bpf,
+        "(host 10.1.1.1 and port 8011) and not host 172.16.1.201"
+    );
 }
 
 #[test]

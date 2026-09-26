@@ -48,7 +48,10 @@ fn endpoints() -> Vec<String> {
             return vec![ep.to_string()];
         }
     }
-    DEFAULT_RUNTIME_ENDPOINTS.iter().map(|s| s.to_string()).collect()
+    DEFAULT_RUNTIME_ENDPOINTS
+        .iter()
+        .map(|s| s.to_string())
+        .collect()
 }
 
 /// Whether a unix endpoint's socket file exists. Non-unix endpoints return true
@@ -105,7 +108,12 @@ async fn resolve(container_id: &str) -> Result<i32> {
                 continue;
             }
         }
-        match tokio::time::timeout(Duration::from_secs(10), get_container_pid(&ep, container_id)).await {
+        match tokio::time::timeout(
+            Duration::from_secs(10),
+            get_container_pid(&ep, container_id),
+        )
+        .await
+        {
             Ok(Ok(pid)) => return Ok(pid),
             Ok(Err(e)) => last_err = Some(e),
             Err(_) => last_err = Some(anyhow!("timed out polling {ep}")),
@@ -134,4 +142,3 @@ async fn main() {
         }
     }
 }
-

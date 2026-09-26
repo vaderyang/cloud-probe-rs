@@ -17,9 +17,13 @@ fn main() {
             Err(_) => break,
         };
         let mut parts = line.splitn(3, '\t');
-        let Some(pattern) = parts.next() else { continue };
+        let Some(pattern) = parts.next() else {
+            continue;
+        };
         let Some(ip_str) = parts.next() else { continue };
-        let Some(port_str) = parts.next() else { continue };
+        let Some(port_str) = parts.next() else {
+            continue;
+        };
         if pattern.is_empty() && ip_str.is_empty() {
             continue;
         }

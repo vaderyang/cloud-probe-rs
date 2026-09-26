@@ -120,12 +120,14 @@ impl Probe {
     }
 
     /// Inject packet `idx` at virtual time `now`.
-    pub fn inject(&mut self, _idx: usize, now: TimeUs, rng: &mut Rng) -> (Vec<Message>, ProbeStats) {
+    pub fn inject(
+        &mut self,
+        _idx: usize,
+        now: TimeUs,
+        rng: &mut Rng,
+    ) -> (Vec<Message>, ProbeStats) {
         let mut delta = ProbeStats::default();
-        let ts = (
-            (now / 1_000_000) as i64,
-            (now % 1_000_000) as i64,
-        );
+        let ts = ((now / 1_000_000) as i64, (now % 1_000_000) as i64);
 
         let frame = gen_frame(rng, self.cfg.frame_min, self.cfg.frame_max);
         let caplen_orig = frame.len() as u32;

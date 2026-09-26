@@ -6,9 +6,9 @@ use std::sync::Arc;
 use socket2::{Domain, Protocol, Socket, Type};
 
 use super::{Output, PacketHeader};
-use crate::config::{GreConfig, OutputConfig, IP_PMTUDISC_DONT, IP_PMTUDISC_DO, IP_PMTUDISC_WANT};
+use crate::config::{GreConfig, OutputConfig, IP_PMTUDISC_DO, IP_PMTUDISC_DONT, IP_PMTUDISC_WANT};
 use crate::error::{Error, Result};
-use crate::packet::{PKT_DIR_UNKNOWN, GRE_HDR_LEN};
+use crate::packet::{GRE_HDR_LEN, PKT_DIR_UNKNOWN};
 use crate::ratelimit::TokenBucket;
 use crate::stats::OutputStats;
 
@@ -95,8 +95,12 @@ impl GreOutput {
             .map_err(|_| Error::new(format!("invalid gre host: {}", cfg.host)))?;
         let remote_addr = SocketAddrV4::new(addr, 0);
 
-        let socket = Socket::new(Domain::IPV4, Type::RAW, Some(Protocol::from(libc::IPPROTO_GRE)))
-            .map_err(|e| Error::new(format!("create socket error: {e}")))?;
+        let socket = Socket::new(
+            Domain::IPV4,
+            Type::RAW,
+            Some(Protocol::from(libc::IPPROTO_GRE)),
+        )
+        .map_err(|e| Error::new(format!("create socket error: {e}")))?;
 
         if !cfg.bind_device.is_empty() {
             set_bind_device(&socket, &cfg.bind_device).map_err(|e| {
@@ -196,9 +200,7 @@ impl Output for GreOutput {
                 Ok(sent) => {
                     if sent < total {
                         self.error_info.nb_partial_sends += 1;
-                        self.stats
-                            .error_drop_bytes
-                            .add((total - sent) as u64);
+                        self.stats.error_drop_bytes.add((total - sent) as u64);
                         self.stats.fwd_bytes.add(sent as u64);
                         self.stats.fwd_packets.add(1);
                         return -1;

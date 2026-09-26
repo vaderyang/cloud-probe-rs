@@ -59,8 +59,10 @@ fn main() {
 
     let mut it = text.split_whitespace();
     let mode = it.next().unwrap_or("");
-    let next_u64 = |it: &mut std::str::SplitWhitespace| -> u64 { it.next().unwrap().parse().unwrap() };
-    let next_i64 = |it: &mut std::str::SplitWhitespace| -> i64 { it.next().unwrap().parse().unwrap() };
+    let next_u64 =
+        |it: &mut std::str::SplitWhitespace| -> u64 { it.next().unwrap().parse().unwrap() };
+    let next_i64 =
+        |it: &mut std::str::SplitWhitespace| -> i64 { it.next().unwrap().parse().unwrap() };
 
     let mut packets: Vec<Packet> = Vec::new();
 
@@ -148,7 +150,14 @@ fn main() {
                 }
                 // Pass the full captured buffer, like production does (the
                 // slice only shrinks the logical `length`, not the source).
-                b.append_packet(p.ts_sec, p.ts_usec, length as u16, wire_len, &p.data, p.direct);
+                b.append_packet(
+                    p.ts_sec,
+                    p.ts_usec,
+                    length as u16,
+                    wire_len,
+                    &p.data,
+                    p.direct,
+                );
             }
             flush(&mut b);
         }

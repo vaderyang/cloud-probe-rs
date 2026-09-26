@@ -8,9 +8,7 @@ use socket2::{Domain, Protocol, Socket, Type};
 use super::{Output, PacketHeader};
 use crate::config::{OutputConfig, VxlanConfig};
 use crate::error::{Error, Result};
-use crate::packet::{
-    parse_packet, PKT_DIR_NONCHECK, PKT_DIR_UNKNOWN, VXLAN_HDR_LEN, ETH_HDR_LEN,
-};
+use crate::packet::{parse_packet, ETH_HDR_LEN, PKT_DIR_NONCHECK, PKT_DIR_UNKNOWN, VXLAN_HDR_LEN};
 use crate::packet_split::{build_fragment, calculate_fragment_count};
 use crate::ratelimit::TokenBucket;
 use crate::stats::OutputStats;
@@ -209,7 +207,13 @@ impl VxlanOutput {
         }
     }
 
-    fn do_send_packet(&mut self, hdr: &PacketHeader, pkt_data: &[u8], length: usize, direct: i32) -> i32 {
+    fn do_send_packet(
+        &mut self,
+        hdr: &PacketHeader,
+        pkt_data: &[u8],
+        length: usize,
+        direct: i32,
+    ) -> i32 {
         let total = vxlan_encapsulate(
             &mut self.buf,
             self.vni,

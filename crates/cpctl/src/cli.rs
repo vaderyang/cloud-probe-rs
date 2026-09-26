@@ -36,7 +36,9 @@ impl Format {
         match s.to_ascii_lowercase().as_str() {
             "text" => Ok(Format::Text),
             "jsonl" | "ndjson" => Ok(Format::Jsonl),
-            other => anyhow::bail!("invalid --format {other:?} (text|jsonl, ndjson accepted as alias)"),
+            other => {
+                anyhow::bail!("invalid --format {other:?} (text|jsonl, ndjson accepted as alias)")
+            }
         }
     }
 }

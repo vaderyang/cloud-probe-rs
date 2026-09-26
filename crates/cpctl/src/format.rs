@@ -1,6 +1,6 @@
 //! Human-readable formatting. Port of `cpctl/cmd/stats.go` helpers.
 
-use cpgolib::cpworker::{BytesStats, EIB_IN_BYTES, PETA_IN_PACKETS, PacketsStats};
+use cpgolib::cpworker::{BytesStats, PacketsStats, EIB_IN_BYTES, PETA_IN_PACKETS};
 
 pub fn bytes_per_sec(stats: &BytesStats, secs: f64) -> BytesStats {
     if secs <= 0.0 {
@@ -101,12 +101,18 @@ mod tests {
 
     #[test]
     fn per_sec() {
-        let b = BytesStats { bytes: 2000, eib: 0 };
+        let b = BytesStats {
+            bytes: 2000,
+            eib: 0,
+        };
         let r = bytes_per_sec(&b, 2.0);
         assert_eq!(r.bytes, 1000);
         assert_eq!(r.eib, 0);
 
-        let p = PacketsStats { packets: 100, peta: 0 };
+        let p = PacketsStats {
+            packets: 100,
+            peta: 0,
+        };
         let rp = packets_per_sec(&p, 2.0);
         assert_eq!(rp.packets, 50);
     }

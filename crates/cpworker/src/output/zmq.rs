@@ -11,8 +11,8 @@ use super::{Output, PacketHeader};
 use crate::config::{OutputConfig, ZmqConfig};
 use crate::error::{Error, Result};
 use crate::packet::{
-    be16, ETH_HDR_LEN, ETHERTYPE_DOT1AD, ETHERTYPE_VLAN, ETHERTYPE_VLAN_9100,
-    ETHERTYPE_VLAN_9200, ETHERTYPE_MPLS, PKT_DIR_UNKNOWN, VLAN_HDR_LEN,
+    be16, ETHERTYPE_DOT1AD, ETHERTYPE_MPLS, ETHERTYPE_VLAN, ETHERTYPE_VLAN_9100,
+    ETHERTYPE_VLAN_9200, ETH_HDR_LEN, PKT_DIR_UNKNOWN, VLAN_HDR_LEN,
 };
 use crate::ratelimit::TokenBucket;
 use crate::stats::OutputStats;
@@ -131,7 +131,9 @@ impl BatchBuilder {
             ETHERTYPE_VLAN | ETHERTYPE_DOT1AD | ETHERTYPE_VLAN_9100 | ETHERTYPE_VLAN_9200
         ) {
             let vlan_offset = ETH_HDR_LEN + vlan_total_size;
-            if vlan_offset + VLAN_HDR_LEN > length_usize || pkt_data.len() < vlan_offset + VLAN_HDR_LEN {
+            if vlan_offset + VLAN_HDR_LEN > length_usize
+                || pkt_data.len() < vlan_offset + VLAN_HDR_LEN
+            {
                 break;
             }
             ether_type = be16(&pkt_data[vlan_offset + 2..vlan_offset + 4]);
@@ -309,7 +311,9 @@ impl ZmqOutput {
 
         if self.error_info.first_pktsec == 0 {
             self.error_info.first_pktsec = self.builder.first_pktsec();
-        } else if self.builder.first_pktsec() > self.error_info.first_pktsec + ERROR_INFO_FLUSH_MAX_DUR_SEC {
+        } else if self.builder.first_pktsec()
+            > self.error_info.first_pktsec + ERROR_INFO_FLUSH_MAX_DUR_SEC
+        {
             self.flush_error_info();
             self.error_info.first_pktsec = self.builder.first_pktsec();
         }
@@ -411,10 +415,14 @@ impl Output for ZmqOutput {
             self.builder.set_first_pktsec(hdr.ts_sec);
         }
 
-        if !self
-            .builder
-            .append_packet(hdr.ts_sec, hdr.ts_usec, length as u16, wire_len, pkt_data, direct)
-        {
+        if !self.builder.append_packet(
+            hdr.ts_sec,
+            hdr.ts_usec,
+            length as u16,
+            wire_len,
+            pkt_data,
+            direct,
+        ) {
             return -1;
         }
         self.last_pkt_ts = hdr.ts();

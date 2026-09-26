@@ -371,12 +371,7 @@ fn humantime_from_str(s: &str) -> Option<std::time::Duration> {
     }
     // Reuse cpctl-style parsing via a tiny local implementation for common units.
     let s = s.trim();
-    for (suffix, mult) in [
-        ("ms", 1u64),
-        ("s", 1000),
-        ("m", 60_000),
-        ("h", 3_600_000),
-    ] {
+    for (suffix, mult) in [("ms", 1u64), ("s", 1000), ("m", 60_000), ("h", 3_600_000)] {
         if let Some(num) = s.strip_suffix(suffix) {
             if let Ok(v) = num.trim().parse::<u64>() {
                 return Some(std::time::Duration::from_millis(v * mult));

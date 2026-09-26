@@ -19,7 +19,10 @@ pub fn run(globals: &Globals) -> anyhow::Result<()> {
         crate::cli::Format::Text => {
             println!("version          : {}", info.version);
             println!("pid              : {}", info.pid);
-            println!("uptime           : {}s ({} sec)", info.uptime_sec, info.uptime_sec);
+            println!(
+                "uptime           : {}s ({} sec)",
+                info.uptime_sec, info.uptime_sec
+            );
             println!(
                 "started_at       : {}",
                 info.started_at().format("%Y-%m-%dT%H:%M:%SZ")

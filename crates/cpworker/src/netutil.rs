@@ -69,7 +69,10 @@ pub fn bpf_filter_replace_nic(bpf: &str) -> Result<String> {
         let addr = get_if_ip_addr(ifname)
             .map_err(|_| Error::new(format!("no ip found for interface {ifname}")))?;
         let ip = addr.format();
-        log(LOG_INFO, &format!("bpf_filter interface {ifname} addresss is {ip}"));
+        log(
+            LOG_INFO,
+            &format!("bpf_filter interface {ifname} addresss is {ip}"),
+        );
         out.push_str(&ip);
         i = end;
     }

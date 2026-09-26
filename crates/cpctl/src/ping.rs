@@ -115,12 +115,7 @@ fn emit_summary(format: Format, sent: i32, rtts: &[f64]) {
     }
 }
 
-pub fn run(
-    globals: &Globals,
-    count: i32,
-    interval: Duration,
-    quiet: bool,
-) -> anyhow::Result<()> {
+pub fn run(globals: &Globals, count: i32, interval: Duration, quiet: bool) -> anyhow::Result<()> {
     let conn = globals.require_unix()?;
     let format = globals.format()?;
     let target = globals.unix.clone().unwrap_or_default();

@@ -114,7 +114,10 @@ impl Worker {
     pub fn start(&self, cfg: &Config) -> Result<()> {
         let mut st = self.state.lock().unwrap();
         if st.pid != 0 {
-            return Err(Error::new(format!("worker {} is already running", self.name)));
+            return Err(Error::new(format!(
+                "worker {} is already running",
+                self.name
+            )));
         }
 
         self.write_config(cfg)?;
@@ -143,7 +146,11 @@ impl Worker {
         // Do not reap via Child; the waiter thread uses waitpid.
         drop(child);
 
-        crate::log_info!("worker started pid={pid} command={} -c {}", self.cfg.executable, self.cfg.config_file);
+        crate::log_info!(
+            "worker started pid={pid} command={} -c {}",
+            self.cfg.executable,
+            self.cfg.config_file
+        );
         log_worker_config(cfg);
 
         st.pid = pid;
@@ -245,13 +252,21 @@ impl Worker {
     fn write_config(&self, cfg: &Config) -> Result<()> {
         let data = serde_json::to_vec_pretty(cfg)
             .map_err(|e| Error::new(format!("encode worker config: {e}")))?;
-        std::fs::write(&self.cfg.config_file, data)
-            .map_err(|e| Error::new(format!("create worker config file {}: {e}", self.cfg.config_file)))?;
+        std::fs::write(&self.cfg.config_file, data).map_err(|e| {
+            Error::new(format!(
+                "create worker config file {}: {e}",
+                self.cfg.config_file
+            ))
+        })?;
         Ok(())
     }
 }
 
-fn spawn_log_reader<R: std::io::Read + Send + 'static>(reader: R, name: String, stream: &'static str) {
+fn spawn_log_reader<R: std::io::Read + Send + 'static>(
+    reader: R,
+    name: String,
+    stream: &'static str,
+) {
     std::thread::spawn(move || {
         let buf = BufReader::new(reader);
         for line in buf.lines() {

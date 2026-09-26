@@ -211,7 +211,8 @@ impl Syncer {
         if self.worker_mgr.is_alive() {
             self.worker_mgr.update(&resp, &self.reg.uuid, &active)?;
         } else {
-            self.worker_mgr.create_if_dead(&resp, &self.reg.uuid, &active)?;
+            self.worker_mgr
+                .create_if_dead(&resp, &self.reg.uuid, &active)?;
         }
         Ok(())
     }
@@ -234,7 +235,10 @@ impl Syncer {
             ..Default::default()
         };
 
-        if let Ok(stats) = self.worker_mgr.collect_stats_summary(Duration::from_secs(3)) {
+        if let Ok(stats) = self
+            .worker_mgr
+            .collect_stats_summary(Duration::from_secs(3))
+        {
             metrics.set_task_stats(&stats);
         }
 
@@ -320,7 +324,9 @@ pub fn generate_uuid(uuid_file: &str, uuid_gen_type: &str, env_keys: &[String]) 
                 let val = std::env::var(key)
                     .map_err(|_| Error::new(format!("environment variable {key:?} is not set")))?;
                 if val.is_empty() {
-                    return Err(Error::new(format!("environment variable {key:?} is not set")));
+                    return Err(Error::new(format!(
+                        "environment variable {key:?} is not set"
+                    )));
                 }
                 s.push_str(&val);
             }

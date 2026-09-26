@@ -12,9 +12,7 @@ use crate::error::{Error, Result};
 use crate::reslimit::CgroupCfg;
 use crate::tool::Tool;
 use crate::worker::{ExecConfig, ResLimit, Worker};
-use crate::worker_config::{
-    Config, ControlConfig, EXECUTION_MODEL_PIPELINE, EXECUTION_MODEL_RTC,
-};
+use crate::worker_config::{Config, ControlConfig, EXECUTION_MODEL_PIPELINE, EXECUTION_MODEL_RTC};
 
 use super::models::SyncStrategyResponse;
 use super::task_builder::WorkerTaskBuilder;
@@ -200,7 +198,9 @@ impl WorkerManager {
     pub fn collect_stats_summary(&self, timeout: Duration) -> Result<StatsSummary> {
         let mut st = self.state.lock();
         match st.client.as_mut() {
-            Some(c) => c.collect_stats_summary(timeout).map_err(|e| Error::new(e.to_string())),
+            Some(c) => c
+                .collect_stats_summary(timeout)
+                .map_err(|e| Error::new(e.to_string())),
             None => Ok(StatsSummary::default()),
         }
     }

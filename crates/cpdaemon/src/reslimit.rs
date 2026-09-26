@@ -51,20 +51,24 @@ pub struct ProcessLimit {
 }
 
 fn is_cgroup_v2(root: &str) -> bool {
-    std::path::Path::new(root).join("cgroup.controllers").exists()
+    std::path::Path::new(root)
+        .join("cgroup.controllers")
+        .exists()
 }
 
 /// Create (or reuse) a cgroup for `pid`, apply the CPU quota, and add the pid.
-pub fn create_process_limit(pid: i32, cfg: &CgroupCfg, cpu_limit: Option<f64>) -> Result<Option<ProcessLimit>> {
+pub fn create_process_limit(
+    pid: i32,
+    cfg: &CgroupCfg,
+    cpu_limit: Option<f64>,
+) -> Result<Option<ProcessLimit>> {
     let Some(cpu) = cpu_limit.filter(|c| *c > 0.0) else {
         return Ok(None);
     };
 
     let root = cfg.effective_root();
     if cfg.version != "v2" && !is_cgroup_v2(root) {
-        crate::log_warn!(
-            "cgroup v2 not detected at {root}; skipping cpu limit for pid {pid}"
-        );
+        crate::log_warn!("cgroup v2 not detected at {root}; skipping cpu limit for pid {pid}");
         return Ok(None);
     }
 
@@ -86,7 +90,10 @@ pub fn create_process_limit(pid: i32, cfg: &CgroupCfg, cpu_limit: Option<f64>) -
         "cpu limit applied: pid={pid}, cpu={cpu}, cgroup={}",
         dir.display()
     );
-    Ok(Some(ProcessLimit { path: dir, active: true }))
+    Ok(Some(ProcessLimit {
+        path: dir,
+        active: true,
+    }))
 }
 
 fn add_process(dir: &std::path::Path, pid: i32) -> Result<()> {

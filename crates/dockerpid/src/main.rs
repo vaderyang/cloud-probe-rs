@@ -62,8 +62,8 @@ fn connect() -> Result<Stream> {
         Ok(Stream::Unix(s))
     } else if let Some(rest) = addr.strip_prefix("tcp://") {
         let target = if rest.is_empty() { DEFAULT_TCP } else { rest };
-        let s = TcpStream::connect(target)
-            .with_context(|| format!("connect to docker {target}"))?;
+        let s =
+            TcpStream::connect(target).with_context(|| format!("connect to docker {target}"))?;
         s.set_read_timeout(Some(Duration::from_secs(10)))?;
         s.set_write_timeout(Some(Duration::from_secs(10)))?;
         Ok(Stream::Tcp(s))
@@ -169,8 +169,8 @@ fn container_pid(api_version: Option<&str>, container_id: &str) -> Result<i64> {
             String::from_utf8_lossy(&resp.body)
         );
     }
-    let v: serde_json::Value = serde_json::from_slice(&resp.body)
-        .context("invalid docker inspect response")?;
+    let v: serde_json::Value =
+        serde_json::from_slice(&resp.body).context("invalid docker inspect response")?;
     let pid = v
         .get("State")
         .and_then(|s| s.get("Pid"))
@@ -197,7 +197,10 @@ fn main() {
 
 fn run(container_id: &str) -> Result<()> {
     // DOCKER_API_VERSION takes precedence; skip negotiation when set.
-    let api_version = if std::env::var("DOCKER_API_VERSION").map(|v| !v.is_empty()).unwrap_or(false) {
+    let api_version = if std::env::var("DOCKER_API_VERSION")
+        .map(|v| !v.is_empty())
+        .unwrap_or(false)
+    {
         None
     } else {
         negotiate_api_version().unwrap_or(None)

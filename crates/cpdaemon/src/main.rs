@@ -24,9 +24,9 @@ use config::DaemonConfig;
 use cpm::client::{ClientConfig, HttpClient};
 use cpm::syncer::{generate_uuid, RegConfig, Syncer, SyncerConfig};
 use cpm::worker_mgr::{MemoryConfig, PipelineConfig, WorkerConfig, WorkerManager};
+use reslimit::CgroupCfg;
 use tool::Tool;
 use worker_config::{ControlConfig, ControlUnixConfig};
-use reslimit::CgroupCfg;
 
 #[derive(Parser, Debug)]
 #[command(name = "cpdaemon", version, about = "Cloud Probe management daemon")]

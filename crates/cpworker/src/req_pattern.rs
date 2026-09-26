@@ -3,14 +3,17 @@
 //! Supports the same custom pattern mini-language:
 //! `host <ip|nic.ifname> and|or port <n>`, with parentheses.
 
+use crate::config::{
+    ReqPatternConfig, LOG_INFO, REQ_PATTERN_TYPE_AUTO_STR, REQ_PATTERN_TYPE_CUSTOM_STR,
+    REQ_PATTERN_TYPE_NONE_STR,
+};
 use crate::error::{Error, Result};
+use crate::log::log;
 use crate::netutil::{get_if_ip_addr, get_if_mac_addr};
 use crate::packet::{
     be16, extract_ipport, format_mac_addr, IpAddr, ETH_HDR_LEN, MAC_ADDR_LEN, PKT_DIR_INCOMING,
     PKT_DIR_NONCHECK, PKT_DIR_OUTGOING, PKT_DIR_UNKNOWN,
 };
-use crate::config::{ReqPatternConfig, LOG_INFO, REQ_PATTERN_TYPE_AUTO_STR, REQ_PATTERN_TYPE_CUSTOM_STR, REQ_PATTERN_TYPE_NONE_STR};
-use crate::log::log;
 
 #[derive(Debug, Clone)]
 pub enum Node {
@@ -300,7 +303,10 @@ fn resolve_host(value: &str) -> Result<IpAddr> {
             .map_err(|_| Error::new(format!("get interface ip error for {ifname}")))?;
         log(
             LOG_INFO,
-            &format!("req_pattern interface {ifname} addresss is {}", addr.format()),
+            &format!(
+                "req_pattern interface {ifname} addresss is {}",
+                addr.format()
+            ),
         );
         return Ok(addr);
     }
@@ -347,8 +353,16 @@ mod tests {
 
     #[test]
     fn parentheses() {
-        assert!(!eval("(host 10.0.0.1 or host 10.0.0.2) and port 80", "10.0.0.2", 443));
-        assert!(eval("(host 10.0.0.1 or host 10.0.0.2) and port 80", "10.0.0.2", 80));
+        assert!(!eval(
+            "(host 10.0.0.1 or host 10.0.0.2) and port 80",
+            "10.0.0.2",
+            443
+        ));
+        assert!(eval(
+            "(host 10.0.0.1 or host 10.0.0.2) and port 80",
+            "10.0.0.2",
+            80
+        ));
     }
 
     #[test]

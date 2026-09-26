@@ -73,7 +73,10 @@ fn clean_network_all_outputs() {
                 "seed {seed} out {out:?}: dropped on clean network"
             );
             assert_eq!(r.stats.decode_errors, 0, "seed {seed} out {out:?}");
-            assert!(r.stats.sent_frames > 0, "seed {seed} out {out:?} sent nothing");
+            assert!(
+                r.stats.sent_frames > 0,
+                "seed {seed} out {out:?} sent nothing"
+            );
         }
     }
 }
@@ -93,7 +96,10 @@ fn harsh_network_invariants() {
             cfg.inject_interval_us = 20_000;
             let r = run(cfg);
             r.check();
-            assert!(r.stats.sent_frames > 0, "seed {seed} out {out:?}: sent nothing");
+            assert!(
+                r.stats.sent_frames > 0,
+                "seed {seed} out {out:?}: sent nothing"
+            );
             total_delivered += r.stats.delivered;
         }
     }

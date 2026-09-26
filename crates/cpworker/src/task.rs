@@ -213,7 +213,9 @@ impl TaskManager {
                         capturer: None,
                         error: Some(e.to_string()),
                     });
-                    out_sets.push(TaskOutputs { outputs: Vec::new() });
+                    out_sets.push(TaskOutputs {
+                        outputs: Vec::new(),
+                    });
                 }
             }
         }
@@ -363,10 +365,7 @@ impl TaskManager {
             self.start();
         }
         result?;
-        crate::log_info!(
-            "reload complete: {} tasks",
-            self.inited_count
-        );
+        crate::log_info!("reload complete: {} tasks", self.inited_count);
         Ok(())
     }
 
@@ -412,7 +411,11 @@ impl Drop for TaskManager {
     }
 }
 
-fn dispatch_ring_msg(out_sets: &Arc<Mutex<Vec<TaskOutputs>>>, alloc: &Arc<SimpleAllocator>, msg: Box<RingMsg>) {
+fn dispatch_ring_msg(
+    out_sets: &Arc<Mutex<Vec<TaskOutputs>>>,
+    alloc: &Arc<SimpleAllocator>,
+    msg: Box<RingMsg>,
+) {
     let task_index = msg.task_index();
     {
         let mut sets = out_sets.lock();

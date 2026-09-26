@@ -29,7 +29,9 @@ pub enum RingMsg {
 impl RingMsg {
     pub fn msg_len(&self) -> u64 {
         match self {
-            RingMsg::Packet { caplen, .. } => std::mem::size_of::<RingMsg>() as u64 + *caplen as u64,
+            RingMsg::Packet { caplen, .. } => {
+                std::mem::size_of::<RingMsg>() as u64 + *caplen as u64
+            }
             RingMsg::Heartbeat { .. } => std::mem::size_of::<RingMsg>() as u64,
         }
     }
@@ -180,8 +182,18 @@ mod tests {
     #[test]
     fn ring_capacity() {
         let r = SpscRing::new(2);
-        assert!(r.push(Box::new(RingMsg::Heartbeat { task_index: 0, ts: 0 })).is_ok());
-        assert!(r.push(Box::new(RingMsg::Heartbeat { task_index: 0, ts: 0 })).is_err());
+        assert!(r
+            .push(Box::new(RingMsg::Heartbeat {
+                task_index: 0,
+                ts: 0
+            }))
+            .is_ok());
+        assert!(r
+            .push(Box::new(RingMsg::Heartbeat {
+                task_index: 0,
+                ts: 0
+            }))
+            .is_err());
         assert!(r.pop().is_some());
         assert!(r.pop().is_none());
     }

@@ -12,7 +12,11 @@ use cpworker::task::TaskManager;
 use cpworker::unix_manager::UnixManager;
 
 #[derive(Parser, Debug)]
-#[command(name = "cpworker", version, about = "Netis Cloud Probe packet capture engine")]
+#[command(
+    name = "cpworker",
+    version,
+    about = "Netis Cloud Probe packet capture engine"
+)]
 struct Args {
     /// Config file path
     #[arg(short = 'c', long = "config")]

@@ -228,10 +228,7 @@ impl Sim {
         // Kick off the probe.
         self.schedule(0, Event::Inject { idx: 0 });
         if self.cfg.probe.heartbeat_ms > 0 {
-            self.schedule(
-                self.cfg.probe.heartbeat_ms as u64 * 1000,
-                Event::Heartbeat,
-            );
+            self.schedule(self.cfg.probe.heartbeat_ms as u64 * 1000, Event::Heartbeat);
         }
 
         while let Some(q) = self.queue.pop() {
@@ -318,9 +315,8 @@ impl Sim {
             return;
         }
 
-        let base = self.now
-            + self.cfg.chaos.base_delay_us
-            + self.rng.below(self.cfg.chaos.jitter_us + 1);
+        let base =
+            self.now + self.cfg.chaos.base_delay_us + self.rng.below(self.cfg.chaos.jitter_us + 1);
         let delay = if self.rng.chance(self.cfg.chaos.reorder) {
             base + self.rng.below(self.cfg.chaos.reorder_delay_us + 1)
         } else {

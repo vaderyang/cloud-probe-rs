@@ -695,9 +695,7 @@ impl RawConfig {
                 if c.ty != CONTROL_TYPE_UNIX {
                     return Err(Error::new(format!("unknown control type: {}", c.ty)));
                 }
-                let u = c
-                    .unix
-                    .ok_or_else(|| Error::new("missing unix config"))?;
+                let u = c.unix.ok_or_else(|| Error::new("missing unix config"))?;
                 Some(ControlConfig::UnixSocket { path: u.path })
             }
         };
@@ -707,7 +705,10 @@ impl RawConfig {
             let task = t.build()?;
             // C rejects duplicate non-empty fingerprints.
             if let Some(fp) = &task.fingerprint {
-                if tasks.iter().any(|other: &TaskConfig| other.fingerprint.as_deref() == Some(fp.as_str())) {
+                if tasks
+                    .iter()
+                    .any(|other: &TaskConfig| other.fingerprint.as_deref() == Some(fp.as_str()))
+                {
                     return Err(Error::new(format!("duplicate fingerprint '{fp}'")));
                 }
             }

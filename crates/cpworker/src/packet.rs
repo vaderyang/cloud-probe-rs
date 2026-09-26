@@ -192,10 +192,7 @@ pub fn parse_packet(pkt_data: &[u8]) -> Option<PacketParseResult> {
         let mut nexthdr = pkt_data[offset + 6];
         offset += 40;
 
-        while matches!(
-            nexthdr,
-            IPPROTO_HOPOPTS | IPPROTO_ROUTING | IPPROTO_DSTOPTS
-        ) {
+        while matches!(nexthdr, IPPROTO_HOPOPTS | IPPROTO_ROUTING | IPPROTO_DSTOPTS) {
             if caplen < offset + 2 {
                 return None;
             }
@@ -352,9 +349,7 @@ fn fill_ports(pkt_data: &[u8], off: usize, out: &mut IpPort, udp: bool) {
     // Heuristic VXLAN detection (UDP port 4700-4799).
     if udp && (4700..4800).contains(&out.dport) {
         let inner_eth = off + 8 + VXLAN_HDR_LEN;
-        if pkt_data.len()
-            >= inner_eth + ETH_HDR_LEN + 20
-        {
+        if pkt_data.len() >= inner_eth + ETH_HDR_LEN + 20 {
             if let Some(inner) = extract_ipport(pkt_data, inner_eth) {
                 out.src = inner.src;
                 out.sport = inner.sport;

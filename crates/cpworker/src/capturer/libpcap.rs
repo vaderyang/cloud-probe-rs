@@ -10,7 +10,7 @@ use crate::config::{bpf_filter_exclude_task_output_hosts, LibpcapConfig, TaskCon
 use crate::error::{Error, Result};
 use crate::netns;
 use crate::netutil::bpf_filter_replace_nic;
-use crate::packet::{PKT_DIR_NONCHECK};
+use crate::packet::PKT_DIR_NONCHECK;
 use crate::req_pattern::ReqPattern;
 use crate::stats::CaptureStats;
 
@@ -56,7 +56,14 @@ impl LibpcapCapturer {
         }
 
         // Build result with cleanup on any error path.
-        let result = Self::open(tasks, task, cfg, stats.clone(), has_netns, self_netns.as_ref());
+        let result = Self::open(
+            tasks,
+            task,
+            cfg,
+            stats.clone(),
+            has_netns,
+            self_netns.as_ref(),
+        );
 
         // Restore original netns if we switched.
         if let Some(self_ns) = self_netns.as_ref() {

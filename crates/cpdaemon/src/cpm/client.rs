@@ -4,8 +4,8 @@
 //! no built-in PKCS#12 decoder without extra crates). Server TLS verification
 //! can be disabled via configuration, matching the Go default.
 
-use serde::Deserialize;
 use reqwest::Url;
+use serde::Deserialize;
 
 use super::models::*;
 use crate::error::{Error, Result};
@@ -40,8 +40,8 @@ pub struct HttpClient {
 
 impl HttpClient {
     pub fn new(base_url: &str, cfg: ClientConfig) -> Result<Self> {
-        let base_url = Url::parse(base_url)
-            .map_err(|e| Error::new(format!("parse cpm.base_url: {e}")))?;
+        let base_url =
+            Url::parse(base_url).map_err(|e| Error::new(format!("parse cpm.base_url: {e}")))?;
         let client = reqwest::Client::builder()
             .timeout(cfg.timeout)
             .danger_accept_invalid_certs(cfg.insecure_skip_verify)
@@ -83,11 +83,7 @@ impl HttpClient {
             .map_err(|e| Error::new(format!("unmarshal register body: {e}")))
     }
 
-    pub async fn sync_strategy(
-        &self,
-        daemon_id: i64,
-        version: i32,
-    ) -> Result<SyncStrategyResult> {
+    pub async fn sync_strategy(&self, daemon_id: i64, version: i32) -> Result<SyncStrategyResult> {
         let mut url = self.endpoint(&format!("/api/v1/daemons/{daemon_id}/sync/strategy"))?;
         url.query_pairs_mut()
             .append_pair("version", &version.to_string());
