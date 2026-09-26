@@ -8,5 +8,5 @@ description = "Deterministic Simulation Testing (DST) harness for the Cloud Prob
 
 [dependencies]
 cpworker = { path = "../cpworker" }
-rand = "0.8"
+rand = "0.10"
 rand_chacha = "0.3"
