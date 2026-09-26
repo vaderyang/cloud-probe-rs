@@ -100,8 +100,9 @@ Reduced-scope port (`cpdaemon`):
   not), and memory-policy tuning.
   See `crates/cpdaemon/src/cpm/syncer.rs` for the documented simplifications.
 
-A code-quality audit (unsafe inventory, lock strategy, dependency hygiene,
-engineering baseline) is in [AUDIT.md](AUDIT.md).
+Code-quality audits: baseline (unsafe inventory, lock strategy, dependency
+hygiene, engineering baseline) in [AUDIT.md](AUDIT.md); review of the
+remediation plan and its implementation in [AUDIT2.md](AUDIT2.md).
 
 ## Layout
 
