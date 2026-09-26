@@ -276,7 +276,6 @@ fn enumerate_nics(including: &[String]) -> Vec<NicEntry> {
     let Ok(ifaddrs) = nix::ifaddrs::getifaddrs() else {
         return out;
     };
-    use nix::sys::socket::SockaddrLike;
     use std::collections::BTreeMap;
 
     let mut map: BTreeMap<String, NicEntry> = BTreeMap::new();

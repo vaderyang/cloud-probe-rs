@@ -119,13 +119,16 @@ struct PipelineShared {
     alloc: Arc<SimpleAllocator>,
 }
 
+/// A task's capturer plus its configured outputs.
+type BuiltTask = (Box<dyn Capturer>, Vec<Box<dyn Output>>);
+
 /// Build one task's capturer + outputs. Mirrors `capture_task_new`.
 fn build_task(
     tasks_cfg: &[TaskConfig],
     task_cfg: &TaskConfig,
     capture: Arc<CaptureStats>,
     output: Arc<OutputStats>,
-) -> Result<(Box<dyn Capturer>, Vec<Box<dyn Output>>)> {
+) -> Result<BuiltTask> {
     let capturer = new_capturer(tasks_cfg, task_cfg, capture)?;
     let mut outputs: Vec<Box<dyn Output>> = Vec::with_capacity(task_cfg.outputs.len());
     for output_cfg in &task_cfg.outputs {
@@ -354,7 +357,10 @@ impl TaskManager {
             ExecutionModel::Pipeline => {
                 let (ring, alloc) = match &self.pipeline {
                     Some(p) => (p.ring.clone(), p.alloc.clone()),
-                    None => return total,
+                    None => {
+                        crate::log_error!("pipeline model missing ring/alloc; no packets polled");
+                        return total;
+                    }
                 };
                 for _ in 0..max {
                     let mut n = 0u64;

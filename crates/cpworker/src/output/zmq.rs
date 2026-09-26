@@ -246,6 +246,9 @@ pub struct ZmqOutput {
     throttle: Option<TokenBucket>,
     slice: i32,
 
+    // The ZMQ sockets borrow from the context, so keep it alive for the
+    // lifetime of the output even though it is never read directly.
+    #[allow(dead_code)]
     context: zmq::Context,
     pusher: zmq::Socket,
 

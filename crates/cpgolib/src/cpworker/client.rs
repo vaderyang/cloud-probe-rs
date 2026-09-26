@@ -123,13 +123,6 @@ impl UnixClient {
         }
     }
 
-    fn ensure_conn(&mut self, timeout: Duration) -> Result<&mut UnixStream> {
-        if self.conn.is_none() {
-            self.dial_with_timeout(timeout)?;
-        }
-        Ok(self.conn.as_mut().unwrap())
-    }
-
     fn dial_with_timeout(&mut self, timeout: Duration) -> Result<()> {
         if self.conn.is_some() {
             return Ok(());

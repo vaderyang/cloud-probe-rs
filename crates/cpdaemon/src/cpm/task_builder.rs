@@ -249,9 +249,8 @@ impl WorkerTaskBuilder {
                 } else if !matches!(
                     strategy.packet_channel_type.as_str(),
                     PACKET_CHANNEL_TYPE_GRE | PACKET_CHANNEL_TYPE_VXLAN
-                ) {
-                    false
-                } else if startup_args.bind_device.is_none() {
+                ) || startup_args.bind_device.is_none()
+                {
                     false
                 } else {
                     startup_args.bind_device.as_deref() != Some(item.nic_name.as_str())

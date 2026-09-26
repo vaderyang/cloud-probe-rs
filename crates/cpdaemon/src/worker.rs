@@ -281,8 +281,7 @@ fn spawn_log_reader<R: std::io::Read + Send + 'static>(
 }
 
 fn log_worker_config(cfg: &Config) {
-    match serde_json::to_string(cfg) {
-        Ok(s) => crate::log_info!("worker config config={s}"),
-        Err(_) => {}
+    if let Ok(s) = serde_json::to_string(cfg) {
+        crate::log_info!("worker config config={s}")
     }
 }

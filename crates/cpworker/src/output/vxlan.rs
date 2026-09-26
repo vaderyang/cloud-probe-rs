@@ -73,6 +73,9 @@ fn rte_raw_cksum(buf: &[u8]) -> u16 {
 /// Build a VXLAN-encapsulated frame into `buf`, returning the total length.
 /// Single source of truth for the VXLAN wire format (also used by the parity
 /// harness). `inner` is the Ethernet frame to encapsulate.
+// Mirrors the C `vxlan_encapsulate` signature (used by the byte-for-byte parity
+// harness), so the argument count is deliberate.
+#[allow(clippy::too_many_arguments)]
 pub fn vxlan_encapsulate(
     buf: &mut [u8],
     vni: u32,

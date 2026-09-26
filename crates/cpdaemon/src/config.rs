@@ -6,7 +6,7 @@ use std::path::Path;
 
 use crate::error::{Error, Result};
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize)]
 #[serde(default)]
 pub struct DaemonConfig {
     pub listen: Listen,
@@ -16,30 +16,10 @@ pub struct DaemonConfig {
     pub cpm: Cpm,
 }
 
-impl Default for DaemonConfig {
-    fn default() -> Self {
-        DaemonConfig {
-            listen: Listen::default(),
-            log: Log::default(),
-            tool: Tool::default(),
-            cgroup: Cgroup::default(),
-            cpm: Cpm::default(),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize)]
 #[serde(default)]
 pub struct Listen {
     pub http: HttpListen,
-}
-
-impl Default for Listen {
-    fn default() -> Self {
-        Listen {
-            http: HttpListen::default(),
-        }
-    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -128,7 +108,7 @@ impl Default for Cgroup {
     }
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize)]
 #[serde(default)]
 pub struct Cpm {
     pub base_url: String,
@@ -136,18 +116,6 @@ pub struct Cpm {
     pub syncer: CpmSyncer,
     pub reg: CpmReg,
     pub worker: CpmWorker,
-}
-
-impl Default for Cpm {
-    fn default() -> Self {
-        Cpm {
-            base_url: String::new(),
-            client: CpmClient::default(),
-            syncer: CpmSyncer::default(),
-            reg: CpmReg::default(),
-            worker: CpmWorker::default(),
-        }
-    }
 }
 
 #[derive(Debug, Clone, Deserialize)]

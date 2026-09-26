@@ -21,11 +21,11 @@ fn cksum_fold(mut sum: u32) -> u16 {
 #[inline]
 fn cksum_accumulate(buf: &[u8], initial: u32) -> u32 {
     let mut sum = initial;
-    let mut chunks = buf.chunks_exact(2);
-    for c in &mut chunks {
-        sum += u16::from_ne_bytes([c[0], c[1]]) as u32;
+    let (chunks, remainder) = buf.as_chunks::<2>();
+    for c in chunks {
+        sum += u16::from_ne_bytes(*c) as u32;
     }
-    if let Some(&b) = chunks.remainder().first() {
+    if let Some(&b) = remainder.first() {
         sum += b as u32;
     }
     sum

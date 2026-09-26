@@ -8,6 +8,10 @@ use std::time::Duration;
 
 use anyhow::{anyhow, bail, Context, Result};
 
+// The generated gRPC types carry the upstream vendored proto comments, some of
+// which trip clippy's `doc_lazy_continuation`; the generated code is not ours
+// to edit.
+#[allow(clippy::doc_lazy_continuation)]
 pub mod runtime {
     tonic::include_proto!("runtime.v1");
 }

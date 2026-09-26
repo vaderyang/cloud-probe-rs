@@ -7,6 +7,3 @@ pub mod synclog;
 pub mod task_builder;
 pub mod utils;
 pub mod worker_mgr;
-
-pub use client::HttpClient;
-pub use models::*;

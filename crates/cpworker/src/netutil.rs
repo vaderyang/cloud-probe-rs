@@ -5,7 +5,6 @@ use crate::error::{Error, Result};
 use crate::log::log;
 use crate::packet::IpAddr;
 use nix::ifaddrs::getifaddrs;
-use nix::sys::socket::SockaddrLike;
 
 /// Resolve an interface's MAC address. Port of `get_if_mac_addr`.
 ///
