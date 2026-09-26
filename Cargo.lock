@@ -457,7 +457,7 @@ dependencies = [
  "serde",
  "serde_json",
  "signal-hook",
- "socket2 0.5.10",
+ "socket2 0.6.5",
  "tempfile",
  "thiserror",
  "uuid",

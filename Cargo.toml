@@ -32,7 +32,7 @@ byteorder = "1"
 rand = "0.8"
 uuid = { version = "1", features = ["v4", "v5"] }
 chrono = "0.4"
-socket2 = { version = "0.5", features = ["all"] }
+socket2 = { version = "0.6", features = ["all"] }
 parking_lot = "0.12"
 pcap = "2"
 zmq = "0.10"
