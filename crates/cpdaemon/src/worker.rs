@@ -3,8 +3,10 @@
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader};
 use std::process::{Command, Stdio};
-use std::sync::{Arc, Condvar, Mutex};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
+
+use parking_lot::{Condvar, Mutex};
 
 use nix::sys::signal::{kill, Signal};
 use nix::sys::wait::waitpid;
@@ -44,13 +46,13 @@ impl Shared {
     }
 
     fn mark_done(&self) {
-        *self.done.lock().unwrap() = true;
+        *self.done.lock() = true;
         self.cv.notify_all();
     }
 
     fn wait_timeout(&self, dur: Duration) -> bool {
-        let guard = self.done.lock().unwrap();
-        let (guard, _) = self.cv.wait_timeout_while(guard, dur, |d| !*d).unwrap();
+        let mut guard = self.done.lock();
+        self.cv.wait_while_for(&mut guard, |d| !*d, dur);
         *guard
     }
 }
@@ -91,11 +93,11 @@ impl Worker {
     }
 
     pub fn pid(&self) -> i32 {
-        self.state.lock().unwrap().pid
+        self.state.lock().pid
     }
 
     pub fn start_time(&self) -> Option<Instant> {
-        self.state.lock().unwrap().start_time
+        self.state.lock().start_time
     }
 
     pub fn is_alive(&self) -> bool {
@@ -112,7 +114,7 @@ impl Worker {
 
     /// Start the worker process. Writes the config file first.
     pub fn start(&self, cfg: &Config) -> Result<()> {
-        let mut st = self.state.lock().unwrap();
+        let mut st = self.state.lock();
         if st.pid != 0 {
             return Err(Error::new(format!(
                 "worker {} is already running",
@@ -181,7 +183,7 @@ impl Worker {
     /// Send SIGINT and wait up to 10s, then SIGKILL.
     pub fn stop(&self) {
         let (pid, shared) = {
-            let st = self.state.lock().unwrap();
+            let st = self.state.lock();
             (st.pid, st.shared.clone())
         };
         if pid <= 0 {
@@ -199,7 +201,7 @@ impl Worker {
             }
         }
 
-        let mut st = self.state.lock().unwrap();
+        let mut st = self.state.lock();
         st.pid = 0;
         st.start_time = None;
         if let Some(limit) = st.res_limit.take() {
@@ -231,7 +233,7 @@ impl Worker {
     }
 
     pub fn update_res_limit(&self, limit: ResLimit) -> Result<()> {
-        let mut st = self.state.lock().unwrap();
+        let mut st = self.state.lock();
         let cpu = limit.cpu.filter(|c| *c > 0.0);
         if cpu.is_none() {
             if let Some(prev) = st.res_limit.as_ref() {
