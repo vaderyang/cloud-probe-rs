@@ -91,6 +91,11 @@ pub struct PcapReader<R> {
     pub len: u32,
     /// Payload of the last record.
     pub data: Vec<u8>,
+    /// `Some(caplen)` when the file stopped in the middle of a record, i.e. the
+    /// record promised `caplen` bytes and the source ended earlier. `None` for a
+    /// clean end of file. The *parser* stays silent; reporting is the
+    /// capturer's job.
+    pub truncated: Option<u32>,
 }
 
 impl PcapReader<BufReader<File>> {
@@ -178,6 +183,7 @@ impl<R: Read> PcapReader<R> {
             caplen: 0,
             len: 0,
             data: Vec::new(),
+            truncated: None,
         })
     }
 
@@ -239,11 +245,10 @@ impl<R: Read> PcapReader<R> {
         match self.r.read_exact(&mut self.data) {
             Ok(()) => {}
             Err(e) if e.kind() == io::ErrorKind::UnexpectedEof => {
-                crate::log_warn!(
-                    "{}: truncated pcap record ({} bytes missing); stopping",
-                    self.src,
-                    caplen
-                );
+                // Silent on purpose: `PcapFileCapturer::capture_once` reports it
+                // once per file. A parser that logs cannot be fuzzed (the
+                // `pcap_reader` target would emit one line per input).
+                self.truncated = Some(caplen);
                 self.data.clear();
                 return Ok(false);
             }
@@ -322,7 +327,14 @@ impl Capturer for PcapFileCapturer {
                 Ok(false) => {
                     sink.on_heartbeat();
                     self.stopped = true;
-                    crate::log_info!("end of file");
+                    if let Some(caplen) = self.reader.truncated {
+                        crate::log_error!(
+                            "{}: truncated pcap record (caplen {caplen} extends past the end of the file); replay stopped",
+                            self.reader.src
+                        );
+                    } else {
+                        crate::log_info!("end of file");
+                    }
                     return 0;
                 }
                 Err(e) => {
@@ -720,6 +732,40 @@ mod tests {
             assert_eq!(r.len, 9);
             assert_eq!(&r.data, &[0xA1, 0xA2, 0xA3]);
         }
+    }
+
+    /// Reporting belongs to the capturer, the parser stays silent (a logging
+    /// parser cannot be fuzzed) - and a truncated file must be distinguishable
+    /// from a clean end of file.
+    #[test]
+    fn truncation_is_reported_once_by_the_capturer() {
+        let mut img = global_header(DLT_EN10MB).to_vec();
+        img.extend_from_slice(&record(1000, 1000, &[0x33u8; 5])); // 995 bytes missing
+        let mut r = PcapReader::from_reader("t.pcap", Cursor::new(img.clone())).expect("header");
+        assert_eq!(r.truncated, None);
+        assert!(!r.next_record().expect("truncation is EOF, not corruption"));
+        assert_eq!(
+            r.truncated,
+            Some(1000),
+            "the parser must record the promised caplen it could not fill"
+        );
+        assert!(r.data.is_empty(), "no partial record may be handed out");
+
+        let (mut cap, path) = replay(&img, "truncated").expect("capturer");
+        let mut sink = Collect::default();
+        assert_eq!(cap.capture_once(&mut sink), 0);
+        assert!(sink.pkts.is_empty());
+        std::fs::remove_file(&path).ok();
+
+        // A whole file is a clean "end of file" instead.
+        let mut img = global_header(DLT_EN10MB).to_vec();
+        img.extend_from_slice(&record(2, 2, &[1, 2]));
+        let (mut cap, path) = replay(&img, "clean").expect("capturer");
+        let mut sink = Collect::default();
+        assert_eq!(cap.capture_once(&mut sink), 1);
+        assert_eq!(cap.capture_once(&mut sink), 0);
+        assert_eq!(cap.reader.truncated, None, "clean end of file");
+        std::fs::remove_file(&path).ok();
     }
 
     /// A record header whose bytes are pure garbage must never be published.
