@@ -197,9 +197,9 @@ fn dispatch(req: &Value, mgr: &Arc<Mutex<TaskManager>>) -> Value {
         "collect_stats_summary" => {
             let g = mgr.lock();
             let mut v = g.collect_stats_summary();
-            v.as_object_mut()
-                .unwrap()
-                .insert("status".into(), Value::String("OK".into()));
+            if let Some(obj) = v.as_object_mut() {
+                obj.insert("status".into(), Value::String("OK".into()));
+            }
             v
         }
         "reload_config" => {

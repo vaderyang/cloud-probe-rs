@@ -30,7 +30,7 @@ mod imp {
             // Try the conventional netns run dir for a bare name.
             if !ns_path.contains('/') {
                 let alt = format!("{NETNS_RUN_DIR}/{ns_path}");
-                let calt = CString::new(alt).unwrap();
+                let calt = CString::new(alt).map_err(|_| Error::new("invalid netns path"))?;
                 let fd = unsafe { libc::open(calt.as_ptr(), libc::O_RDONLY) };
                 if fd < 0 {
                     return Err(Error::new(format!(

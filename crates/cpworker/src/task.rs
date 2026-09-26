@@ -108,6 +108,14 @@ pub fn now_sec() -> i64 {
         .unwrap_or(0)
 }
 
+/// Ring + allocator for the pipeline execution model. Bundled into one struct
+/// so the two are always constructed and dropped together, making a partial
+/// (ring without alloc) state impossible.
+struct PipelineShared {
+    ring: Arc<Mutex<SpscRing>>,
+    alloc: Arc<SimpleAllocator>,
+}
+
 /// Build one task's capturer + outputs. Mirrors `capture_task_new`.
 fn build_task(
     tasks_cfg: &[TaskConfig],
@@ -136,8 +144,7 @@ pub struct TaskManager {
     entries: Vec<TaskEntry>,
     out_sets: Arc<Mutex<Vec<TaskOutputs>>>,
 
-    ring: Option<Arc<Mutex<SpscRing>>>,
-    alloc: Option<Arc<SimpleAllocator>>,
+    pipeline: Option<PipelineShared>,
 
     running: Arc<AtomicBool>,
     output_thread: Option<JoinHandle<()>>,
@@ -151,14 +158,15 @@ impl TaskManager {
         let stats_capture = Arc::new(CaptureStats::default());
         let stats_output = Arc::new(OutputStats::default());
 
-        let (ring, alloc) = if config.execution_model == ExecutionModel::Pipeline {
-            let ring = Arc::new(Mutex::new(SpscRing::new(1024 * 1024)));
-            let alloc = Arc::new(SimpleAllocator::new(
-                config.pipeline_buffer_size_mb.max(0) as u64 * 1024 * 1024,
-            ));
-            (Some(ring), Some(alloc))
+        let pipeline = if config.execution_model == ExecutionModel::Pipeline {
+            Some(PipelineShared {
+                ring: Arc::new(Mutex::new(SpscRing::new(1024 * 1024))),
+                alloc: Arc::new(SimpleAllocator::new(
+                    config.pipeline_buffer_size_mb.max(0) as u64 * 1024 * 1024,
+                )),
+            })
         } else {
-            (None, None)
+            None
         };
 
         let mut mgr = TaskManager {
@@ -170,8 +178,7 @@ impl TaskManager {
             stats_output,
             entries: Vec::new(),
             out_sets: Arc::new(Mutex::new(Vec::new())),
-            ring,
-            alloc,
+            pipeline,
             running: Arc::new(AtomicBool::new(false)),
             output_thread: None,
             inited_count: 0,
@@ -266,8 +273,12 @@ impl TaskManager {
         if self.config.execution_model != ExecutionModel::Pipeline {
             return;
         }
-        let ring = self.ring.clone().unwrap();
-        let alloc = self.alloc.clone().unwrap();
+        let Some(pipeline) = &self.pipeline else {
+            crate::log_error!("pipeline model missing ring/alloc; output thread not started");
+            return;
+        };
+        let ring = pipeline.ring.clone();
+        let alloc = pipeline.alloc.clone();
         let out_sets = self.out_sets.clone();
         let running = self.running.clone();
 
@@ -313,8 +324,10 @@ impl TaskManager {
         let mut total = 0u64;
         match self.config.execution_model {
             ExecutionModel::Pipeline => {
-                let ring = self.ring.clone().unwrap();
-                let alloc = self.alloc.clone().unwrap();
+                let (ring, alloc) = match &self.pipeline {
+                    Some(p) => (p.ring.clone(), p.alloc.clone()),
+                    None => return total,
+                };
                 for _ in 0..max {
                     let mut n = 0u64;
                     for entry in self.entries.iter_mut() {
@@ -368,13 +381,14 @@ impl TaskManager {
         *self.out_sets.lock() = Vec::new();
 
         // Recreate pipeline ring/alloc if the buffer size changed.
-        self.ring = None;
-        self.alloc = None;
+        self.pipeline = None;
         if self.config.execution_model == ExecutionModel::Pipeline {
-            self.ring = Some(Arc::new(Mutex::new(SpscRing::new(1024 * 1024))));
-            self.alloc = Some(Arc::new(SimpleAllocator::new(
-                self.config.pipeline_buffer_size_mb.max(0) as u64 * 1024 * 1024,
-            )));
+            self.pipeline = Some(PipelineShared {
+                ring: Arc::new(Mutex::new(SpscRing::new(1024 * 1024))),
+                alloc: Arc::new(SimpleAllocator::new(
+                    self.config.pipeline_buffer_size_mb.max(0) as u64 * 1024 * 1024,
+                )),
+            });
         }
 
         let result = self.build_all();
@@ -400,14 +414,14 @@ impl TaskManager {
     /// `task_manager_collect_stats_summary_command`.
     pub fn collect_stats_summary(&self) -> serde_json::Value {
         let (sec, nsec) = monotonic_now();
-        let (ring_total, ring_used, mem_total, mem_used) = match (&self.ring, &self.alloc) {
-            (Some(r), Some(a)) => (
-                r.lock().size() as u64,
-                r.lock().used() as u64,
-                a.capacity(),
-                a.used(),
+        let (ring_total, ring_used, mem_total, mem_used) = match &self.pipeline {
+            Some(p) => (
+                p.ring.lock().size() as u64,
+                p.ring.lock().used() as u64,
+                p.alloc.capacity(),
+                p.alloc.used(),
             ),
-            _ => (0, 0, 0, 0),
+            None => (0, 0, 0, 0),
         };
 
         serde_json::json!({
@@ -481,7 +495,9 @@ fn monotonic_now() -> (i64, i64) {
     }
     #[cfg(not(target_os = "linux"))]
     {
-        let d = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
+        let d = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default();
         (d.as_secs() as i64, d.subsec_nanos() as i64)
     }
 }
