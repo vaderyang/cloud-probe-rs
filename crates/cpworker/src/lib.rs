@@ -9,6 +9,7 @@
 #![warn(missing_docs)]
 
 pub mod affinity;
+pub mod bpf;
 pub mod capturer;
 pub mod config;
 pub mod error;
@@ -21,6 +22,7 @@ pub mod packet_split;
 pub mod ratelimit;
 pub mod req_pattern;
 pub mod ring_buffer;
+pub mod sockopt;
 pub mod stats;
 pub mod task;
 pub mod unix_manager;

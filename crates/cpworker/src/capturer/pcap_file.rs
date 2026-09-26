@@ -8,6 +8,7 @@ use std::io::{BufReader, Read};
 use std::sync::Arc;
 
 use super::{Capturer, PacketHeader, PacketSink};
+use crate::bpf::{self, Program};
 use crate::config::{bpf_filter_exclude_task_output_hosts, PcapFileConfig, TaskConfig};
 use crate::error::{Error, Result};
 use crate::netutil::bpf_filter_replace_nic;
@@ -101,6 +102,7 @@ pub struct PcapFileCapturer {
     stats: Arc<CaptureStats>,
     req_pattern: Option<ReqPattern>,
     reader: PcapReader,
+    program: Option<Program>,
     eof: bool,
 }
 
@@ -121,17 +123,22 @@ impl PcapFileCapturer {
 
         let reader = PcapReader::open(&cfg.file_name)?;
 
-        let bpf = bpf_filter_exclude_task_output_hosts(&cfg.bpf, tasks);
-        if !bpf.is_empty() {
-            let bpf = bpf_filter_replace_nic(&bpf)?;
-            // TODO(P3): apply the pure-Rust BPF filter once the compiler lands.
-            crate::log_warn!("pcap_file BPF filter not yet applied (pure-Rust migration): {bpf}");
-        }
+        let bpf_expr = bpf_filter_exclude_task_output_hosts(&cfg.bpf, tasks);
+        let program =
+            if bpf_expr.is_empty() {
+                None
+            } else {
+                let bpf_expr = bpf_filter_replace_nic(&bpf_expr)?;
+                Some(bpf::compile(&bpf_expr).map_err(|e| {
+                    Error::new(format!("compile bpf filter '{bpf_expr}' error: {e}"))
+                })?)
+            };
 
         Ok(PcapFileCapturer {
             stats,
             req_pattern: Some(req_pattern),
             reader,
+            program,
             eof: false,
         })
     }
@@ -139,13 +146,22 @@ impl PcapFileCapturer {
 
 impl Capturer for PcapFileCapturer {
     fn capture_once(&mut self, sink: &mut dyn PacketSink) -> u64 {
-        if !self.reader.next() {
-            sink.on_heartbeat();
-            if !self.eof {
-                crate::log_info!("end of file");
-                self.eof = true;
+        // Skip frames rejected by the BPF filter, like `pcap_next_ex` does.
+        loop {
+            if !self.reader.next() {
+                sink.on_heartbeat();
+                if !self.eof {
+                    crate::log_info!("end of file");
+                    self.eof = true;
+                }
+                return 0;
             }
-            return 0;
+            if let Some(p) = &self.program {
+                if !p.apply(&self.reader.data) {
+                    continue;
+                }
+            }
+            break;
         }
 
         let hdr = PacketHeader {

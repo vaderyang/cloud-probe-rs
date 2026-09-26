@@ -13,7 +13,7 @@ export PATH="$HOME/.cargo/bin:$PATH"
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CRATE="$HERE/crates/cpworker"
-ALL_TARGETS="packet_split config vxlan zmq_batch sim_dst zmtp_wire zmtp_client"
+ALL_TARGETS="packet_split config vxlan zmq_batch sim_dst bpf zmtp_wire zmtp_client"
 
 ensure_toolchain() {
     if ! rustup toolchain list | grep -q '^nightly'; then

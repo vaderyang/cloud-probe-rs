@@ -50,10 +50,9 @@ fn main() {
             Some(v) => v,
             None => continue,
         };
-        let hex = match parts.next() {
-            Some(h) => h,
-            None => continue,
-        };
+        // Mirror c_harness.c: a missing/empty hex token is a zero-length frame,
+        // which must be reported as FAIL (never silently skipped).
+        let hex = parts.next().unwrap_or("");
 
         let pkt = from_hex(hex);
         let Some(r) = parse_packet(&pkt) else {

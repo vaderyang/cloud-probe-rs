@@ -72,3 +72,10 @@ path = "fuzz_targets/zmtp_client.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "bpf"
+path = "fuzz_targets/bpf.rs"
+test = false
+doc = false
+bench = false
