@@ -27,6 +27,18 @@ cargo test --workspace
 
 Binaries land in `target/debug/` (or `target/release/`).
 
+### Coverage
+
+Line coverage is collected in CI (advisory) with `cargo-llvm-cov` and uploaded
+as an `lcov` artifact. To reproduce locally:
+
+```bash
+rustup component add llvm-tools-preview
+cargo install cargo-llvm-cov
+cargo llvm-cov --workspace --lcov --output-path lcov.info
+cargo llvm-cov report --summary-only
+```
+
 ### System dependencies
 
 * **libpcap** (development headers) — `cpworker` capture / savefiles

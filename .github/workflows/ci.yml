@@ -55,6 +55,37 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo clippy --workspace --all-targets
 
+  coverage:
+    name: coverage (llvm-cov)
+    # Advisory: reports line coverage and uploads an lcov artifact. It is not a
+    # hard gate yet (see IMPROVEMENT_PLAN.md P2.3).
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: System dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libpcap-dev libzmq3-dev protobuf-compiler
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: llvm-tools-preview
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-llvm-cov
+      - name: Collect coverage
+        run: cargo llvm-cov --workspace --lcov --output-path lcov.info
+      - name: Summary
+        run: cargo llvm-cov report --summary-only
+      - name: Upload lcov artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-lcov
+          path: lcov.info
+          if-no-files-found: warn
+
   deny:
     name: licenses & advisories (cargo-deny)
     runs-on: ubuntu-latest

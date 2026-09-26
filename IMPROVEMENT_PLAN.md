@@ -9,7 +9,7 @@
 | 阶段 | 主题 | 项数 | 预估 | 风险 | 状态 |
 |---|---|---|---|---|---|
 | P1 | 快速清扫（锁策略、死依赖、脆弱 unwrap） | 3 | 0.5–1 天 | 低 | ✅ 已完成 |
-| P2 | 可靠性加固（panic 面、可观测性） | 3 | 1–2 天 | 低 | ⬜ 待开始 |
+| P2 | 可靠性加固（panic 面、可观测性） | 3 | 1–2 天 | 低 | ✅ 已完成 |
 | P3 | 移除 C 依赖（纯 Rust） | 3 | 周级 | 高 | ⬜ 待开始 |
 | P4 | 可选质量项（覆盖率、文档、基准） | 3 | 1–2 天 | 低 | ⬜ 待开始 |
 
@@ -112,6 +112,28 @@
 - **验收**：CI 打印/上传 lcov；文档记录当前行覆盖率。
 
 ---
+
+## P2 完成记录
+
+- **P2.1 panic 面收敛**（生产代码）
+  - `output/{null,gre,vxlan,zmq}.rs`：删除冗余 `rate_limit_mbps` 字段，
+    用 `if let Some(tb) = self.throttle.as_mut()` 消除 4 处 `unwrap()`。
+  - `task.rs`：输出线程 spawn 失败不再 `expect` 中止，改为复位 `running`
+    并记录错误。
+  - `cpdaemon/cpm/task_builder.rs`：3 处 `libpcap.as_mut().unwrap()` 改
+    `if let`；短选项解析的 `chars().next().unwrap()` 改 `ok_or_else`。
+  - `cpdaemon/cpm/worker_mgr.rs`：`worker.clone().unwrap()` 改为缺失时返回错误。
+  - **保留**：`packet.rs` 4 处 `try_into().unwrap()`（有前置长度检查，
+    审计已认可）；测试/差分 harness 中的 `unwrap/expect` 属预期。
+  - `#[cfg(test)]`/`tests/`/`bin/*parity` 中的 unwrap 不处理（测试失败应中止）。
+- **P2.2 pedantic 文档段**
+  - `#[must_use]`：clippy `--fix` 全量应用（cpworker/cpgolib/cpsim），0 剩余。
+  - `# Errors`：为 cpworker 公共 API（config/capturer/output/netns/netutil/
+    task/unix_manager/affinity/req_pattern/ring_buffer）、cpgolib client、
+    cpsim collector 补齐；`clippy::missing_errors_doc` 在 `--lib` 下 0 剩余。
+- **P2.3 覆盖率**
+  - `.github/workflows/ci.yml` 新增 `coverage (llvm-cov)` job（advisory，
+    `continue-on-error`），产出并上传 `lcov.info`；README 增加本地复现步骤。
 
 ## P3 — 移除 C 依赖（审计 §4.4，最大工程项）
 
