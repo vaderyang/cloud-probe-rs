@@ -72,9 +72,12 @@ impl PcapReader {
     /// Read the next record into `self.data`. Returns `false` at end of file.
     fn next(&mut self) -> bool {
         let mut rec = [0u8; 16];
-        match self.r.read(&mut rec) {
-            Ok(16) => {}
-            _ => return false, // EOF or truncated header
+        // `read_exact` is required here: a plain `read()` may return fewer than
+        // 16 bytes when the record header straddles the BufReader's internal
+        // buffer boundary, which loses those bytes and corrupts the file
+        // position for every subsequent record.
+        if self.r.read_exact(&mut rec).is_err() {
+            return false; // clean EOF or truncated header
         }
         self.ts_sec = self.u32(&rec[0..4]) as i64;
         let mut ts = self.u32(&rec[4..8]) as i64;
@@ -207,6 +210,45 @@ mod tests {
         assert_eq!(r.caplen, 4);
         assert_eq!(r.len, 60);
         assert_eq!(&r.data, &[1, 2, 3, 4]);
+        assert!(!r.next());
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn pcap_reader_large_file_no_position_drift() {
+        // Regression: the record header must be read with `read_exact`. A plain
+        // `read()` returns fewer than 16 bytes when a header straddles the
+        // BufReader's internal buffer boundary, losing those bytes and
+        // corrupting the file position for every subsequent record. Only
+        // manifests on files larger than the 8 KiB buffer.
+        let path = std::env::temp_dir().join(format!("cp-pcap-big-{}.pcap", std::process::id()));
+        let n = 1000usize;
+        {
+            let mut w =
+                crate::output::pcap_writer::PcapWriter::create(&path, 65535).expect("create");
+            for i in 0..n {
+                let caplen = 64 + (i % 961); // 64..1024, so headers straddle the buffer
+                let data = vec![0xA5u8; caplen];
+                let hdr = PacketHeader {
+                    ts_sec: 1,
+                    ts_usec: i as i64,
+                    caplen: caplen as u32,
+                    len: caplen as u32,
+                };
+                w.write(&hdr, &data).expect("write");
+            }
+            w.flush().expect("flush");
+        }
+        let mut r = PcapReader::open(path.to_str().unwrap()).expect("open");
+        for i in 0..n {
+            assert!(r.next(), "record {i} failed to read");
+            assert_eq!(
+                r.caplen as usize,
+                64 + (i % 961),
+                "record {i} caplen drifted"
+            );
+            assert_eq!(r.ts_usec, i as i64, "record {i} timestamp drifted");
+        }
         assert!(!r.next());
         std::fs::remove_file(&path).ok();
     }
