@@ -136,7 +136,9 @@ impl Output for RotatingFileOutput {
         }
 
         if let Some(w) = self.writer.as_mut() {
-            w.write(hdr, pkt);
+            if let Err(e) = w.write(hdr, pkt) {
+                crate::log_error!("write pcap output failed: {e}");
+            }
         }
         self.stats.fwd_bytes.add(hdr.caplen as u64);
         self.stats.fwd_packets.add(1);

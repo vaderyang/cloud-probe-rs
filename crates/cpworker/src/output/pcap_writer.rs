@@ -1,112 +1,86 @@
-//! Raw libpcap savefile writer.
+//! Pure-Rust libpcap savefile writer (no libpcap linkage).
 //!
-//! The `pcap` crate does not expose `pcap_dump_open` for a "dead" handle, so we
-//! declare the small FFI surface we need ourselves. Linking is provided by the
-//! `pcap` crate's build script.
+//! Writes the classic pcap format: a 24-byte global header followed by one
+//! 16-byte record header per packet. Link type is Ethernet (`DLT_EN10MB`).
 
-use std::ffi::CString;
+use std::fs::File;
+use std::io::{BufWriter, Write};
 use std::path::Path;
 
 use crate::error::{Error, Result};
 use crate::output::PacketHeader;
 
 /// Link-layer type for Ethernet, as used by libpcap savefiles.
-pub const DLT_EN10MB: libc::c_int = 1;
+pub const DLT_EN10MB: u32 = 1;
 
-#[repr(C)]
-struct PcapPkthdr {
-    ts: libc::timeval,
-    caplen: u32,
-    len: u32,
-}
+/// libpcap magic for microsecond-resolution timestamps, host byte order.
+const PCAP_MAGIC_USEC: u32 = 0xa1b2_c3d4;
+/// pcap format version 2.4.
+const PCAP_VERSION_MAJOR: u16 = 2;
+const PCAP_VERSION_MINOR: u16 = 4;
 
-extern "C" {
-    fn pcap_open_dead(linktype: libc::c_int, snaplen: libc::c_int) -> *mut libc::c_void;
-    fn pcap_dump_open(p: *mut libc::c_void, fname: *const libc::c_char) -> *mut libc::c_void;
-    fn pcap_dump(user: *mut libc::c_uchar, h: *const PcapPkthdr, sp: *const libc::c_uchar);
-    fn pcap_dump_flush(p: *mut libc::c_void) -> libc::c_int;
-    fn pcap_dump_close(p: *mut libc::c_void);
-    fn pcap_close(p: *mut libc::c_void);
-}
-
-/// A libpcap savefile writer owning a dead pcap handle and its dumper.
+/// A pcap savefile writer. Buffered; call [`PcapWriter::flush`] to fsync.
 pub struct PcapWriter {
-    pcap: *mut libc::c_void,
-    dumper: *mut libc::c_void,
+    w: BufWriter<File>,
 }
-
-// The writer owns its handles exclusively; libpcap dumpers are not thread-safe
-// for concurrent access but are safe to move between threads.
-unsafe impl Send for PcapWriter {}
 
 impl PcapWriter {
-    /// Create a pcap dumper writing to `path` with the given snaplen.
+    /// Create a new pcap file writing Ethernet frames with the given snaplen.
     ///
     /// # Errors
-    /// Returns an error if the libpcap handle or dumper cannot be created.
+    /// Returns an error if the file cannot be created or written.
     pub fn create(path: &Path, snaplen: i32) -> Result<Self> {
-        let pcap = unsafe { pcap_open_dead(DLT_EN10MB, snaplen) };
-        if pcap.is_null() {
-            return Err(Error::new("pcap_open_dead failed"));
-        }
-        let cpath = CString::new(path.to_string_lossy().as_bytes())
-            .map_err(|_| Error::new("invalid output path"))?;
-        let dumper = unsafe { pcap_dump_open(pcap, cpath.as_ptr()) };
-        if dumper.is_null() {
-            unsafe { pcap_close(pcap) };
-            return Err(Error::new(format!(
-                "pcap_dump_open failed for {}",
-                path.display()
-            )));
-        }
-        Ok(PcapWriter { pcap, dumper })
+        let file = File::create(path)
+            .map_err(|e| Error::new(format!("open {} for writing: {e}", path.display())))?;
+        let mut w = BufWriter::new(file);
+        let snaplen = if snaplen <= 0 { 65535 } else { snaplen as u32 };
+        let mut hdr = [0u8; 24];
+        hdr[0..4].copy_from_slice(&PCAP_MAGIC_USEC.to_le_bytes());
+        hdr[4..6].copy_from_slice(&PCAP_VERSION_MAJOR.to_le_bytes());
+        hdr[6..8].copy_from_slice(&PCAP_VERSION_MINOR.to_le_bytes());
+        hdr[8..12].copy_from_slice(&0i32.to_le_bytes()); // thiszone
+        hdr[12..16].copy_from_slice(&0u32.to_le_bytes()); // sigfigs
+        hdr[16..20].copy_from_slice(&snaplen.to_le_bytes());
+        hdr[20..24].copy_from_slice(&DLT_EN10MB.to_le_bytes());
+        w.write_all(&hdr)
+            .map_err(|e| Error::new(format!("write pcap header: {e}")))?;
+        Ok(PcapWriter { w })
     }
 
     /// Append one packet to the savefile.
-    pub fn write(&mut self, hdr: &PacketHeader, data: &[u8]) {
-        // `pcap_dump` writes `hdr.caplen` bytes from the data pointer, so the
-        // caller must guarantee the buffer is at least that long. All current
-        // callers take `data` from the ring buffer where `caplen == data.len()`.
+    ///
+    /// # Errors
+    /// Returns an error if the write fails. `data` must be at least `caplen`
+    /// bytes long (all current callers satisfy this).
+    pub fn write(&mut self, hdr: &PacketHeader, data: &[u8]) -> Result<()> {
+        let caplen = hdr.caplen.min(data.len() as u32);
         debug_assert!(
             data.len() >= hdr.caplen as usize,
             "pcap data buffer ({} bytes) shorter than caplen ({})",
             data.len(),
             hdr.caplen
         );
-        let phdr = PcapPkthdr {
-            ts: libc::timeval {
-                tv_sec: hdr.ts_sec as libc::time_t,
-                tv_usec: hdr.ts_usec as libc::suseconds_t,
-            },
-            caplen: hdr.caplen,
-            len: hdr.len,
-        };
-        unsafe {
-            pcap_dump(
-                self.dumper as *mut libc::c_uchar,
-                &phdr,
-                data.as_ptr() as *const libc::c_uchar,
-            );
-        }
+        let mut rec = [0u8; 16];
+        rec[0..4].copy_from_slice(&(hdr.ts_sec as u32).to_le_bytes());
+        rec[4..8].copy_from_slice(&(hdr.ts_usec as u32).to_le_bytes());
+        rec[8..12].copy_from_slice(&caplen.to_le_bytes());
+        rec[12..16].copy_from_slice(&hdr.len.to_le_bytes());
+        self.w
+            .write_all(&rec)
+            .map_err(|e| Error::new(format!("write pcap record header: {e}")))?;
+        self.w
+            .write_all(&data[..caplen as usize])
+            .map_err(|e| Error::new(format!("write pcap record data: {e}")))?;
+        Ok(())
     }
 
-    /// Flush buffered packets to disk.
-    pub fn flush(&mut self) {
-        unsafe {
-            pcap_dump_flush(self.dumper);
-        }
-    }
-}
-
-impl Drop for PcapWriter {
-    fn drop(&mut self) {
-        unsafe {
-            if !self.dumper.is_null() {
-                pcap_dump_close(self.dumper);
-            }
-            if !self.pcap.is_null() {
-                pcap_close(self.pcap);
-            }
-        }
+    /// Flush buffered packets to the OS.
+    ///
+    /// # Errors
+    /// Returns an error if flushing fails.
+    pub fn flush(&mut self) -> Result<()> {
+        self.w
+            .flush()
+            .map_err(|e| Error::new(format!("flush pcap file: {e}")))
     }
 }

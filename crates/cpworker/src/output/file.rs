@@ -34,13 +34,17 @@ impl Output for FileOutput {
             self.stats.direction_drop_packets.add(1);
             return -1;
         }
-        self.writer.write(hdr, pkt);
+        if let Err(e) = self.writer.write(hdr, pkt) {
+            crate::log_error!("write pcap output failed: {e}");
+        }
         self.stats.fwd_bytes.add(hdr.caplen as u64);
         self.stats.fwd_packets.add(1);
         0
     }
 
     fn destroy(&mut self) {
-        self.writer.flush();
+        if let Err(e) = self.writer.flush() {
+            crate::log_error!("flush pcap output failed: {e}");
+        }
     }
 }
