@@ -1,3 +1,5 @@
+![CI](https://github.com/vaderyang/cloud-probe-rs/actions/workflows/ci.yml/badge.svg)
+
 # cloud-probe-rs — Netis Cloud Probe (Rust port)
 
 A standalone Rust port of Netis Cloud Probe. The original C + Go implementation lives in
