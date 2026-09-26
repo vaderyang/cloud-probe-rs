@@ -79,3 +79,10 @@ path = "fuzz_targets/bpf.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "pcap_reader"
+path = "fuzz_targets/pcap_reader.rs"
+test = false
+doc = false
+bench = false

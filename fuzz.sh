@@ -7,13 +7,14 @@
 #   FUZZ_SEED=123 fuzz.sh 60 zmq_batch  # fixed seed, longer run
 #   fuzz.sh repro zmq_batch <artifact>  # reproduce a crash
 #
-# Targets: packet_split config vxlan zmq_batch sim_dst
+# Targets: packet_split config vxlan zmq_batch sim_dst bpf zmtp_wire zmtp_client
+#          pcap_reader diff_oracle(diff, see parity/difffuzz.sh)
 set -euo pipefail
 export PATH="$HOME/.cargo/bin:$PATH"
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CRATE="$HERE/crates/cpworker"
-ALL_TARGETS="packet_split config vxlan zmq_batch sim_dst bpf zmtp_wire zmtp_client"
+ALL_TARGETS="packet_split config vxlan zmq_batch sim_dst bpf zmtp_wire zmtp_client pcap_reader"
 
 ensure_toolchain() {
     if ! rustup toolchain list | grep -q '^nightly'; then
