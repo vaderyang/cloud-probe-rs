@@ -87,7 +87,13 @@ jobs:
 
   dependency-review:
     name: dependency review
-    if: github.event_name == 'pull_request'
+    # GitHub's dependency-review needs the repository Dependency graph feature
+    # (Settings -> Security) and a write token, which Dependabot PRs do not get.
+    # Keep it advisory: skip Dependabot PRs and never block the build.
+    if: >-
+      github.event_name == 'pull_request' &&
+      github.actor != 'dependabot[bot]'
+    continue-on-error: true
     runs-on: ubuntu-latest
     permissions:
       contents: read
