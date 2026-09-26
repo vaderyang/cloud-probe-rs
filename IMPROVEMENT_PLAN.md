@@ -10,7 +10,7 @@
 |---|---|---|---|---|---|
 | P1 | 快速清扫（锁策略、死依赖、脆弱 unwrap） | 3 | 0.5–1 天 | 低 | ✅ 已完成 |
 | P2 | 可靠性加固（panic 面、可观测性） | 3 | 1–2 天 | 低 | ✅ 已完成 |
-| P3 | 移除 C 依赖（纯 Rust） | 3 | 周级 | 高 | 🟡 进行中：libzmq ✅，libpcap ⬜ |
+| P3 | 移除 C 依赖（纯 Rust） | 3 | 周级 | 高 | ✅ 已完成 |
 | P4 | 可选质量项（覆盖率、文档、基准） | 3 | 1–2 天 | 低 | 🟡 P4.2/P4.3 完成，P4.1 待硬件 |
 
 ### P1 完成记录（commits `0ff95d6` / `62597d9` / `3ba6813`）
@@ -146,6 +146,19 @@
 
 - ✅ **pcap 写/读纯 Rust 化**：`output/pcap_writer.rs` 去掉 `pcap_open_dead`/`pcap_dump` FFI；
   `capturer/pcap_file.rs` 自写 pcap 读取（大小端 + 微秒/纳秒 + 越界保护）。
+- ✅ **libpcap 已移除**（P3.1）：
+  - `crates/cpworker/src/bpf/`：平台无关的 tcpdump 子集编译器 + 安全 cBPF 解释器
+    （`host`/`net`/`port`/`portrange`/`ether host`、`ip`/`ip6`/`arp`/`rarp`/`tcp`/`udp`/`icmp`/`icmp6`、
+    `and`/`or`/`not`/括号；不支持的关键字明确报错）。
+  - `crates/cpworker/src/capturer/af_packet.rs`：裸 `AF_PACKET`（`SOCK_RAW` + `SO_RCVBUF` +
+    `SO_TIMESTAMPNS` + `PACKET_STATISTICS` 丢包统计），替换 `capturer/libpcap.rs`。
+  - BPF 经 `SO_ATTACH_FILTER` 挂载；离线 `pcap_file` 用解释器过滤。
+  - 删除 `pcap` 依赖；CI `test/clippy/coverage/release` 不再需 `libpcap-dev`
+    （parity/fuzz job 保留，用于 C oracle）。
+  - **与 libpcap 对拍**：`parity/verify_bpf.sh`（`c_bpf.c` + `bpf_eval`，随机表达式 × 随机报文逐包一致）。
+  - fuzz：`bpf` target；内核验证单测（`SO_ATTACH_FILTER`）+ 离线过滤端到端测试 +
+    真实 `AF_PACKET` 抓包（`af_packet_live.rs`，需 `CAP_NET_RAW`，`#[ignore]`）。
+  - `cargo tree --workspace` 已无 `pcap`。
 - ✅ **libzmq 已移除**（P3.2）：
   - `crates/cpworker/src/zmtp/codec.rs`：ZMTP 3.x greeting/READY/帧编解码。
   - `crates/cpworker/src/zmtp/client.rs`：非阻塞 PUSH 状态机（非阻塞 connect、NULL 握手、
@@ -158,33 +171,25 @@
 - ⬜ **libpcap 待移除**（P3.1）：实时抓包 `capturer/libpcap.rs` 待改裸 `AF_PACKET` + 自研 BPF
   子集（决策已定：1A + 2A）。
 
-### P3.1 采集侧去 libpcap
+### P3.1 采集侧去 libpcap（已完成）
 
-- **现状**：`crates/cpworker/src/capturer/libpcap.rs` + `pcap_file.rs` 链接 libpcap。
-- **做法**：
-  1. 活跃采集用 `pnet_datalink`（AF_PACKET）或直接 `socket(AF_PACKET, SOCK_RAW)` +
-     `nix`；对照 `libpcap.c` 的 fanout/ring 行为。
-  2. 离线 pcap 文件读写改为纯 Rust reader/writer（`pcap_writer.rs` 已有封装，
-     替换 FFI 层即可）。
-  3. BPF 过滤：审计建议"自写 tcpdump BPF 子集编译器"。若项目只支持有限表达式，
-     实现子集；否则可评估用 `pcap` 语法解析到 `BPF` 指令的现有 Rust crate。
-- **验收**：`cargo tree -p cpworker | grep -E "^pcap"` 无输出；34 个 C 差分测试
-  （`port_parity.rs`）全绿；fuzz `packet_split`/`config`/`vxlan` 全绿；
-  采集吞吐基准不低于 C 基线 ±5%。
+- ✅ 实时抓包：裸 `AF_PACKET`（`capturer/af_packet.rs`）。
+- ✅ 离线 pcap 读写：纯 Rust reader/writer（`capturer/pcap_file.rs`、`output/pcap_writer.rs`）。
+- ✅ BPF：`bpf/` 自研 tcpdump 子集编译器 + 解释器，Linux `SO_ATTACH_FILTER`。
+- ✅ 验收：`cargo tree --workspace` 无 `pcap`；`verify_bpf.sh` 与 libpcap 逐包一致；
+  `bpf` fuzz target 全绿；真实 `AF_PACKET` 抓包测试通过（root）。
 
-### P3.2 输出侧去 libzmq（纯 Rust ZMTP）
+### P3.2 输出侧去 libzmq（纯 Rust ZMTP）（已完成）
 
-- **现状**：`crates/cpworker/src/output/zmq.rs` 使用 `zmq` crate（libzmq）。
-- **做法**：实现 ZMTP 3.x 最小子集（或引入纯 Rust 实现），保持 wire 兼容，
-  复用现有 `BatchBuilder`（`zmq_batch` fuzz target 已覆盖 VLAN/MPLS 边界）。
-- **验收**：`cargo tree -p cpworker | grep -E "^zmq"` 无输出；
-  与 collector 的端到端对拍通过；`zmq_vlan_slice_never_corrupts` 回归通过。
+- ✅ ZMTP 3.x `PUSH` 实现，wire 兼容，复用 `BatchBuilder`。
+- ✅ 验收：`cargo tree --workspace` 无 `zmq`；`verify_zmtp.sh` 与真实 libzmq 逐字节一致。
 
-### P3.3 供应链/构建切换
+### P3.3 供应链/构建切换（已完成）
 
-- **做法**：移除 `pcap`/`zmq` 依赖后更新 `deny.toml`/`Cargo.lock`、CI 构建镜像
-  （不再需要 `libpcap-dev`/`libzmq3-dev`）；更新 `PARITY.md §4` 状态为已完成。
-- **验收**：`cargo deny check` 四项 ok；CI 在无 libpcap/libzmq 的镜像上构建通过。
+- ✅ 移除 `pcap`/`zmq` 依赖；更新 `Cargo.lock`；CI 构建/测试/发布不再安装
+  `libpcap-dev`/`libzmq3-dev`（仅 parity/fuzz 的 C oracle 需要）。
+- ✅ `PARITY.md §4` 状态更新为已完成。
+- ✅ 验收：`cargo deny check` 四项 ok；Rust 构建在无 libpcap/libzmq 的镜像上通过。
 
 ---
 

@@ -69,7 +69,7 @@ collector 解码并对账。同一 seed 跨进程 trace 摘要一致，可精确
 
 ### 1.5 覆盖率引导的 Fuzz（cargo-fuzz / libFuzzer）
 
-`crates/cpworker/fuzz/` 下有 8 个 fuzz target（nightly + ASAN + libFuzzer）：
+`crates/cpworker/fuzz/` 下有 9 个 fuzz target（nightly + ASAN + libFuzzer）：
 
 | target | 对象 |
 |---|---|
@@ -78,6 +78,7 @@ collector 解码并对账。同一 seed 跨进程 trace 摘要一致，可精确
 | `vxlan` | `vxlan_encapsulate`（校验和/capture_time） |
 | `zmq_batch` | `BatchBuilder`（VLAN/MPLS，issue #231 回归） |
 | `sim_dst` | 整个确定性仿真 + 不变量 |
+| `bpf` | BPF 解析/编译/解释（任意表达式 + 任意报文） |
 | `zmtp_wire` | ZMTP greeting/帧/命令编解码（含长度上限） |
 | `zmtp_client` | 非阻塞 ZMTP 客户端状态机（模拟垃圾握手/截断/中断/HWM 的混沌驱动） |
 | `diff_oracle` | C/Go 差分（见 §1.6，由 `parity/difffuzz.sh` 驱动） |
@@ -210,29 +211,46 @@ parity/run.sh 5000 42     # packet_split: C vs Rust
 * `decodeContainerId`：含 `docker://`、`containerd://`、多 NIC。
 * `cpu_set_parse`：C 的全部边界用例（`,`、`1,`、`1-,2`、`3-1`、`""`…）。
 
-## 4. "纯 Rust" 现状
+## 4. "纯 Rust" 现状（已完成）
 
-| C 依赖 | 现状 | 计划替代 |
-|---|---|---|
-| **libzmq** | ✅ **已移除**（纯 Rust ZMTP 3.x `PUSH`，`crates/cpworker/src/zmtp/`） | — |
-| **libpcap** | ⚠️ 仍在：`pcap` crate 仅用于实时抓包（`capturer/libpcap.rs`）；pcap 文件读/写和离线过滤已是纯 Rust | 裸 `AF_PACKET` + 自研 tcpdump BPF 子集编译器 |
-| libc（raw socket/syscall） | `libc` crate | 系统调用，非第三方 C 库 |
+**`cargo build` / `cargo test` 不再链接任何 C 库。**
 
-**libzmq 已完成的替代**（`crates/cpworker/src/zmtp/`）：
+| 原 C 依赖 | 替代 |
+|---|---|
+| **libpcap**（实时抓包） | ✅ 裸 `AF_PACKET`（`capturer/af_packet.rs`）：`SOCK_RAW` + `SO_RCVBUF` + `SO_TIMESTAMPNS` + `PACKET_STATISTICS` |
+| **libpcap**（BPF 编译/挂载） | ✅ 自研 tcpdump 子集编译器（`bpf/`），Linux 用 `SO_ATTACH_FILTER` |
+| **libpcap**（pcap 文件读/写） | ✅ 纯 Rust（`capturer/pcap_file.rs`、`output/pcap_writer.rs`）|
+| **libzmq**（ZMQ 输出） | ✅ 纯 Rust ZMTP 3.x `PUSH`（`zmtp/`）|
+| libc / nix（syscall 绑定） | 保留（不是任务 C 代码）|
 
-* `codec.rs`：ZMTP 3.x greeting / `READY` / 帧编解码（纯函数，直接 fuzz）。
-* `client.rs`：非阻塞 `PUSH` 状态机（非阻塞 connect、NULL 安全握手、HWM 排队/丢弃、
+### BPF 子集（`crates/cpworker/src/bpf/`）
+
+* `parser.rs` → `compiler.rs`：`host`/`net`/`port`/`portrange`/`ether host`、`src`/`dst`、
+  `ip`/`ip6`/`arp`/`rarp`/`tcp`/`udp`/`icmp`/`icmp6`、`and`/`or`/`not`/括号。
+  语义对齐 tcpdump（IPv6 分片头 `0x2c`、IPv4 分片偏移、bare `port` 含 SCTP、`net` 掩码）。
+  不支持的关键字（`vlan` 等）**明确报错**。
+* `interp.rs`：安全 cBPF 解释器（越界 load → drop，无 `unsafe`），用于离线过滤与对拍。
+* `linux.rs`：`SO_ATTACH_FILTER`（唯一 OS 相关部分；编译器本身平台无关）。
+* 对拍：`parity/verify_bpf.sh` 用 **libpcap `pcap_offline_filter`** 在同一批随机
+  表达式/报文上逐包比较决策（`parity/c_bpf.c` + `bpf_eval`）。
+* fuzz：`bpf` target（任意表达式 + 任意报文，不得 panic）。
+
+### ZMTP（`crates/cpworker/src/zmtp/`）
+
+* `codec.rs`：ZMTP 3.x greeting / `READY` / 帧编解码（纯函数）。
+* `client.rs`：非阻塞 `PUSH` 状态机（非阻塞 connect、NULL 握手、HWM 排队/丢弃、
   自动重连退避、`PING`→`PONG`；transport/connector 可注入）。
-* 对拍：`parity/verify_zmtp.sh` 用**真实 libzmq PULL** 接收，验证 wire 逐字节一致
-  （small / empty / long / 64 KiB）。
-* 强 fuzz：`zmtp_wire`（编解码）、`zmtp_client`（模拟错误协议/截断/中断/HWM 的混沌状态机），
-  以及真实 TCP 集成测试（并发发送、服务端中途断开→重连重发）。
+* 对拍：`parity/verify_zmtp.sh` 用**真实 libzmq PULL** 验证 wire 逐字节一致。
+* fuzz：`zmtp_wire` + `zmtp_client`；真实 TCP 集成测试（并发/断开重连）。
 
-> **“纯 Rust”的定义**：本项目的目标是**不链接任何 C 库**。
-> `libc` 只是一个声明系统调用与常量 ABI 的 crate（不是任务 C 代码），会一直保留。
->
-> 去 C 依赖对应改进计划 P3；libpcap 移除前需先完成用户配置中 BPF 表达式的分布审计
-> （已初步完成：实际只用到 `host X` / `udp` / `udp and port N` 等很小子集）。
+### Windows 延展性
+
+编译器、pcap 文件 I/O、ZMTP 均为平台无关；平台相关代码集中在
+`capturer/af_packet.rs`（`#[cfg(target_os = "linux")]`）与 `bpf/linux.rs` 的 attach。
+未来 Windows 支持只需新增后端（实时抓包需 Npcap 或驱动 + 对应 attach），不影响共享代码。
+
+> **”纯 Rust”的定义**：不链接任何 C 库（`libc`/`nix` 仅声明 syscall ABI，保留）。
+> 去 C 依赖对应改进计划 P3，**已完成**。离线 `pcap_file` 过滤也已接入纯 Rust BPF。
 
 ## 5. 剩余工作与范围决策
 
