@@ -199,3 +199,24 @@ WP2 与 WP3 可并行；M1 必须最先（唯一可能"完全无数据"的缺陷
 ### 下一步
 
 - **M2**：采集面语义等价（P5-02 `PACKET_STATISTICS`、P5-03 VLAN、P5-05 `SO_RCVBUF`、P5-09 启动空窗 + P5-16 live CI）。
+
+### M2 已完成
+
+- ✅ **P5-02 `PACKET_STATISTICS`**：实测确认它是**读后清零**（连续两次读取无流量 → 0），
+  改为按“本窗口增量直接累加”；`DropCounter` 纯逻辑单测覆盖“上窗口 5 → 本窗口 0 不再产生
+  ~4.29e9 假值”。
+- ✅ **P5-03 VLAN/AUXDATA**：启用 `PACKET_AUXDATA`，解析 `tpacket_auxdata`，
+  `TP_STATUS_VLAN_VALID` 时在 MAC 后重插 802.1Q 头；veth 端到端测试验证
+  （内核确实剥离标签：`auxdata_vlan=1 tci=100`）。
+- ✅ **P5-05 `SO_RCVBUF`**：优先 `SO_RCVBUFFORCE`（需 `CAP_NET_ADMIN`），失败回退；
+  `getsockopt` 回读实际值，被 `net.core.rmem_max` 截断时告警。root 下实测 `SO_RCVBUF=512MiB`。
+- ✅ **P5-09 启动空窗**：socket 以协议 0 创建 → 挂 BPF → 再 `bind(ETH_P_ALL, ifindex)`。
+- ✅（顺带）**P5-12 错误日志限速**、**P5-13 recv-first + 常驻非阻塞**、
+  **P5-14 cmsg 用 libc 宏 + 时间戳启用失败告警**。
+- ✅ **P5-16 live CI job**：`.github/workflows/ci.yml` 新增 privileged `live-capture` job。
+- 验证：`cargo test --workspace` **116 passed**；clippy/deny ok；root 下 2 个 `#[ignore]`
+  live 测试通过（lo 过滤 + veth VLAN 重插）。
+
+### 下一步
+
+- **M3**：输出与生命周期（P5-04 `destroy()`、P5-10 ZMTP 超时/keepalive/重解析、P5-11 内存上限）。

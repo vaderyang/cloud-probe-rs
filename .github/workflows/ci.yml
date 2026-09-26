@@ -39,6 +39,23 @@ jobs:
       - run: cargo build --workspace --all-targets
       - run: cargo test --workspace
 
+  live-capture:
+    name: live capture (privileged)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build the live-capture test
+        run: cargo test -p cpworker --test af_packet_live --no-run
+      - name: Run AF_PACKET capture test on lo as root
+        # Covers the real AF_PACKET path (socket/bind ordering, SO_ATTACH_FILTER,
+        # SO_RCVBUFFORCE with CAP_NET_ADMIN, timestamps) that the other jobs skip.
+        run: |
+          BIN=$(find target/debug/deps -maxdepth 1 -type f -name 'af_packet_live-*' ! -name '*.d' | head -n1)
+          echo "running $BIN"
+          sudo -E "$BIN" --ignored --nocapture
+
   clippy:
     name: clippy
     runs-on: ubuntu-latest

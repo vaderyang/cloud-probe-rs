@@ -1,13 +1,15 @@
 //! `AF_PACKET` live capturer (Linux). Replaces the libpcap live capturer.
 //!
-//! Uses a `SOCK_RAW` `AF_PACKET` socket bound to the configured interface, a
-//! large `SO_RCVBUF`, kernel `SO_TIMESTAMPNS` timestamps, a classic-BPF program
-//! attached with `SO_ATTACH_FILTER`, and `PACKET_STATISTICS` for drop counters.
-//! The bpf and netns plumbing live in platform-neutral/other modules so a
-//! different OS backend could reuse them.
+//! Uses a non-blocking `SOCK_RAW` `AF_PACKET` socket bound to the configured
+//! interface, a large `SO_RCVBUF` (preferring `SO_RCVBUFFORCE`) with a read-back
+//! warning, kernel `SO_TIMESTAMPNS` timestamps, `PACKET_AUXDATA` for 802.1Q VLAN
+//! tags, a classic-BPF program attached with `SO_ATTACH_FILTER` *before* the
+//! bind (to avoid an unfiltered startup window), and `PACKET_STATISTICS` for drop
+//! counters. The bpf and netns plumbing live in platform-neutral/other modules
+//! so a different OS backend could reuse them.
 
 use std::ffi::CString;
-use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
+use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -23,6 +25,11 @@ use crate::stats::CaptureStats;
 
 const DROP_STAT_DUR_SEC: i64 = 2;
 const ETH_P_ALL: u16 = 0x0003;
+const DEFAULT_VLAN_TPID: u16 = 0x8100;
+/// Ethernet header (`dst` + `src` + ethertype) length; VLAN is inserted after
+/// the 12 address bytes.
+const ETH_HDR_MIN: usize = 14;
+const VLAN_HDR_LEN: usize = 4;
 
 #[repr(C)]
 struct TpacketStats {
@@ -30,11 +37,59 @@ struct TpacketStats {
     tp_drops: u32,
 }
 
+/// `struct tpacket_auxdata` (`linux/if_packet.h`).
+#[repr(C)]
+struct TpacketAuxdata {
+    tp_status: u32,
+    tp_len: u32,
+    tp_snaplen: u32,
+    tp_mac: u16,
+    tp_net: u16,
+    tp_vlan_tci: u16,
+    tp_vlan_tpid: u16,
+}
+
+#[derive(Clone, Copy)]
+struct VlanTag {
+    tci: u16,
+    tpid: u16,
+}
+
 struct RecvMeta {
     ts_sec: i64,
     ts_usec: i64,
     caplen: u32,
     len: u32,
+}
+
+/// Accumulates `PACKET_STATISTICS` drops on the 2-second cadence.
+///
+/// Linux `getsockopt(PACKET_STATISTICS)` is **read-cleared**: it returns the
+/// counters accumulated since the previous read and resets them. Each sample is
+/// therefore a delta that must be added directly; the first read is discarded as
+/// a baseline. (Treating it as a cumulative counter and subtracting produced
+/// ~4.29e9 bogus drop counts whenever a window had fewer drops than the last.)
+#[derive(Default)]
+struct DropCounter {
+    started: bool,
+    prev_time: i64,
+}
+
+impl DropCounter {
+    fn due(&self, now: i64) -> bool {
+        !self.started || now - self.prev_time >= DROP_STAT_DUR_SEC
+    }
+
+    /// Feed one sample at time `now`, returning the packets to account.
+    fn update(&mut self, now: i64, sample: Option<u32>) -> u64 {
+        let baseline = !self.started;
+        self.started = true;
+        self.prev_time = now;
+        if baseline {
+            return 0;
+        }
+        sample.map_or(0, u64::from)
+    }
 }
 
 fn errno() -> i32 {
@@ -61,32 +116,100 @@ fn interface_index(name: &str) -> Result<u32> {
     Ok(idx)
 }
 
-fn open_socket(interface: &str, buffer_size: i32, nonblock: bool) -> Result<OwnedFd> {
-    let mut flags = libc::SOCK_RAW | libc::SOCK_CLOEXEC;
-    if nonblock {
-        flags |= libc::SOCK_NONBLOCK;
-    }
-    // SAFETY: plain socket(2) call.
-    let raw = unsafe { libc::socket(libc::AF_PACKET, flags, i32::from(ETH_P_ALL.to_be())) };
-    if raw < 0 {
-        return Err(Error::new(format!("socket(AF_PACKET) error: {}", errno())));
-    }
-    // SAFETY: `raw` is a fresh fd we own.
-    let fd = unsafe { OwnedFd::from_raw_fd(raw) };
-
-    let sz: i32 = buffer_size;
-    // SAFETY: valid pointer/size for SO_RCVBUF.
+fn setsockopt_i32(fd: RawFd, level: i32, name: i32, val: i32) -> std::io::Result<()> {
+    // SAFETY: `val` is a valid `i32` of the given size.
     let rc = unsafe {
         libc::setsockopt(
-            fd.as_raw_fd(),
-            libc::SOL_SOCKET,
-            libc::SO_RCVBUF,
-            std::ptr::addr_of!(sz).cast::<libc::c_void>(),
+            fd,
+            level,
+            name,
+            std::ptr::addr_of!(val).cast::<libc::c_void>(),
             std::mem::size_of::<i32>() as libc::socklen_t,
         )
     };
     if rc != 0 {
-        crate::log_warn!("set SO_RCVBUF({buffer_size}) error: {}", errno());
+        Err(std::io::Error::last_os_error())
+    } else {
+        Ok(())
+    }
+}
+
+/// Request `requested` bytes of receive buffer, preferring `SO_RCVBUFFORCE`
+/// (needs `CAP_NET_ADMIN`), then read the value back and warn if the kernel
+/// silently clamped it (to `net.core.rmem_max`).
+fn set_rcvbuf(fd: RawFd, requested: i32) {
+    let force = setsockopt_i32(fd, libc::SOL_SOCKET, libc::SO_RCVBUFFORCE, requested);
+    if force.is_err() {
+        if let Err(e) = setsockopt_i32(fd, libc::SOL_SOCKET, libc::SO_RCVBUF, requested) {
+            crate::log_warn!("set SO_RCVBUF({requested}) error: {e}");
+            return;
+        }
+    }
+    let mut applied: i32 = 0;
+    let mut len = std::mem::size_of::<i32>() as libc::socklen_t;
+    // SAFETY: valid pointer/size for SO_RCVBUF.
+    let rc = unsafe {
+        libc::getsockopt(
+            fd,
+            libc::SOL_SOCKET,
+            libc::SO_RCVBUF,
+            std::ptr::addr_of_mut!(applied).cast::<libc::c_void>(),
+            &mut len,
+        )
+    };
+    if rc != 0 {
+        crate::log_warn!("read back SO_RCVBUF error: {}", errno());
+    } else if applied < requested {
+        crate::log_warn!(
+            "SO_RCVBUF applied {applied} < requested {requested} (limited by net.core.rmem_max; \
+             SO_RCVBUFFORCE needs CAP_NET_ADMIN)"
+        );
+    } else {
+        crate::log_info!("SO_RCVBUF={applied}");
+    }
+}
+
+/// Create the capture socket with protocol 0. Packets only start flowing after
+/// `bind(ETH_P_ALL, ifindex)`, which lets us attach the BPF filter first and
+/// avoids an unfiltered window (P5-09).
+fn create_socket() -> Result<OwnedFd> {
+    // SAFETY: plain socket(2) call.
+    let raw = unsafe {
+        libc::socket(
+            libc::AF_PACKET,
+            libc::SOCK_RAW | libc::SOCK_CLOEXEC | libc::SOCK_NONBLOCK,
+            0,
+        )
+    };
+    if raw < 0 {
+        return Err(Error::new(format!("socket(AF_PACKET) error: {}", errno())));
+    }
+    // SAFETY: `raw` is a fresh fd we own.
+    Ok(unsafe { OwnedFd::from_raw_fd(raw) })
+}
+
+/// Configure the socket and finally bind it to `interface`.
+fn configure_and_bind(
+    fd: RawFd,
+    interface: &str,
+    buffer_size: i32,
+    program: Option<&Program>,
+) -> Result<()> {
+    set_rcvbuf(fd, buffer_size);
+
+    if let Err(e) = setsockopt_i32(fd, libc::SOL_SOCKET, libc::SO_TIMESTAMPNS, 1) {
+        crate::log_warn!(
+            "enable SO_TIMESTAMPNS failed: {e}; timestamps will fall back to wall clock"
+        );
+    }
+    if let Err(e) = setsockopt_i32(fd, libc::SOL_PACKET, libc::PACKET_AUXDATA, 1) {
+        crate::log_warn!("enable PACKET_AUXDATA failed: {e}; VLAN tags may be missing");
+    }
+
+    // Attach the filter before bind so the very first received packet is filtered.
+    if let Some(p) = program {
+        bpf::attach_filter(fd, p)
+            .map_err(|e| Error::new(format!("attach bpf filter error: {e}")))?;
     }
 
     let ifindex = i32::try_from(interface_index(interface)?).unwrap_or(i32::MAX);
@@ -98,7 +221,7 @@ fn open_socket(interface: &str, buffer_size: i32, nonblock: bool) -> Result<Owne
     // SAFETY: `sll` is fully initialized above.
     let rc = unsafe {
         libc::bind(
-            fd.as_raw_fd(),
+            fd,
             std::ptr::addr_of!(sll).cast::<libc::sockaddr>(),
             std::mem::size_of::<libc::sockaddr_ll>() as libc::socklen_t,
         )
@@ -109,44 +232,74 @@ fn open_socket(interface: &str, buffer_size: i32, nonblock: bool) -> Result<Owne
             errno()
         )));
     }
-
-    // Best-effort kernel timestamps; fall back to wall clock if unavailable.
-    let one: i32 = 1;
-    // SAFETY: valid pointer/size for SO_TIMESTAMPNS.
-    unsafe {
-        libc::setsockopt(
-            fd.as_raw_fd(),
-            libc::SOL_SOCKET,
-            libc::SO_TIMESTAMPNS,
-            std::ptr::addr_of!(one).cast::<libc::c_void>(),
-            std::mem::size_of::<i32>() as libc::socklen_t,
-        );
-    }
-    Ok(fd)
+    Ok(())
 }
 
-/// Parse an `SCM_TIMESTAMPNS` control message, returning `(sec, usec)`.
-fn parse_timestamp(cmsg: &[u8]) -> Option<(i64, i64)> {
-    let mut off = 0usize;
-    while off + 16 <= cmsg.len() {
-        let len = u64::from_ne_bytes(cmsg[off..off + 8].try_into().ok()?) as usize;
-        let level = i32::from_ne_bytes(cmsg[off + 8..off + 12].try_into().ok()?);
-        let typ = i32::from_ne_bytes(cmsg[off + 12..off + 16].try_into().ok()?);
-        if len < 16 || off + len > cmsg.len() {
-            break;
-        }
-        if level == libc::SOL_SOCKET && typ == libc::SO_TIMESTAMPNS && len >= 32 {
-            let sec = i64::from_ne_bytes(cmsg[off + 16..off + 24].try_into().ok()?);
-            let nsec = i64::from_ne_bytes(cmsg[off + 24..off + 32].try_into().ok()?);
-            return Some((sec, nsec / 1000));
-        }
-        let aligned = (len + 7) & !7;
-        if aligned == 0 {
-            break;
-        }
-        off += aligned;
+/// Reinsert a stripped 802.1Q header after the 12 MAC bytes. Returns the new
+/// captured length (unchanged if the frame is too short or `buf` has no room).
+fn insert_vlan(buf: &mut [u8], caplen: usize, tag: VlanTag) -> usize {
+    if caplen < ETH_HDR_MIN || buf.len() < caplen + VLAN_HDR_LEN {
+        return caplen;
     }
-    None
+    buf.copy_within(12..caplen, 12 + VLAN_HDR_LEN);
+    buf[12..14].copy_from_slice(&tag.tpid.to_be_bytes());
+    buf[14..16].copy_from_slice(&tag.tci.to_be_bytes());
+    caplen + VLAN_HDR_LEN
+}
+
+/// Walk the control messages of a filled `msghdr`, returning the
+/// `SCM_TIMESTAMPNS` timestamp and any `PACKET_AUXDATA` VLAN tag.
+///
+/// # Safety
+/// `msg` must come from a `recvmsg` call whose `msg_control` buffer is valid for
+/// `msg_controllen` bytes.
+unsafe fn parse_control(msg: &libc::msghdr) -> (Option<(i64, i64)>, Option<VlanTag>) {
+    let mut ts = None;
+    let mut vlan = None;
+    let align = std::mem::align_of::<libc::cmsghdr>();
+    let header = (std::mem::size_of::<libc::cmsghdr>() + align - 1) & !(align - 1);
+    let start = msg.msg_control as *const u8;
+    let end = start.add(msg.msg_controllen);
+    let mut cmsg = libc::CMSG_FIRSTHDR(msg);
+    while !cmsg.is_null() && (cmsg as *const u8) < end {
+        let c = &*cmsg;
+        let clen = c.cmsg_len;
+        if clen < header {
+            break;
+        }
+        let data = libc::CMSG_DATA(cmsg);
+        let dlen = clen - header;
+        if c.cmsg_level == libc::SOL_SOCKET && c.cmsg_type == libc::SO_TIMESTAMPNS && dlen >= 16 {
+            let t = std::ptr::read_unaligned(data as *const libc::timespec);
+            ts = Some((t.tv_sec as i64, (t.tv_nsec / 1000) as i64));
+        } else if c.cmsg_level == libc::SOL_PACKET
+            && c.cmsg_type == libc::PACKET_AUXDATA
+            && dlen >= std::mem::size_of::<TpacketAuxdata>()
+        {
+            let a = std::ptr::read_unaligned(data as *const TpacketAuxdata);
+            if a.tp_status & libc::TP_STATUS_VLAN_VALID != 0 {
+                let tpid = if a.tp_status & libc::TP_STATUS_VLAN_TPID_VALID != 0 {
+                    a.tp_vlan_tpid
+                } else {
+                    DEFAULT_VLAN_TPID
+                };
+                vlan = Some(VlanTag {
+                    tci: a.tp_vlan_tci,
+                    tpid,
+                });
+            }
+        }
+        let step = (clen + align - 1) & !(align - 1);
+        if step == 0 {
+            break;
+        }
+        let next = (cmsg as *const u8).add(step) as *mut libc::cmsghdr;
+        if next as *const u8 >= end {
+            break;
+        }
+        cmsg = next;
+    }
+    (ts, vlan)
 }
 
 /// Live capture from a network interface via `AF_PACKET`.
@@ -158,13 +311,12 @@ pub struct AfPacketCapturer {
     req_pattern: Option<ReqPattern>,
     snaplen: usize,
     timeout_ms: i32,
+    /// Frame buffer; `snaplen` usable bytes plus 4 spare for VLAN reinsertion.
     buf: Vec<u8>,
 
-    drop_stat_started: bool,
-    drop_stat_prev_time: i64,
-    prev_ps_drop: u32,
-    prev_ps_ifdrop: u32,
+    drops: DropCounter,
     next_error: Option<String>,
+    last_error_log: i64,
 }
 
 impl AfPacketCapturer {
@@ -238,12 +390,13 @@ impl AfPacketCapturer {
             }
         };
 
-        let nonblock = cfg.timeout_ms <= 0;
-        let fd = open_socket(&cfg.interface, buffer_size, nonblock)?;
-        if let Some(p) = program.as_ref() {
-            bpf::attach_filter(fd.as_raw_fd(), p)
-                .map_err(|e| Error::new(format!("attach bpf filter error: {e}")))?;
-        }
+        let fd = create_socket()?;
+        configure_and_bind(
+            fd.as_raw_fd(),
+            &cfg.interface,
+            buffer_size,
+            program.as_ref(),
+        )?;
 
         let snaplen = cfg.snaplen.max(1) as usize;
         Ok(AfPacketCapturer {
@@ -254,12 +407,10 @@ impl AfPacketCapturer {
             req_pattern: Some(req_pattern),
             snaplen,
             timeout_ms: cfg.timeout_ms,
-            buf: vec![0u8; snaplen],
-            drop_stat_started: false,
-            drop_stat_prev_time: 0,
-            prev_ps_drop: 0,
-            prev_ps_ifdrop: 0,
+            buf: vec![0u8; snaplen + VLAN_HDR_LEN],
+            drops: DropCounter::default(),
             next_error: None,
+            last_error_log: 0,
         })
     }
 
@@ -267,9 +418,11 @@ impl AfPacketCapturer {
     fn recv_into_buf(&mut self) -> std::io::Result<Option<RecvMeta>> {
         let mut iov = libc::iovec {
             iov_base: self.buf.as_mut_ptr().cast::<libc::c_void>(),
-            iov_len: self.buf.len(),
+            // Never read more than `snaplen` from the wire; the extra 4 bytes of
+            // `buf` are reserved for VLAN reinsertion.
+            iov_len: self.snaplen,
         };
-        let mut cmsg = [0u8; 64];
+        let mut cmsg = [0u8; 256];
         // SAFETY: zeroed msghdr is a valid starting state.
         let mut msg: libc::msghdr = unsafe { std::mem::zeroed() };
         msg.msg_iov = &mut iov;
@@ -285,10 +438,20 @@ impl AfPacketCapturer {
                 _ => return Err(e),
             }
         }
-        let len = n as u32;
-        let caplen = len.min(self.snaplen as u32);
-        let (ts_sec, ts_usec) = parse_timestamp(&cmsg[..msg.msg_controllen.min(cmsg.len())])
-            .unwrap_or_else(|| (now_sec(), 0));
+        let mut len = n as u32;
+        let mut caplen = len.min(self.snaplen as u32);
+
+        // SAFETY: `msg` was filled by recvmsg above.
+        let (ts, vlan) = unsafe { parse_control(&msg) };
+        if let Some(v) = vlan {
+            let new_caplen = insert_vlan(&mut self.buf, caplen as usize, v);
+            if new_caplen != caplen as usize {
+                caplen = new_caplen as u32;
+                len += VLAN_HDR_LEN as u32;
+            }
+        }
+
+        let (ts_sec, ts_usec) = ts.unwrap_or_else(|| (now_sec(), 0));
         Ok(Some(RecvMeta {
             ts_sec,
             ts_usec,
@@ -321,38 +484,21 @@ impl AfPacketCapturer {
     }
 
     fn update_drop_stats(&mut self, now: i64) {
-        if !self.drop_stat_started {
-            if let Some(drop) = self.read_stats() {
-                self.drop_stat_started = true;
-                self.prev_ps_drop = drop;
-                self.prev_ps_ifdrop = 0;
-                self.drop_stat_prev_time = now;
-            }
+        if !self.drops.due(now) {
             return;
         }
-        if now - self.drop_stat_prev_time < DROP_STAT_DUR_SEC {
-            return;
-        }
-        if let Some(drop) = self.read_stats() {
-            let drop_diff = drop.wrapping_sub(self.prev_ps_drop);
-            self.stats.drop_packets.add(u64::from(drop_diff));
-            // Linux does not report interface drops separately; libpcap also
-            // returns ps_ifdrop = 0.
-            let ifdrop_diff = 0u32.wrapping_sub(self.prev_ps_ifdrop);
-            self.stats.ifdrop_packets.add(u64::from(ifdrop_diff));
-            self.prev_ps_drop = drop;
-            self.prev_ps_ifdrop = 0;
-            self.drop_stat_prev_time = now;
-        }
+        let sample = self.read_stats();
+        let add = self.drops.update(now, sample);
+        self.stats.drop_packets.add(add);
     }
 }
 
 impl Capturer for AfPacketCapturer {
     fn capture_once(&mut self, sink: &mut dyn PacketSink) -> u64 {
-        let mut num_pkts = 0u64;
-        let now;
-
-        if self.timeout_ms > 0 {
+        // Try to receive first (the socket is always non-blocking); only when it
+        // would block and a timeout is configured do we wait for readability.
+        let mut res = self.recv_into_buf();
+        if self.timeout_ms > 0 && matches!(res, Ok(None)) {
             let mut pfd = libc::pollfd {
                 fd: self.fd.as_raw_fd(),
                 events: libc::POLLIN,
@@ -360,14 +506,14 @@ impl Capturer for AfPacketCapturer {
             };
             // SAFETY: single valid pollfd.
             let r = unsafe { libc::poll(&mut pfd, 1, self.timeout_ms) };
-            if r <= 0 {
-                sink.on_heartbeat();
-                self.update_drop_stats(now_sec());
-                return 0;
+            if r > 0 && (pfd.revents & libc::POLLIN) != 0 {
+                res = self.recv_into_buf();
             }
         }
 
-        match self.recv_into_buf() {
+        let mut num_pkts = 0u64;
+        let now;
+        match res {
             Ok(Some(meta)) => {
                 let hdr = PacketHeader {
                     ts_sec: meta.ts_sec,
@@ -403,9 +549,103 @@ impl Capturer for AfPacketCapturer {
 
         self.update_drop_stats(now);
 
+        // Rate-limit persistent errors to the drop-stat cadence (the C version
+        // gates its logging the same way) to avoid a log flood / busy loop when
+        // the interface goes away.
         if let Some(err) = self.next_error.take() {
-            crate::log_error!("{err}");
+            if now - self.last_error_log >= DROP_STAT_DUR_SEC {
+                crate::log_error!("{err}");
+                self.last_error_log = now;
+            }
         }
         num_pkts
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn drop_counter_adds_read_cleared_samples() {
+        // Regression for the read-cleared PACKET_STATISTICS semantics: a window
+        // with fewer drops than the previous one must NOT wrap (the old code
+        // subtracted and produced ~4.29e9).
+        let mut c = DropCounter::default();
+        assert_eq!(c.update(1000, Some(7)), 0); // baseline (clears kernel counter)
+        assert_eq!(c.update(1002, Some(5)), 5);
+        assert_eq!(c.update(1004, Some(0)), 0);
+        assert_eq!(c.update(1006, Some(9)), 9);
+    }
+
+    #[test]
+    fn drop_counter_cadence() {
+        let mut c = DropCounter::default();
+        assert!(c.due(1000));
+        c.update(1000, Some(1));
+        assert!(!c.due(1001));
+        assert!(c.due(1002));
+    }
+
+    #[test]
+    fn insert_vlan_reinserts_after_macs() {
+        // dst(6) src(6) ethertype(2) payload(4)
+        let mut buf = vec![0xaa; 18 + VLAN_HDR_LEN];
+        buf[12..14].copy_from_slice(&[0x08, 0x00]);
+        buf[14..18].copy_from_slice(&[1, 2, 3, 4]);
+        let n = insert_vlan(
+            &mut buf,
+            18,
+            VlanTag {
+                tci: 0x0164,
+                tpid: 0x8100,
+            },
+        );
+        assert_eq!(n, 22);
+        assert_eq!(&buf[12..14], &[0x81, 0x00]);
+        assert_eq!(&buf[14..16], &[0x01, 0x64]);
+        assert_eq!(&buf[16..18], &[0x08, 0x00]);
+        assert_eq!(&buf[18..22], &[1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn parse_control_reads_timestamp_and_vlan() {
+        let header = (std::mem::size_of::<libc::cmsghdr>() + 7) & !7;
+        let ts_len = header + 16;
+        let aux_len = header + std::mem::size_of::<TpacketAuxdata>();
+        let aux_off = ts_len;
+        let total = aux_off + ((aux_len + 7) & !7);
+        let mut cbuf = vec![0u8; total];
+
+        // SCM_TIMESTAMPNS
+        cbuf[0..8].copy_from_slice(&(ts_len as u64).to_ne_bytes());
+        cbuf[8..12].copy_from_slice(&libc::SOL_SOCKET.to_ne_bytes());
+        cbuf[12..16].copy_from_slice(&libc::SO_TIMESTAMPNS.to_ne_bytes());
+        cbuf[16..24].copy_from_slice(&1234i64.to_ne_bytes());
+        cbuf[24..32].copy_from_slice(&500_000_000i64.to_ne_bytes());
+
+        // PACKET_AUXDATA
+        cbuf[aux_off..aux_off + 8].copy_from_slice(&(aux_len as u64).to_ne_bytes());
+        cbuf[aux_off + 8..aux_off + 12].copy_from_slice(&libc::SOL_PACKET.to_ne_bytes());
+        cbuf[aux_off + 12..aux_off + 16].copy_from_slice(&libc::PACKET_AUXDATA.to_ne_bytes());
+        let d = aux_off + 16;
+        let status = libc::TP_STATUS_VLAN_VALID | libc::TP_STATUS_VLAN_TPID_VALID;
+        cbuf[d..d + 4].copy_from_slice(&status.to_ne_bytes());
+        cbuf[d + 16..d + 18].copy_from_slice(&0x0164u16.to_ne_bytes()); // tci
+        cbuf[d + 18..d + 20].copy_from_slice(&0x88a8u16.to_ne_bytes()); // tpid
+
+        // SAFETY: cbuf is laid out as a well-formed control message buffer.
+        let msg = unsafe {
+            let mut m: libc::msghdr = std::mem::zeroed();
+            m.msg_control = cbuf.as_mut_ptr().cast::<libc::c_void>();
+            m.msg_controllen = total;
+            m
+        };
+        // SAFETY: msg points at cbuf for `total` bytes.
+        let (ts, vlan) = unsafe { parse_control(&msg) };
+        assert_eq!(ts, Some((1234, 500_000)));
+        let v = vlan.expect("vlan tag");
+        assert_eq!(v.tci, 0x0164);
+        assert_eq!(v.tpid, 0x88a8);
     }
 }

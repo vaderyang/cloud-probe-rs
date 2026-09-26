@@ -217,11 +217,22 @@ parity/run.sh 5000 42     # packet_split: C vs Rust
 
 | 原 C 依赖 | 替代 |
 |---|---|
-| **libpcap**（实时抓包） | ✅ 裸 `AF_PACKET`（`capturer/af_packet.rs`）：`SOCK_RAW` + `SO_RCVBUF` + `SO_TIMESTAMPNS` + `PACKET_STATISTICS` |
+| **libpcap**（实时抓包） | ✅ 裸 `AF_PACKET`（`capturer/af_packet.rs`）：`SOCK_RAW` + `SO_RCVBUF`/`SO_RCVBUFFORCE`（回读+告警）+ `SO_TIMESTAMPNS` + `PACKET_AUXDATA`（VLAN）+ `PACKET_STATISTICS`；**先挂 BPF 再 bind** |
 | **libpcap**（BPF 编译/挂载） | ✅ 自研 tcpdump 子集编译器（`bpf/`），Linux 用 `SO_ATTACH_FILTER` |
 | **libpcap**（pcap 文件读/写） | ✅ 纯 Rust（`capturer/pcap_file.rs`、`output/pcap_writer.rs`）|
 | **libzmq**（ZMQ 输出） | ✅ 纯 Rust ZMTP 3.x `PUSH`（`zmtp/`）|
 | libc / nix（syscall 绑定） | 保留（不是任务 C 代码）|
+
+采集面语义（AUDIT4 P5-02/03/05/09）：
+
+* **丢包统计**：`getsockopt(PACKET_STATISTICS)` 是**读后清零**，每个样本是"自上次读取以来的增量"，
+  直接累加；首次读取作基线。`ps_ifdrop` 在 Linux 恒为 0（与 libpcap 一致）。
+* **VLAN**：启用 `PACKET_AUXDATA`，内核剥离标签后由 `TP_STATUS_VLAN_VALID`/`tp_vlan_tci`
+  在 MAC 后重插 4 字节 802.1Q 头（TPID 取 `tp_vlan_tpid`，缺省 0x8100）。
+* **接收缓冲**：优先 `SO_RCVBUFFORCE`（需 `CAP_NET_ADMIN`），失败回退 `SO_RCVBUF`，
+  并用 `getsockopt` 回读实际值，被 `net.core.rmem_max` 截断时告警。
+* **启动无空窗**：socket 以协议 0 创建 → 挂 BPF → 再 `bind(ETH_P_ALL, ifindex)`，
+  避免 bind/挂过滤器之前收到未过滤流量。
 
 ### BPF 子集（`crates/cpworker/src/bpf/`）
 
@@ -253,8 +264,8 @@ parity/run.sh 5000 42     # packet_split: C vs Rust
 未来 Windows 支持只需新增后端（实时抓包需 Npcap 或驱动 + 对应 attach），不影响共享代码。
 
 > **实现差异（已知取舍）**：`AF_PACKET` 抓包用 `recvmsg` 而非 libpcap 的 TPACKET_V3
-> mmap 环形缓冲，因此**高吞吐下的丢包特征可能与 libpcap 不同**；`PACKET_STATISTICS`
-> 的 `tp_drops` 语义已对齐（`ps_ifdrop` Linux 恒为 0，与 libpcap 一致）。若需要与
+> mmap 环形缓冲，因此**高吞吐下的丢包特征可能与 libpcap 不同**；`PACKET_STATISTICS` 是
+> **读后清零**，实现按"本窗口增量直接累加"处理（详见上文采集面语义）。若需要与
 > libpcap 完全一致的吞吐/丢包曲线，可后续在 `af_packet.rs` 内加 mmap ring（不影响其他模块）。
 
 > **”纯 Rust”的定义**：不链接任何 C 库（`libc`/`nix` 仅声明 syscall ABI，保留）。

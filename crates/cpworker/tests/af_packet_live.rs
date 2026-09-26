@@ -38,6 +38,57 @@ fn privileged() -> bool {
     unsafe { libc::geteuid() == 0 }
 }
 
+fn run_ok(cmd: &str, args: &[&str]) {
+    let status = std::process::Command::new(cmd)
+        .args(args)
+        .status()
+        .unwrap_or_else(|e| panic!("spawn {cmd}: {e}"));
+    assert!(status.success(), "{cmd} {args:?} failed: {status}");
+}
+
+/// Send an 802.1Q-tagged Ethernet frame out of `ifname` via a raw socket.
+fn send_tagged_frame(ifname: &str, tci: u16) {
+    // SAFETY: raw AF_PACKET send with a fully initialized frame/sockaddr.
+    unsafe {
+        let fd = libc::socket(
+            libc::AF_PACKET,
+            libc::SOCK_RAW,
+            i32::from(0x0003u16.to_be()),
+        );
+        assert!(fd >= 0, "raw tx socket");
+        let cname = std::ffi::CString::new(ifname).unwrap();
+        let ifindex = libc::if_nametoindex(cname.as_ptr());
+        assert!(ifindex > 0, "unknown interface {ifname}");
+        let mut sll: libc::sockaddr_ll = std::mem::zeroed();
+        sll.sll_family = libc::AF_PACKET as u16;
+        sll.sll_protocol = 0x0003u16.to_be();
+        sll.sll_ifindex = ifindex as i32;
+        let mut frame = [0u8; 60];
+        for b in frame.iter_mut().take(6) {
+            *b = 0xff;
+        }
+        for b in frame.iter_mut().take(12).skip(6) {
+            *b = 0x11;
+        }
+        frame[12..14].copy_from_slice(&0x8100u16.to_be_bytes());
+        frame[14..16].copy_from_slice(&tci.to_be_bytes());
+        frame[16..18].copy_from_slice(&0x0800u16.to_be_bytes());
+        for (i, b) in frame.iter_mut().enumerate().skip(18) {
+            *b = i as u8;
+        }
+        let n = libc::sendto(
+            fd,
+            frame.as_ptr().cast::<libc::c_void>(),
+            frame.len(),
+            0,
+            std::ptr::addr_of!(sll).cast::<libc::sockaddr>(),
+            std::mem::size_of::<libc::sockaddr_ll>() as libc::socklen_t,
+        );
+        assert!(n > 0, "sendto failed");
+        libc::close(fd);
+    }
+}
+
 #[test]
 #[ignore = "requires CAP_NET_RAW (run with sudo) on lo"]
 fn live_capture_on_loopback_with_filter() {
@@ -96,4 +147,82 @@ fn live_capture_on_loopback_with_filter() {
         assert_eq!(u16::from_be_bytes([pkt[36], pkt[37]]), PORT);
     }
     assert!(stats.cap_packets.load().0 >= 1);
+}
+
+/// Create a veth pair and check that a stripped 802.1Q tag is re-inserted
+/// (`PACKET_AUXDATA`), matching what libpcap does.
+#[test]
+#[ignore = "requires CAP_NET_RAW (run with sudo); creates a veth pair"]
+fn live_capture_reinserts_vlan_on_veth() {
+    if !privileged() {
+        eprintln!("skipping: not root / no CAP_NET_RAW");
+        return;
+    }
+    const TCI: u16 = 100;
+
+    // Best-effort cleanup of any stale pair, then create a fresh one.
+    let _ = std::process::Command::new("ip")
+        .args(["link", "del", "veth0"])
+        .status();
+    run_ok(
+        "ip",
+        &[
+            "link", "add", "veth0", "type", "veth", "peer", "name", "veth1",
+        ],
+    );
+    run_ok("ip", &["link", "set", "veth0", "up"]);
+    run_ok("ip", &["link", "set", "veth1", "up"]);
+
+    struct Cleanup;
+    impl Drop for Cleanup {
+        fn drop(&mut self) {
+            let _ = std::process::Command::new("ip")
+                .args(["link", "del", "veth0"])
+                .status();
+        }
+    }
+    let _cleanup = Cleanup;
+    std::thread::sleep(std::time::Duration::from_millis(300));
+
+    let json = r#"{
+        "log_level": "INFO",
+        "execution_model": "rtc",
+        "tasks": [{
+            "capturer": { "type": "libpcap", "libpcap": {
+                "interface": "veth0", "timeout_ms": 200
+            } },
+            "outputs": []
+        }]
+    }"#;
+    let cfg = Config::parse_str(json).expect("parse config");
+    let tasks = cfg.tasks.clone();
+    let stats = Arc::new(CaptureStats::default());
+    let mut cap = new_capturer(&tasks, &tasks[0], stats).expect("capturer");
+
+    for _ in 0..10 {
+        send_tagged_frame("veth1", TCI);
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+
+    let mut sink = Collect::default();
+    let tagged = |p: &[u8]| {
+        p.len() >= 18
+            && p[12..14] == [0x81, 0x00]
+            && p[14..16] == TCI.to_be_bytes()
+            && p[16..18] == [0x08, 0x00]
+    };
+    for _ in 0..50 {
+        cap.capture_once(&mut sink);
+        if sink.pkts.iter().any(|p| tagged(p)) {
+            break;
+        }
+    }
+
+    let frame = sink
+        .pkts
+        .iter()
+        .find(|p| tagged(p))
+        .expect("no VLAN-tagged frame captured (AUXDATA not applied?)");
+    // Payload that followed the original ethertype must still be intact.
+    assert_eq!(frame[18], 0x12, "payload after reinserted VLAN tag shifted");
 }
