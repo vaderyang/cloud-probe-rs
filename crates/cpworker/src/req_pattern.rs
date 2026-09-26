@@ -16,10 +16,15 @@ use crate::packet::{
 };
 
 #[derive(Debug, Clone)]
+/// AST node of a custom req-pattern expression.
 pub enum Node {
+    /// Matches a host address.
     Host(IpAddr),
+    /// Matches a port.
     Port(u16),
+    /// Logical AND of two nodes.
     And(Box<Node>, Box<Node>),
+    /// Logical OR of two nodes.
     Or(Box<Node>, Box<Node>),
 }
 
@@ -35,10 +40,20 @@ impl Node {
 }
 
 #[derive(Debug, Clone)]
+/// Direction-matching strategy for a task.
 pub enum ReqPattern {
+    /// No direction checking.
     None,
-    Auto { mac: [u8; MAC_ADDR_LEN] },
-    Custom { ast: Box<Node> },
+    /// MAC-based matching against the interface MAC.
+    Auto {
+        /// The interface MAC address to match.
+        mac: [u8; MAC_ADDR_LEN],
+    },
+    /// Custom expression matching.
+    Custom {
+        /// Parsed expression AST.
+        ast: Box<Node>,
+    },
 }
 
 impl ReqPattern {
@@ -101,12 +116,16 @@ impl ReqPattern {
 }
 
 #[must_use]
+/// Evaluate a parsed custom pattern against an IP/port pair.
 pub fn custom_match_by_ipport(node: &Node, ip: &IpAddr, port: u16) -> bool {
     node.evaluate(ip, port)
 }
 
+/// Req-pattern type discriminant: no matching.
 pub const REQ_PATTERN_TYPE_NONE: i32 = 0;
+/// Req-pattern type discriminant: automatic matching.
 pub const REQ_PATTERN_TYPE_AUTO: i32 = 1;
+/// Req-pattern type discriminant: custom matching.
 pub const REQ_PATTERN_TYPE_CUSTOM: i32 = 2;
 
 #[allow(dead_code)]

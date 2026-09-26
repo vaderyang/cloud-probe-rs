@@ -36,6 +36,7 @@ struct ErrorInfo {
     other_send_error: String,
 }
 
+/// GRE tunnel output.
 pub struct GreOutput {
     stats: Arc<OutputStats>,
     throttle: Option<TokenBucket>,

@@ -11,6 +11,7 @@ use crate::error::{Error, Result};
 use crate::packet::PKT_DIR_UNKNOWN;
 use crate::stats::OutputStats;
 
+/// Rotating pcap file output.
 pub struct RotatingFileOutput {
     stats: Arc<OutputStats>,
     file_root: String,

@@ -6,50 +6,76 @@
 
 use std::fmt;
 
+/// Ethernet header length (no VLAN tag).
 pub const ETH_HDR_LEN: usize = 14;
+/// MAC address length in bytes.
 pub const MAC_ADDR_LEN: usize = 6;
+/// VLAN tag length in bytes.
 pub const VLAN_HDR_LEN: usize = 4;
+/// VXLAN header length in bytes.
 pub const VXLAN_HDR_LEN: usize = 8;
+/// GRE header length in bytes.
 pub const GRE_HDR_LEN: usize = 8;
 
+/// EtherType: IPv4.
 pub const ETHERTYPE_IP: u16 = 0x0800;
+/// EtherType: IPv6.
 pub const ETHERTYPE_IPV6: u16 = 0x86dd;
+/// EtherType: 802.1Q VLAN tag.
 pub const ETHERTYPE_VLAN: u16 = 0x8100;
+/// EtherType: 802.1ad provider bridging VLAN tag.
 pub const ETHERTYPE_DOT1AD: u16 = 0x88a8;
+/// EtherType: legacy VLAN tag 0x9100.
 pub const ETHERTYPE_VLAN_9100: u16 = 0x9100;
+/// EtherType: legacy VLAN tag 0x9200.
 pub const ETHERTYPE_VLAN_9200: u16 = 0x9200;
+/// EtherType: MPLS unicast.
 pub const ETHERTYPE_MPLS: u16 = 0x8847;
 
+/// IPv6 extension header: hop-by-hop options.
 pub const IPPROTO_HOPOPTS: u8 = 0;
+/// IP protocol: TCP.
 pub const IPPROTO_TCP: u8 = 6;
+/// IP protocol: UDP.
 pub const IPPROTO_UDP: u8 = 17;
+/// IPv6 extension header: routing.
 pub const IPPROTO_ROUTING: u8 = 43;
+/// IPv6 extension header: fragment.
 pub const IPPROTO_FRAGMENT: u8 = 44;
+/// IPv6 extension header: destination options.
 pub const IPPROTO_DSTOPTS: u8 = 60;
 
+/// Packet direction: unknown (dropped).
 pub const PKT_DIR_UNKNOWN: i32 = -1;
+/// Packet direction: not checked.
 pub const PKT_DIR_NONCHECK: i32 = 0;
+/// Packet direction: incoming.
 pub const PKT_DIR_INCOMING: i32 = 1;
+/// Packet direction: outgoing.
 pub const PKT_DIR_OUTGOING: i32 = 2;
 
 #[inline]
 #[must_use]
+/// Read a big-endian `u16` from the first two bytes of `b`.
 pub fn be16(b: &[u8]) -> u16 {
     u16::from_be_bytes([b[0], b[1]])
 }
 
 #[inline]
 #[must_use]
+/// Read a big-endian `u32` from the first four bytes of `b`.
 pub fn be32(b: &[u8]) -> u32 {
     u32::from_be_bytes([b[0], b[1], b[2], b[3]])
 }
 
 #[inline]
+/// Write `v` big-endian into the first two bytes of `b`.
 pub fn put_be16(b: &mut [u8], v: u16) {
     b[..2].copy_from_slice(&v.to_be_bytes());
 }
 
 #[inline]
+/// Write `v` big-endian into the first four bytes of `b`.
 pub fn put_be32(b: &mut [u8], v: u32) {
     b[..4].copy_from_slice(&v.to_be_bytes());
 }
@@ -57,11 +83,14 @@ pub fn put_be32(b: &mut [u8], v: u32) {
 /// IPv4/IPv6 address union, matching `ip_addr_t`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IpAddr {
+    /// IPv4 address (4 bytes).
     V4([u8; 4]),
+    /// IPv6 address (16 bytes).
     V6([u8; 16]),
 }
 
 impl IpAddr {
+    /// Format the address in its canonical textual form.
     #[must_use]
     pub fn format(&self) -> String {
         match self {
@@ -70,6 +99,7 @@ impl IpAddr {
         }
     }
 
+    /// The raw address bytes.
     #[must_use]
     pub fn as_bytes(&self) -> &[u8] {
         match self {
@@ -86,6 +116,7 @@ impl fmt::Display for IpAddr {
 }
 
 #[must_use]
+/// Format a MAC address as `aa:bb:cc:dd:ee:ff`.
 pub fn format_mac_addr(mac: &[u8; MAC_ADDR_LEN]) -> String {
     format!(
         "{:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}",
@@ -96,21 +127,35 @@ pub fn format_mac_addr(mac: &[u8; MAC_ADDR_LEN]) -> String {
 /// Result of parsing an Ethernet frame up to (but excluding) the payload.
 #[derive(Debug, Clone, Default)]
 pub struct PacketParseResult {
+    /// Frame carries IPv4.
     pub is_ipv4: bool,
+    /// Frame carries IPv6.
     pub is_ipv6: bool,
+    /// IPv4/IPv6 payload is TCP.
     pub is_tcp: bool,
+    /// IPv4/IPv6 payload is UDP.
     pub is_udp: bool,
+    /// Frame has at least one VLAN tag.
     pub has_vlan: bool,
 
+    /// Offset of the Ethernet header.
     pub eth_offset: usize,
+    /// Offset of the outermost VLAN tag (if any).
     pub vlan_offset: usize,
+    /// Offset of the IP header.
     pub ip_offset: usize,
+    /// Offset of the L4 (TCP/UDP) header.
     pub l4_offset: usize,
+    /// Offset of the L4 payload.
     pub payload_offset: usize,
 
+    /// IP header length in bytes.
     pub ip_hdr_len: usize,
+    /// Total length of IPv6 extension headers in bytes.
     pub ipv6_ext_len: usize,
+    /// L4 header length in bytes.
     pub l4_hdr_len: usize,
+    /// L4 payload length in bytes.
     pub payload_len: usize,
 }
 
@@ -265,11 +310,17 @@ pub fn parse_packet(pkt_data: &[u8]) -> Option<PacketParseResult> {
 /// Extract source/destination IP+port after descending through Ethernet, VLAN,
 /// IPv4/IPv6 and (heuristically for VXLAN) inner frames.
 pub struct IpPort {
+    /// Source IP address.
     pub src: IpAddr,
+    /// Source L4 port.
     pub sport: u16,
+    /// Destination IP address.
     pub dst: IpAddr,
+    /// Destination L4 port.
     pub dport: u16,
+    /// An IP layer was found.
     pub has_ip: bool,
+    /// An L4 port pair was found.
     pub has_port: bool,
 }
 

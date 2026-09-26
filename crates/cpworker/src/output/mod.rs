@@ -18,13 +18,18 @@ use crate::stats::OutputStats;
 /// Minimal packet metadata passed to outputs (replaces `struct pcap_pkthdr`).
 #[derive(Debug, Clone, Copy)]
 pub struct PacketHeader {
+    /// Capture timestamp, seconds.
     pub ts_sec: i64,
+    /// Capture timestamp, microseconds.
     pub ts_usec: i64,
+    /// Number of bytes captured.
     pub caplen: u32,
+    /// Original packet length on the wire.
     pub len: u32,
 }
 
 impl PacketHeader {
+    /// Capture timestamp as `(seconds, microseconds)`.
     #[must_use]
     pub fn ts(&self) -> (i64, i64) {
         (self.ts_sec, self.ts_usec)
@@ -33,10 +38,14 @@ impl PacketHeader {
 
 /// Common interface implemented by every output.
 pub trait Output: Send {
+    /// Forward one packet. `direct` is a `PKT_DIR_*` value; returns 0 on
+    /// success or a negative value on drop.
     fn send_packet(&mut self, hdr: &PacketHeader, pkt: &[u8], direct: i32) -> i32;
 
+    /// Periodic tick; outputs may emit heartbeats here.
     fn heartbeat(&mut self, _now: i64) {}
 
+    /// Flush and release resources on shutdown.
     fn destroy(&mut self) {}
 }
 

@@ -6,6 +6,8 @@
 //!   Capturer  ->  Task  ->  Output(s)
 //! ```
 
+#![warn(missing_docs)]
+
 pub mod affinity;
 pub mod capturer;
 pub mod config;

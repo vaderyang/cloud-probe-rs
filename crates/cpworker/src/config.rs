@@ -7,106 +7,173 @@ use std::path::Path;
 
 use crate::error::{Error, Result};
 
+/// Capturer type string: DPDK pdump (not yet ported).
 pub const CAPTURER_TYPE_DPDK_PDUMP: &str = "dpdk_pdump";
+/// Capturer type string: libpcap live capture.
 pub const CAPTURER_TYPE_LIBPCAP: &str = "libpcap";
+/// Capturer type string: offline pcap file replay.
 pub const CAPTURER_TYPE_PCAP_FILE: &str = "pcap_file";
 
+/// Req-pattern type string: no direction matching.
 pub const REQ_PATTERN_TYPE_NONE_STR: &str = "none";
+/// Req-pattern type string: automatic MAC-based matching.
 pub const REQ_PATTERN_TYPE_AUTO_STR: &str = "auto";
+/// Req-pattern type string: custom expression matching.
 pub const REQ_PATTERN_TYPE_CUSTOM_STR: &str = "custom";
 
+/// Output type string: VXLAN tunnel.
 pub const OUTPUT_TYPE_VXLAN: &str = "vxlan";
+/// Output type string: GRE tunnel.
 pub const OUTPUT_TYPE_GRE: &str = "gre";
+/// Output type string: ZMQ batch push.
 pub const OUTPUT_TYPE_ZMQ: &str = "zmq";
+/// Output type string: single pcap file.
 pub const OUTPUT_TYPE_FILE: &str = "file";
+/// Output type string: rotating pcap files.
 pub const OUTPUT_TYPE_ROTATING_FILE: &str = "rotating_file";
+/// Output type string: discard (null sink).
 pub const OUTPUT_TYPE_NULL: &str = "null";
 
+/// Control channel type string: unix domain socket.
 pub const CONTROL_TYPE_UNIX: &str = "unix";
 
+/// `IP_MTU_DISCOVER` mode: never set DF.
 pub const IP_PMTUDISC_DONT: i32 = 0;
+/// `IP_MTU_DISCOVER` mode: kernel default / want DF.
 pub const IP_PMTUDISC_WANT: i32 = 1;
+/// `IP_MTU_DISCOVER` mode: always set DF.
 pub const IP_PMTUDISC_DO: i32 = 2;
+/// `IP_MTU_DISCOVER` mode: probe path MTU without sending.
 pub const IP_PMTUDISC_PROBE: i32 = 3;
 
+/// Log level: trace.
 pub const LOG_TRACE: i32 = 0;
+/// Log level: debug.
 pub const LOG_DEBUG: i32 = 1;
+/// Log level: info.
 pub const LOG_INFO: i32 = 2;
+/// Log level: warning.
 pub const LOG_WARN: i32 = 3;
+/// Log level: error.
 pub const LOG_ERROR: i32 = 4;
+/// Log level: fatal.
 pub const LOG_FATAL: i32 = 5;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Task execution model.
 pub enum ExecutionModel {
+    /// Run-to-completion: each task forwards packets inline.
     Rtc,
+    /// Pipeline: capturers enqueue into a shared ring; an output thread drains it.
     Pipeline,
 }
 
 #[derive(Debug, Clone, Default)]
+/// VXLAN output fragmentation settings.
 pub struct SplitConfig {
+    /// Maximum payload size per fragment, in bytes.
     pub max_payload_size: u16,
+    /// Recompute inner packet checksums after splitting.
     pub recalculate_checksum: bool,
 }
 
 #[derive(Debug, Clone)]
+/// VXLAN output configuration.
 pub struct VxlanConfig {
+    /// Remote tunnel endpoint host.
     pub host: String,
+    /// Remote tunnel endpoint UDP port.
     pub port: u16,
+    /// Include a capture timestamp in the VXLAN header.
     pub capture_time: bool,
+    /// VXLAN header version.
     pub vni_version: u8,
+    /// VXLAN network identifier (VNI).
     pub vni: u32,
+    /// Restrict the tunnel socket to this interface (`SO_BINDTODEVICE`).
     pub bind_device: String,
+    /// Path-MTU-discovery mode (`IP_PMTUDISC_*`).
     pub pmtudisc: i32,
+    /// Fragmentation settings.
     pub split: SplitConfig,
 }
 
 #[derive(Debug, Clone)]
+/// GRE output configuration.
 pub struct GreConfig {
+    /// Remote tunnel endpoint host.
     pub host: String,
+    /// Service tag written into the GRE header.
     pub service_tag: u32,
+    /// Restrict the tunnel socket to this interface (`SO_BINDTODEVICE`).
     pub bind_device: String,
+    /// Path-MTU-discovery mode (`IP_PMTUDISC_*`).
     pub pmtudisc: i32,
 }
 
 #[derive(Debug, Clone)]
+/// ZMQ output configuration.
 pub struct ZmqConfig {
+    /// Collector host.
     pub host: String,
+    /// Collector port.
     pub port: u16,
+    /// ZMQ high-water mark.
     pub hwm: i32,
+    /// Service tag stamped into each batch.
     pub service_tag: u32,
+    /// Probe UUID string.
     pub uuid: String,
+    /// Heartbeat interval in milliseconds.
     pub heartbeat_ms: i32,
 }
 
 #[derive(Debug, Clone)]
+/// Single pcap file output configuration.
 pub struct FileConfig {
+    /// Destination file name.
     pub name: String,
 }
 
 #[derive(Debug, Clone)]
+/// Rotating pcap file output configuration.
 pub struct RotatingFileConfig {
+    /// Root directory for the generated files.
     pub file_root: String,
+    /// Maximum interval between file rotations, in seconds.
     pub max_file_interval: i32,
 }
 
 #[derive(Debug, Clone)]
+/// Output backend selection and its configuration.
 pub enum OutputKind {
+    /// VXLAN tunnel output.
     Vxlan(VxlanConfig),
+    /// GRE tunnel output.
     Gre(GreConfig),
+    /// ZMQ batch output.
     Zmq(ZmqConfig),
+    /// Single pcap file output.
     File(FileConfig),
+    /// Rotating pcap file output.
     RotatingFile(RotatingFileConfig),
+    /// Discard packets.
     Null,
 }
 
 #[derive(Debug, Clone)]
+/// One task output (a backend plus per-output options).
 pub struct OutputConfig {
+    /// Backend kind and configuration.
     pub kind: OutputKind,
+    /// Token-bucket rate limit in Mbps (0 = unlimited).
     pub rate_limit_mbps: u64,
+    /// Truncate forwarded packets to this many bytes (0 = no truncation).
     pub slice: i32,
 }
 
 impl OutputConfig {
+    /// The config string for this output's type.
     #[must_use]
     pub fn output_type(&self) -> &'static str {
         match self.kind {
@@ -132,38 +199,59 @@ impl OutputConfig {
 }
 
 #[derive(Debug, Clone)]
+/// libpcap live-capture configuration.
 pub struct LibpcapConfig {
+    /// Capture interface name.
     pub interface: String,
+    /// Snapshot length in bytes.
     pub snaplen: i32,
+    /// Network namespace to enter before capture (empty = current).
     pub netns: String,
+    /// BPF filter expression.
     pub bpf: String,
+    /// libpcap capture buffer size in MB.
     pub buffer_size_mb: i32,
+    /// Read timeout in milliseconds.
     pub timeout_ms: i32,
+    /// Exclude task output hosts from the BPF filter.
     pub not_filter_output_hosts: bool,
 }
 
 #[derive(Debug, Clone)]
+/// Offline pcap file replay configuration.
 pub struct PcapFileConfig {
+    /// Source pcap file name.
     pub file_name: String,
+    /// BPF filter expression.
     pub bpf: String,
 }
 
 #[derive(Debug, Clone)]
+/// DPDK pdump capturer configuration (not yet ported).
 pub struct DpdkPdumpConfig {
+    /// Capture interface name.
     pub interface: String,
+    /// Snapshot length in bytes.
     pub snaplen: i32,
+    /// BPF filter expression.
     pub bpf: String,
+    /// DPDK ring size.
     pub ring_size: i32,
 }
 
 #[derive(Debug, Clone)]
+/// Capturer backend selection and its configuration.
 pub enum CapturerKind {
+    /// libpcap live capture.
     Libpcap(LibpcapConfig),
+    /// Offline pcap file replay.
     PcapFile(PcapFileConfig),
+    /// DPDK pdump capture (not yet ported).
     DpdkPdump(DpdkPdumpConfig),
 }
 
 impl CapturerKind {
+    /// The config string for this capturer's type.
     #[must_use]
     pub fn capturer_type(&self) -> &'static str {
         match self {
@@ -173,6 +261,7 @@ impl CapturerKind {
         }
     }
 
+    /// Effective snapshot length for this capturer.
     #[must_use]
     pub fn snaplen(&self) -> i32 {
         match self {
@@ -194,37 +283,63 @@ impl CapturerKind {
 }
 
 #[derive(Debug, Clone)]
+/// Capturer selection for a task.
 pub struct CapturerConfig {
+    /// Capturer backend and its configuration.
     pub kind: CapturerKind,
 }
 
 #[derive(Debug, Clone)]
+/// Direction-matching requirement for a task.
 pub enum ReqPatternConfig {
+    /// No direction matching.
     None,
+    /// Automatic MAC-based matching.
     Auto,
-    Custom { pattern: String },
+    /// Custom pattern expression.
+    Custom {
+        /// The pattern expression string.
+        pattern: String,
+    },
 }
 
 #[derive(Debug, Clone)]
+/// One capture/forward task.
 pub struct TaskConfig {
+    /// Stable fingerprint identifying the task (optional).
     pub fingerprint: Option<String>,
+    /// Direction-matching requirement.
     pub req_pattern: ReqPatternConfig,
+    /// Capturer for this task.
     pub capturer: CapturerConfig,
+    /// Outputs for this task.
     pub outputs: Vec<OutputConfig>,
 }
 
 #[derive(Debug, Clone)]
+/// Control-channel configuration.
 pub enum ControlConfig {
-    UnixSocket { path: String },
+    /// Unix domain socket control channel.
+    UnixSocket {
+        /// Socket path.
+        path: String,
+    },
 }
 
 #[derive(Debug, Clone)]
+/// Top-level worker configuration (mirrors the on-disk JSON schema).
 pub struct Config {
+    /// Log level (`LOG_*`).
     pub log_level: i32,
+    /// CPU affinity list (empty = no pinning).
     pub cpu_affinity: String,
+    /// Task execution model.
     pub execution_model: ExecutionModel,
+    /// Pipeline ring buffer size in MB.
     pub pipeline_buffer_size_mb: i32,
+    /// Optional control channel.
     pub control: Option<ControlConfig>,
+    /// Tasks to run.
     pub tasks: Vec<TaskConfig>,
 }
 

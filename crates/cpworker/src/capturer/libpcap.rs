@@ -16,6 +16,7 @@ use crate::stats::CaptureStats;
 
 const DROP_STAT_DUR_SEC: i64 = 2;
 
+/// Live capture from a network interface via libpcap.
 pub struct LibpcapCapturer {
     stats: Arc<CaptureStats>,
     interface: String,

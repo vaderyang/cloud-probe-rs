@@ -124,6 +124,7 @@ struct ErrorInfo {
     other_send_error: String,
 }
 
+/// VXLAN tunnel output.
 pub struct VxlanOutput {
     stats: Arc<OutputStats>,
     throttle: Option<TokenBucket>,

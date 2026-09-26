@@ -8,6 +8,7 @@ use crate::packet::PKT_DIR_UNKNOWN;
 use crate::ratelimit::TokenBucket;
 use crate::stats::OutputStats;
 
+/// Discards all packets; used for benchmarking.
 pub struct NullOutput {
     stats: Arc<OutputStats>,
     throttle: Option<TokenBucket>,
@@ -15,6 +16,7 @@ pub struct NullOutput {
 }
 
 impl NullOutput {
+    /// Create a null output.
     pub fn new(cfg: &OutputConfig, stats: Arc<OutputStats>) -> Self {
         let throttle = if cfg.rate_limit_mbps > 0 {
             Some(TokenBucket::new(cfg.rate_limit_mbps * 1_000_000))

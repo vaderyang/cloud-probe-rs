@@ -20,8 +20,10 @@ use serde_json::{json, Value};
 use crate::error::{Error, Result};
 use crate::task::TaskManager;
 
+/// Control protocol version string.
 pub const PROTO_VERSION_V1: &str = "v1";
 
+/// Unix-domain-socket control server owning its accept thread.
 pub struct UnixManager {
     path: PathBuf,
     running: Arc<AtomicBool>,
@@ -76,6 +78,7 @@ impl UnixManager {
         })
     }
 
+    /// Stop the accept thread and remove the socket file.
     pub fn stop(&mut self) {
         self.running.store(false, Ordering::Release);
         if let Some(t) = self.thread.take() {

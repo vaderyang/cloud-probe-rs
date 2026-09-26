@@ -10,6 +10,7 @@ use std::path::Path;
 use crate::error::{Error, Result};
 use crate::output::PacketHeader;
 
+/// Link-layer type for Ethernet, as used by libpcap savefiles.
 pub const DLT_EN10MB: libc::c_int = 1;
 
 #[repr(C)]
@@ -28,6 +29,7 @@ extern "C" {
     fn pcap_close(p: *mut libc::c_void);
 }
 
+/// A libpcap savefile writer owning a dead pcap handle and its dumper.
 pub struct PcapWriter {
     pcap: *mut libc::c_void,
     dumper: *mut libc::c_void,
@@ -60,6 +62,7 @@ impl PcapWriter {
         Ok(PcapWriter { pcap, dumper })
     }
 
+    /// Append one packet to the savefile.
     pub fn write(&mut self, hdr: &PacketHeader, data: &[u8]) {
         // `pcap_dump` writes `hdr.caplen` bytes from the data pointer, so the
         // caller must guarantee the buffer is at least that long. All current
@@ -87,6 +90,7 @@ impl PcapWriter {
         }
     }
 
+    /// Flush buffered packets to disk.
     pub fn flush(&mut self) {
         unsafe {
             pcap_dump_flush(self.dumper);

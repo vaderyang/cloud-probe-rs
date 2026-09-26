@@ -11,22 +11,34 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+/// A message travelling through the pipeline ring.
 pub enum RingMsg {
+    /// A captured packet.
     Packet {
+        /// Owning task index.
         task_index: usize,
+        /// Packet direction (`PKT_DIR_*`).
         direction: i32,
+        /// Capture timestamp, seconds.
         ts_sec: i64,
+        /// Capture timestamp, microseconds.
         ts_usec: i64,
+        /// Captured length in bytes.
         caplen: u32,
+        /// Captured packet bytes.
         data: Vec<u8>,
     },
+    /// A heartbeat tick for a task.
     Heartbeat {
+        /// Owning task index.
         task_index: usize,
+        /// Timestamp, seconds.
         ts: i64,
     },
 }
 
 impl RingMsg {
+    /// Approximate memory footprint of this message in bytes.
     #[must_use]
     pub fn msg_len(&self) -> u64 {
         match self {
@@ -37,6 +49,7 @@ impl RingMsg {
         }
     }
 
+    /// Index of the task that produced this message.
     #[must_use]
     pub fn task_index(&self) -> usize {
         match self {
@@ -53,6 +66,7 @@ pub struct SpscRing {
 }
 
 impl SpscRing {
+    /// Create a ring holding at most `size` messages.
     #[must_use]
     pub fn new(size: usize) -> Self {
         SpscRing {
@@ -61,10 +75,12 @@ impl SpscRing {
         }
     }
 
+    /// Configured ring capacity in messages.
     pub fn size(&self) -> usize {
         self.size
     }
 
+    /// Number of messages currently queued.
     pub fn used(&self) -> usize {
         self.buf.lock().len()
     }
@@ -85,6 +101,7 @@ impl SpscRing {
     }
 
     /// Returns `false` when empty.
+    /// Pop the oldest message, or `None` when empty.
     pub fn pop(&self) -> Option<Box<RingMsg>> {
         self.buf.lock().pop_front()
     }
@@ -98,6 +115,7 @@ pub struct SimpleAllocator {
 }
 
 impl SimpleAllocator {
+    /// Create an allocator with a `capacity`-byte budget.
     #[must_use]
     pub fn new(capacity: u64) -> Self {
         SimpleAllocator {
@@ -106,14 +124,17 @@ impl SimpleAllocator {
         }
     }
 
+    /// Current byte budget.
     pub fn capacity(&self) -> u64 {
         self.capacity.load(Ordering::Relaxed)
     }
 
+    /// Bytes currently reserved.
     pub fn used(&self) -> u64 {
         self.used.load(Ordering::Relaxed)
     }
 
+    /// Change the byte budget.
     pub fn resize(&self, new_capacity: u64) {
         self.capacity.store(new_capacity, Ordering::Release);
     }
@@ -143,6 +164,7 @@ impl SimpleAllocator {
             });
     }
 
+    /// Allocate a packet message, or `None` if the byte budget is exceeded.
     pub fn alloc_packet(
         &self,
         task_index: usize,
@@ -165,6 +187,7 @@ impl SimpleAllocator {
         Some(msg)
     }
 
+    /// Allocate a heartbeat message, or `None` if the byte budget is exceeded.
     pub fn alloc_heartbeat(&self, task_index: usize) -> Option<Box<RingMsg>> {
         let ts = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -177,6 +200,7 @@ impl SimpleAllocator {
         Some(msg)
     }
 
+    /// Release the bytes accounted for by `msg`.
     pub fn free(&self, msg: &RingMsg) {
         self.release(msg.msg_len());
     }

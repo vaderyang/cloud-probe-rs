@@ -23,6 +23,7 @@ use crate::stats::{BytesStats, CaptureStats, OutputStats, PacketsStats};
 
 /// Outputs belonging to one task.
 pub struct TaskOutputs {
+    /// The task's configured outputs.
     pub outputs: Vec<Box<dyn Output>>,
 }
 
@@ -102,6 +103,7 @@ impl PacketSink for PipelineSink {
 }
 
 #[must_use]
+/// Current wall-clock time in seconds since the Unix epoch.
 pub fn now_sec() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -133,6 +135,7 @@ fn build_task(
     Ok((capturer, outputs))
 }
 
+/// Owns all tasks, their capturers and outputs, and the execution threads.
 pub struct TaskManager {
     config: Config,
     config_path: String,
@@ -238,35 +241,42 @@ impl TaskManager {
     }
 
     #[must_use]
+    /// Number of tasks successfully initialized.
     pub fn inited_count(&self) -> usize {
         self.inited_count
     }
 
+    /// Total number of configured tasks.
     #[must_use]
     pub fn total_tasks(&self) -> usize {
         self.config.tasks.len()
     }
 
+    /// Path of the config file this manager was created from.
     #[must_use]
     pub fn config_path(&self) -> &str {
         &self.config_path
     }
 
+    /// Working directory used when building tasks.
     #[must_use]
     pub fn working_dir(&self) -> &str {
         &self.working_dir
     }
 
+    /// Unix timestamp (seconds) at which the manager was created.
     #[must_use]
     pub fn started_at(&self) -> i64 {
         self.started_at
     }
 
+    /// The configured task execution model.
     #[must_use]
     pub fn execution_model(&self) -> ExecutionModel {
         self.config.execution_model
     }
 
+    /// Log per-task build errors recorded during construction.
     pub fn print_errors(&self) {
         for e in &self.entries {
             if let Some(err) = &e.error {
@@ -323,6 +333,7 @@ impl TaskManager {
         }
     }
 
+    /// Stop the pipeline output thread, if running, and join it.
     pub fn stop(&mut self) {
         if let Some(handle) = self.output_thread.take() {
             self.running.store(false, Ordering::Release);
@@ -437,6 +448,8 @@ impl TaskManager {
     /// Build the `collect_stats_summary` RPC payload. Mirrors
     /// `task_manager_collect_stats_summary_command`.
     #[must_use]
+    /// Build the `collect_stats_summary` RPC payload. Mirrors
+    /// `task_manager_collect_stats_summary_command`.
     pub fn collect_stats_summary(&self) -> serde_json::Value {
         let (sec, nsec) = monotonic_now();
         let (ring_total, ring_used, mem_total, mem_used) = match &self.pipeline {

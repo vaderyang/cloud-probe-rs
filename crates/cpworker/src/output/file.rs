@@ -9,6 +9,7 @@ use crate::error::Result;
 use crate::packet::PKT_DIR_UNKNOWN;
 use crate::stats::OutputStats;
 
+/// Single pcap file output.
 pub struct FileOutput {
     stats: Arc<OutputStats>,
     writer: PcapWriter,

@@ -13,13 +13,17 @@ pub use crate::output::PacketHeader;
 
 /// Sink receiving captured packets and heartbeat ticks.
 pub trait PacketSink {
+    /// Deliver one captured packet. `direct` is a `PKT_DIR_*` value.
     fn on_packet(&mut self, hdr: &PacketHeader, pkt: &[u8], direct: i32);
+    /// Called periodically so the sink can emit heartbeats.
     fn on_heartbeat(&mut self);
 }
 
 /// A packet source. `capture_once` processes at most one packet / tick and
 /// returns the number of packets delivered.
 pub trait Capturer: Send {
+    /// Capture at most one packet / tick, delivering it to `sink`.
+    /// Returns the number of packets delivered.
     fn capture_once(&mut self, sink: &mut dyn PacketSink) -> u64;
 }
 

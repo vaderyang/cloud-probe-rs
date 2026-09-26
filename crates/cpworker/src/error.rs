@@ -2,6 +2,7 @@
 
 use std::fmt;
 
+/// Size of the fixed error buffer used by the C implementation.
 pub const ERROR_BUFFER_SIZE: usize = 256;
 
 /// A simple string-backed error. Mirrors the C `errbuf` mechanism where callers
@@ -10,6 +11,7 @@ pub const ERROR_BUFFER_SIZE: usize = 256;
 pub struct Error(pub String);
 
 impl Error {
+    /// Create an error from an owned or borrowed message.
     pub fn new(msg: impl Into<String>) -> Self {
         Error(msg.into())
     }
@@ -35,6 +37,7 @@ impl From<anyhow::Error> for Error {
     }
 }
 
+/// Convenience alias for results carrying this crate's [`Error`].
 pub type Result<T> = std::result::Result<T, Error>;
 
 /// Write `msg` into an errbuf, truncating to `ERROR_BUFFER_SIZE` including NUL

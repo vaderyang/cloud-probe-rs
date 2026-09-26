@@ -1,6 +1,7 @@
 //! Token-bucket rate limiter. Port of `ratelimit.c`.
 
 #[derive(Debug)]
+/// A token bucket enforcing an average rate with a burst capacity of one second.
 pub struct TokenBucket {
     rate_bps: u64,
     capacity: u64,
@@ -9,6 +10,7 @@ pub struct TokenBucket {
 }
 
 impl TokenBucket {
+    /// Create a bucket refilling at `rate_bps` bytes per second.
     #[must_use]
     pub fn new(rate_bps: u64) -> Self {
         TokenBucket {

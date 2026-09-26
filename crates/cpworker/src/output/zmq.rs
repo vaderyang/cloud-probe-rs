@@ -28,6 +28,7 @@ const MPLS_HDR_SIZE: usize = 4;
 const ERROR_INFO_FLUSH_MAX_DUR_SEC: i64 = 5;
 
 #[must_use]
+/// Parse a UUID string into its 16-byte representation, or `None` if invalid.
 pub fn uuid_to_bytes(uuid: &str) -> Option<[u8; 16]> {
     let clean: Vec<u8> = uuid.bytes().filter(|&b| b != b'-').collect();
     if clean.len() != 32 {
@@ -43,6 +44,7 @@ pub fn uuid_to_bytes(uuid: &str) -> Option<[u8; 16]> {
 }
 
 #[must_use]
+/// Build the 32-bit MPLS label header carrying direction and service tag.
 pub fn make_mpls_hdr(direct: i32, service_tag: u32) -> u32 {
     let b0 = (1u8 << 7) | (((direct as u8) & 0x0f) << 3);
     let b1 = (service_tag >> 4) as u8;
@@ -53,6 +55,7 @@ pub fn make_mpls_hdr(direct: i32, service_tag: u32) -> u32 {
 
 /// ZMQ batch buffer builder. Single source of truth for the ZMQ wire format.
 pub struct BatchBuilder {
+    /// The underlying batch buffer (header + packets).
     pub buf: Vec<u8>,
     pos: usize,
     num: u16,
@@ -61,6 +64,7 @@ pub struct BatchBuilder {
 }
 
 impl BatchBuilder {
+    /// Create a builder for `service_tag` and `uuid`, writing the batch header.
     #[must_use]
     pub fn new(service_tag: u32, uuid: &[u8; 16]) -> Self {
         let mut buf = vec![0u8; ZMQ_MAX_BATCH_BUF_SIZE];
@@ -77,18 +81,22 @@ impl BatchBuilder {
         }
     }
 
+    /// Number of packets currently in the batch.
     #[must_use]
     pub fn num(&self) -> u16 {
         self.num
     }
+    /// Current write position within the buffer.
     #[must_use]
     pub fn pos(&self) -> usize {
         self.pos
     }
+    /// Timestamp (seconds) of the first packet in the batch, or 0 if empty.
     #[must_use]
     pub fn first_pktsec(&self) -> i64 {
         self.first_pktsec
     }
+    /// Set the timestamp of the first packet in the batch.
     pub fn set_first_pktsec(&mut self, t: i64) {
         self.first_pktsec = t;
     }
@@ -108,6 +116,7 @@ impl BatchBuilder {
         (self.num, self.pos)
     }
 
+    /// Reset the builder after a flush has been sent.
     pub fn end_flush(&mut self) {
         self.first_pktsec = 0;
         self.pos = BATCH_HDR_SIZE;
@@ -231,6 +240,7 @@ struct ErrorInfo {
     send_error: String,
 }
 
+/// ZMQ batch output pushing to a collector.
 pub struct ZmqOutput {
     stats: Arc<OutputStats>,
     throttle: Option<TokenBucket>,

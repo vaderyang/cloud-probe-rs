@@ -12,6 +12,7 @@ use crate::packet::PKT_DIR_NONCHECK;
 use crate::req_pattern::ReqPattern;
 use crate::stats::CaptureStats;
 
+/// Offline replay of packets from a pcap file.
 pub struct PcapFileCapturer {
     stats: Arc<CaptureStats>,
     req_pattern: Option<ReqPattern>,

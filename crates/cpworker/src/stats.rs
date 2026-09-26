@@ -11,12 +11,16 @@ pub const EIB_IN_BYTES: u64 = 1024 * 1024 * 1024 * 1024 * 1024 * 1024;
 pub const PETA_IN_PACKETS: u64 = 10_000_000_000_000_000;
 
 #[derive(Debug, Default)]
+/// Byte counter split into whole EiB plus a remainder below 1 EiB.
 pub struct BytesStats {
+    /// Remainder bytes (always below `EIB_IN_BYTES`).
     pub bytes: AtomicU64,
+    /// Whole EiB units.
     pub eib: AtomicU64,
 }
 
 impl BytesStats {
+    /// Add `bytes`, carrying into the EiB field as needed.
     pub fn add(&self, mut bytes: u64) {
         let mut new_eib = bytes / EIB_IN_BYTES;
         bytes %= EIB_IN_BYTES;
@@ -30,6 +34,7 @@ impl BytesStats {
         self.eib.fetch_add(new_eib, Ordering::Relaxed);
     }
 
+    /// Merge another counter into this one.
     pub fn merge(&self, src: &BytesStats) {
         let total = self.bytes.load(Ordering::Relaxed) + src.bytes.load(Ordering::Relaxed);
         let carry = total / EIB_IN_BYTES;
@@ -38,6 +43,7 @@ impl BytesStats {
             .fetch_add(src.eib.load(Ordering::Relaxed) + carry, Ordering::Relaxed);
     }
 
+    /// Return `(remainder_bytes, eib)`.
     pub fn load(&self) -> (u64, u64) {
         (
             self.bytes.load(Ordering::Relaxed),
@@ -47,12 +53,16 @@ impl BytesStats {
 }
 
 #[derive(Debug, Default)]
+/// Packet counter split into whole Peta (10^16) plus a remainder.
 pub struct PacketsStats {
+    /// Remainder packets (always below `PETA_IN_PACKETS`).
     pub packets: AtomicU64,
+    /// Whole Peta units.
     pub peta: AtomicU64,
 }
 
 impl PacketsStats {
+    /// Add `packets`, carrying into the Peta field as needed.
     pub fn add(&self, mut packets: u64) {
         let mut new_peta = packets / PETA_IN_PACKETS;
         packets %= PETA_IN_PACKETS;
@@ -66,6 +76,7 @@ impl PacketsStats {
         self.peta.fetch_add(new_peta, Ordering::Relaxed);
     }
 
+    /// Merge another counter into this one.
     pub fn merge(&self, src: &PacketsStats) {
         let total = self.packets.load(Ordering::Relaxed) + src.packets.load(Ordering::Relaxed);
         let carry = total / PETA_IN_PACKETS;
@@ -75,6 +86,7 @@ impl PacketsStats {
             .fetch_add(src.peta.load(Ordering::Relaxed) + carry, Ordering::Relaxed);
     }
 
+    /// Return `(remainder_packets, peta)`.
     pub fn load(&self) -> (u64, u64) {
         (
             self.packets.load(Ordering::Relaxed),
@@ -84,31 +96,51 @@ impl PacketsStats {
 }
 
 #[derive(Debug, Default)]
+/// Capture-side counters.
 pub struct CaptureStats {
+    /// Bytes captured.
     pub cap_bytes: BytesStats,
+    /// Packets captured.
     pub cap_packets: PacketsStats,
+    /// Packets dropped by the capturer.
     pub drop_packets: PacketsStats,
+    /// Packets dropped by the interface (ps_ifdrop).
     pub ifdrop_packets: PacketsStats,
 }
 
 #[derive(Debug, Default)]
+/// Output-side counters.
 pub struct OutputStats {
+    /// Bytes forwarded.
     pub fwd_bytes: BytesStats,
+    /// Packets forwarded.
     pub fwd_packets: PacketsStats,
+    /// Bytes dropped for unknown direction.
     pub direction_drop_bytes: BytesStats,
+    /// Packets dropped for unknown direction.
     pub direction_drop_packets: PacketsStats,
+    /// Bytes dropped due to send errors.
     pub error_drop_bytes: BytesStats,
+    /// Packets dropped due to send errors.
     pub error_drop_packets: PacketsStats,
+    /// Bytes dropped by the rate limiter.
     pub ratelimit_drop_bytes: BytesStats,
+    /// Packets dropped by the rate limiter.
     pub ratelimit_drop_packets: PacketsStats,
+    /// Heartbeat frames sent.
     pub heartbeat_packets: PacketsStats,
 }
 
 #[derive(Debug, Default, Clone, Copy)]
+/// Snapshot of pipeline ring-buffer usage.
 pub struct PipelineBufferStats {
+    /// Total ring capacity in messages.
     pub ring_total: u64,
+    /// Ring slots currently used.
     pub ring_used: u64,
+    /// Total pipeline buffer memory in bytes.
     pub mem_total: u64,
+    /// Pipeline buffer memory currently used.
     pub mem_used: u64,
 }
 
