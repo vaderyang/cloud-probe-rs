@@ -17,7 +17,7 @@ serde_json.workspace = true
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "time"] }
 tonic = "0.12"
 prost = "0.13"
-tower = { version = "0.4", features = ["util"] }
+tower = { version = "0.5", features = ["util"] }
 hyper-util = { version = "0.1", features = ["tokio"] }
 
 [build-dependencies]
