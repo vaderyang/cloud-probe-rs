@@ -253,7 +253,7 @@ WP2 与 WP3 可并行；M1 必须最先（唯一可能"完全无数据"的缺陷
   keepalive/`TCP_USER_TIMEOUT`、DNS 重解析、hwm 校验、队列字节上限、`fwd_*` 口径）。
 - ✅ **门禁强化 §3.1 落地**：新增 `parity/verify_liveness.sh`（"实现了却没人调用"的接口
   grep 门禁，测试内调用不计入），已接入 `parity/all.sh`（第 8 项）与 CI `test` job。
-- 验证：`cargo test --workspace` **140 passed / 0 failed**；clippy `-D warnings` 0；
+- 验证：`cargo test --workspace` **138 passed / 0 failed**（另有 2 个 live 测试 `#[ignore]`，由 privileged job 跑）；clippy `-D warnings` 0；
   `cargo fmt --all -- --check` 通过；`cargo deny check` 四项 ok；`parity/all.sh` **8/8 绿**；
   `zmtp_client` fuzz 120s / 1.04M runs 无崩溃。
 
