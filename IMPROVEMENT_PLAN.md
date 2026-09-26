@@ -10,7 +10,7 @@
 |---|---|---|---|---|---|
 | P1 | 快速清扫（锁策略、死依赖、脆弱 unwrap） | 3 | 0.5–1 天 | 低 | ✅ 已完成 |
 | P2 | 可靠性加固（panic 面、可观测性） | 3 | 1–2 天 | 低 | ✅ 已完成 |
-| P3 | 移除 C 依赖（纯 Rust） | 3 | 周级 | 高 | ⬜ 待开始 |
+| P3 | 移除 C 依赖（纯 Rust） | 3 | 周级 | 高 | 🟡 进行中：libzmq ✅，libpcap ⬜ |
 | P4 | 可选质量项（覆盖率、文档、基准） | 3 | 1–2 天 | 低 | 🟡 P4.2/P4.3 完成，P4.1 待硬件 |
 
 ### P1 完成记录（commits `0ff95d6` / `62597d9` / `3ba6813`）
@@ -141,6 +141,22 @@
 ## P3 — 移除 C 依赖（审计 §4.4，最大工程项）
 
 > 目标：去掉 `libpcap` / `libzmq`，实现"纯 Rust"。建议拆成独立里程碑，逐个可回退。
+
+### P3 进度
+
+- ✅ **pcap 写/读纯 Rust 化**：`output/pcap_writer.rs` 去掉 `pcap_open_dead`/`pcap_dump` FFI；
+  `capturer/pcap_file.rs` 自写 pcap 读取（大小端 + 微秒/纳秒 + 越界保护）。
+- ✅ **libzmq 已移除**（P3.2）：
+  - `crates/cpworker/src/zmtp/codec.rs`：ZMTP 3.x greeting/READY/帧编解码。
+  - `crates/cpworker/src/zmtp/client.rs`：非阻塞 PUSH 状态机（非阻塞 connect、NULL 握手、
+    HWM 排队/丢弃、自动重连退避、PING→PONG；transport/connector 可注入）。
+  - 删除 `zmq` 依赖；CI `build/test/clippy/coverage/release` 不再需 `libzmq3-dev`
+    （parity/fuzz job 保留，用于 C oracle 与互操作测试）。
+  - **与 libzmq 端到端对拍**：`parity/verify_zmtp.sh`（small/empty/long/64KiB 逐字节一致）。
+  - **强 fuzz**：`zmtp_wire` + `zmtp_client`（混沌状态机）+ 真实 TCP 集成测试（并发/中途断开重连）。
+  - 过程中发现并修复：`pong_command` 命令名长度写错（由 PING→PONG 单测捕获）。
+- ⬜ **libpcap 待移除**（P3.1）：实时抓包 `capturer/libpcap.rs` 待改裸 `AF_PACKET` + 自研 BPF
+  子集（决策已定：1A + 2A）。
 
 ### P3.1 采集侧去 libpcap
 

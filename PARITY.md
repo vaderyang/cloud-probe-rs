@@ -69,7 +69,7 @@ collector 解码并对账。同一 seed 跨进程 trace 摘要一致，可精确
 
 ### 1.5 覆盖率引导的 Fuzz（cargo-fuzz / libFuzzer）
 
-`crates/cpworker/fuzz/` 下有 5 个 fuzz target（nightly + ASAN + libFuzzer）：
+`crates/cpworker/fuzz/` 下有 8 个 fuzz target（nightly + ASAN + libFuzzer）：
 
 | target | 对象 |
 |---|---|
@@ -78,6 +78,9 @@ collector 解码并对账。同一 seed 跨进程 trace 摘要一致，可精确
 | `vxlan` | `vxlan_encapsulate`（校验和/capture_time） |
 | `zmq_batch` | `BatchBuilder`（VLAN/MPLS，issue #231 回归） |
 | `sim_dst` | 整个确定性仿真 + 不变量 |
+| `zmtp_wire` | ZMTP greeting/帧/命令编解码（含长度上限） |
+| `zmtp_client` | 非阻塞 ZMTP 客户端状态机（模拟垃圾握手/截断/中断/HWM 的混沌驱动） |
+| `diff_oracle` | C/Go 差分（见 §1.6，由 `parity/difffuzz.sh` 驱动） |
 
 * 运行：`fuzz.sh [秒数] [target|all]`；CI 烟雾：`fuzz.sh --check`
 * 复现：`fuzz.sh repro zmq_batch <artifact>`
@@ -207,20 +210,29 @@ parity/run.sh 5000 42     # packet_split: C vs Rust
 * `decodeContainerId`：含 `docker://`、`containerd://`、多 NIC。
 * `cpu_set_parse`：C 的全部边界用例（`,`、`1,`、`1-,2`、`3-1`、`""`…）。
 
-## 4. "纯 Rust" 现状（未完成）
+## 4. "纯 Rust" 现状
 
 | C 依赖 | 现状 | 计划替代 |
 |---|---|---|
-| **libpcap** | `pcap` crate 绑定 + 少量 FFI | AF_PACKET（`pnet_datalink`）+ `pcap-file` + 自研 tcpdump BPF 子集编译器 |
-| **libzmq** | `zmq` crate 绑定 | `tmq`（纯 Rust） |
+| **libzmq** | ✅ **已移除**（纯 Rust ZMTP 3.x `PUSH`，`crates/cpworker/src/zmtp/`） | — |
+| **libpcap** | ⚠️ 仍在：`pcap` crate 仅用于实时抓包（`capturer/libpcap.rs`）；pcap 文件读/写和离线过滤已是纯 Rust | 裸 `AF_PACKET` + 自研 tcpdump BPF 子集编译器 |
 | libc（raw socket/syscall） | `libc` crate | 系统调用，非第三方 C 库 |
 
-> **“纯 Rust”的定义**：本项目的目标是**不链接任何 C 库**（去除 libpcap / libzmq）。
-> `libc` 只是一个声明系统调用与常量 ABI 的 crate（不是任务 C 代码），移除 libpcap/libzmq
-> 后仍会保留，这是预期且符合目标的。
+**libzmq 已完成的替代**（`crates/cpworker/src/zmtp/`）：
+
+* `codec.rs`：ZMTP 3.x greeting / `READY` / 帧编解码（纯函数，直接 fuzz）。
+* `client.rs`：非阻塞 `PUSH` 状态机（非阻塞 connect、NULL 安全握手、HWM 排队/丢弃、
+  自动重连退避、`PING`→`PONG`；transport/connector 可注入）。
+* 对拍：`parity/verify_zmtp.sh` 用**真实 libzmq PULL** 接收，验证 wire 逐字节一致
+  （small / empty / long / 64 KiB）。
+* 强 fuzz：`zmtp_wire`（编解码）、`zmtp_client`（模拟错误协议/截断/中断/HWM 的混沌状态机），
+  以及真实 TCP 集成测试（并发发送、服务端中途断开→重连重发）。
+
+> **“纯 Rust”的定义**：本项目的目标是**不链接任何 C 库**。
+> `libc` 只是一个声明系统调用与常量 ABI 的 crate（不是任务 C 代码），会一直保留。
 >
-> 去 C 依赖对应改进计划 P3；开工前需先完成两项调研：用户配置中 BPF 表达式的分布审计、
-> collector 侧 ZMTP socket 语义确认。
+> 去 C 依赖对应改进计划 P3；libpcap 移除前需先完成用户配置中 BPF 表达式的分布审计
+> （已初步完成：实际只用到 `host X` / `udp` / `udp and port N` 等很小子集）。
 
 ## 5. 剩余工作与范围决策
 

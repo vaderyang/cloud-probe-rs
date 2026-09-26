@@ -58,3 +58,17 @@ path = "fuzz_targets/diff_oracle.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "zmtp_wire"
+path = "fuzz_targets/zmtp_wire.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "zmtp_client"
+path = "fuzz_targets/zmtp_client.rs"
+test = false
+doc = false
+bench = false

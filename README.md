@@ -43,14 +43,18 @@ cargo llvm-cov report --summary-only
 
 ### System dependencies
 
-* **libpcap** (development headers) — `cpworker` capture / savefiles
-* **libzmq** (development headers) — `cpworker` ZMQ output
+* **libpcap** (development headers) — `cpworker` live capture (`libpcap` capturer). The
+  pcap file reader/writer are pure Rust.
+* **libzmq** (development headers) — **not needed to build** (the ZMQ output uses a
+  pure-Rust ZMTP client); only required by the `parity/verify_zmtp.sh` interop test.
 * **protoc** — only for `cripid` code generation (`proto/api.proto` is vendored)
 
 On Debian/Ubuntu:
 
 ```bash
-sudo apt-get install -y libpcap-dev libzmq3-dev protobuf-compiler
+sudo apt-get install -y libpcap-dev protobuf-compiler
+# libzmq3-dev is only needed for the ZMTP interop parity test:
+# sudo apt-get install -y libzmq3-dev
 ```
 
 ## Run
