@@ -249,6 +249,11 @@ parity/run.sh 5000 42     # packet_split: C vs Rust
 `capturer/af_packet.rs`（`#[cfg(target_os = "linux")]`）与 `bpf/linux.rs` 的 attach。
 未来 Windows 支持只需新增后端（实时抓包需 Npcap 或驱动 + 对应 attach），不影响共享代码。
 
+> **实现差异（已知取舍）**：`AF_PACKET` 抓包用 `recvmsg` 而非 libpcap 的 TPACKET_V3
+> mmap 环形缓冲，因此**高吞吐下的丢包特征可能与 libpcap 不同**；`PACKET_STATISTICS`
+> 的 `tp_drops` 语义已对齐（`ps_ifdrop` Linux 恒为 0，与 libpcap 一致）。若需要与
+> libpcap 完全一致的吞吐/丢包曲线，可后续在 `af_packet.rs` 内加 mmap ring（不影响其他模块）。
+
 > **”纯 Rust”的定义**：不链接任何 C 库（`libc`/`nix` 仅声明 syscall ABI，保留）。
 > 去 C 依赖对应改进计划 P3，**已完成**。离线 `pcap_file` 过滤也已接入纯 Rust BPF。
 
