@@ -30,7 +30,6 @@ byteorder.workspace = true
 chrono.workspace = true
 socket2.workspace = true
 parking_lot.workspace = true
-pcap.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]

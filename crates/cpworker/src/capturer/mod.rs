@@ -1,6 +1,7 @@
 //! Capturer pipeline. Port of `capturer.h`, `libpcap.c`, `pcap_file.c`.
 
-pub mod libpcap;
+#[cfg(target_os = "linux")]
+pub mod af_packet;
 pub mod pcap_file;
 
 use std::sync::Arc;
@@ -39,7 +40,15 @@ pub fn new_capturer(
 ) -> Result<Box<dyn Capturer>> {
     match &task.capturer.kind {
         CapturerKind::Libpcap(c) => {
-            libpcap::LibpcapCapturer::new(tasks, task, c, stats).map(|c| Box::new(c) as _)
+            #[cfg(target_os = "linux")]
+            {
+                af_packet::AfPacketCapturer::new(tasks, task, c, stats).map(|c| Box::new(c) as _)
+            }
+            #[cfg(not(target_os = "linux"))]
+            {
+                let _ = (tasks, task, c, stats);
+                Err(Error::new("live capture is not supported on this platform"))
+            }
         }
         CapturerKind::PcapFile(c) => {
             pcap_file::PcapFileCapturer::new(tasks, task, c, stats).map(|c| Box::new(c) as _)

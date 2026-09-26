@@ -36,7 +36,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            libpcap-dev protobuf-compiler
+            protobuf-compiler
 
       - name: System dependencies (macOS)
         if: runner.os == 'macOS'

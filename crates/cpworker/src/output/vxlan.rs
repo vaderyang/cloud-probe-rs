@@ -18,41 +18,11 @@ const ERROR_INFO_FLUSH_MAX_DUR_SEC: i64 = 5;
 const ENOBUFS: i32 = 105;
 
 fn set_bind_device(socket: &Socket, device: &str) -> std::io::Result<()> {
-    let cdev = std::ffi::CString::new(device).map_err(|_| {
-        std::io::Error::new(
-            std::io::ErrorKind::InvalidInput,
-            "bind_device contains a NUL byte",
-        )
-    })?;
-    let ret = unsafe {
-        libc::setsockopt(
-            std::os::fd::AsRawFd::as_raw_fd(socket),
-            libc::SOL_SOCKET,
-            25,
-            cdev.as_ptr() as *const libc::c_void,
-            (device.len() + 1) as libc::socklen_t,
-        )
-    };
-    if ret != 0 {
-        return Err(std::io::Error::last_os_error());
-    }
-    Ok(())
+    crate::sockopt::bind_to_device(socket, device)
 }
 
 fn set_pmtudisc(socket: &Socket, pmtudisc: i32) -> std::io::Result<()> {
-    let ret = unsafe {
-        libc::setsockopt(
-            std::os::fd::AsRawFd::as_raw_fd(socket),
-            libc::IPPROTO_IP,
-            10,
-            &pmtudisc as *const i32 as *const libc::c_void,
-            std::mem::size_of::<i32>() as libc::socklen_t,
-        )
-    };
-    if ret != 0 {
-        return Err(std::io::Error::last_os_error());
-    }
-    Ok(())
+    crate::sockopt::set_pmtudisc(socket, pmtudisc)
 }
 
 /// Port of `rte_raw_cksum` (with the 0x4a3b2d1c seed).
