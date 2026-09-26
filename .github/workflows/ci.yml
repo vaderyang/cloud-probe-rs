@@ -41,6 +41,10 @@ jobs:
       # AUDIT4 §3.1: interfaces that are implemented but never called are invisible
       # to dead_code/clippy (P5-04). Guard them explicitly.
       - run: bash parity/verify_liveness.sh
+      # AUDIT4 §3 / WP4: truncating casts in the config layer, panic constructors
+      # on library paths (release uses panic="abort"), docs that overstate what
+      # they do, fuzz targets that exist but are never run.
+      - run: bash parity/verify_hygiene.sh
 
   live-capture:
     name: live capture (privileged)

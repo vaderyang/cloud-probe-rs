@@ -63,7 +63,20 @@ impl RotatingFileOutput {
     /// Port of `generate_path` + `create_dumper`.
     fn create_writer(&mut self) -> Result<()> {
         use chrono::{Datelike, TimeZone, Timelike};
-        let dt = chrono::Local.timestamp_opt(self.file_time, 0).unwrap();
+        // `timestamp_opt` is only `None` for a clock outside chrono's (or the
+        // pcap name's) representable range, but an unreachable panic on a
+        // machine with a broken RTC is still a dead worker under
+        // `panic = "abort"` - report it as a dumper error, which send_packet()
+        // already counts in error_drop_* (AUDIT4 P5-23).
+        let dt = chrono::Local
+            .timestamp_opt(self.file_time, 0)
+            .single()
+            .ok_or_else(|| {
+                Error::new(format!(
+                    "invalid file_time {}: out of range",
+                    self.file_time
+                ))
+            })?;
         let date = format!(
             "{:04}{:02}{:02}{:02}{:02}{:02}",
             dt.year(),
@@ -161,6 +174,34 @@ impl Output for RotatingFileOutput {
 mod tests {
     use super::*;
     use crate::config::PcapFileConfig;
+
+    /// AUDIT4 P5-23: `create_writer` used to `unwrap()` chrono's LocalResult.
+    /// A clock outside the representable range has to surface as a dumper error
+    /// (the caller already has an error path for it), not abort the worker.
+    #[test]
+    fn out_of_range_file_time_is_an_error_not_a_panic() {
+        let dir = tempfile::tempdir().unwrap();
+        let cfg = RotatingFileConfig {
+            file_root: dir.path().display().to_string(),
+            max_file_interval: -1,
+        };
+        let capturer = CapturerKind::PcapFile(PcapFileConfig {
+            file_name: String::new(),
+            bpf: String::new(),
+        });
+        let stats = Arc::new(OutputStats::default());
+        let mut out = RotatingFileOutput::new(&cfg, &capturer, stats).expect("create");
+
+        for bad in [i64::MAX, -8_000_000_000_000_000] {
+            out.file_time = bad;
+            match out.create_writer() {
+                Ok(_) => panic!("file_time {bad} was accepted"),
+                Err(e) => assert!(e.to_string().contains("file_time"), "{e}"),
+            }
+        }
+        out.file_time = 1_700_000_000;
+        out.create_writer().expect("a sane clock still works");
+    }
 
     /// `destroy()` must push the buffered packets out to the file: the writer
     /// is still alive here, so anything readable on disk has been flushed.

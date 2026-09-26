@@ -31,6 +31,7 @@ const IPPROTO_FRAGMENT: u32 = 0x2c;
 const IPV4_FRAG_MASK: u32 = 0x1fff;
 
 /// Normalized boolean tree. Leaves are [`Test`]s.
+#[derive(Debug)]
 enum NExpr {
     And(Box<NExpr>, Box<NExpr>),
     Or(Box<NExpr>, Box<NExpr>),
@@ -39,6 +40,7 @@ enum NExpr {
 }
 
 /// A self-contained atomic packet test.
+#[derive(Debug)]
 enum Test {
     EtherType(u16),
     EtherHost {
@@ -86,10 +88,27 @@ fn and(a: NExpr, b: NExpr) -> NExpr {
     NExpr::And(Box::new(a), Box::new(b))
 }
 
-fn or_all(v: Vec<NExpr>) -> NExpr {
+/// Fold atomic tests into an `or` chain.
+///
+/// An empty list is reported as an error instead of panicking (AUDIT4 P5-23):
+/// the release profile uses `panic = "abort"`, so a panic anywhere on the
+/// filter-compilation path - which is driven by config files, CPM task updates
+/// and SIGHUP reloads - would take the whole worker down instead of failing the
+/// one task. Callers keep the `Result` so the failure surfaces as a filter
+/// error naming the expression.
+fn or_all(v: Vec<NExpr>) -> Result<NExpr> {
     let mut it = v.into_iter();
-    let first = it.next().expect("or_all called with empty list");
-    it.fold(first, or)
+    // Every current caller passes a fixed, non-empty set of alternatives, so the
+    // Err arm below is an internal-invariant violation. It stays an error rather
+    // than a debug_assert: the message says so, and a future caller that gets it
+    // wrong fails its own task visibly in *every* profile instead of aborting
+    // the worker in release.
+    let Some(first) = it.next() else {
+        return Err(Error::new(
+            "bpf: internal lowering error (empty alternative list)",
+        ));
+    };
+    Ok(it.fold(first, or))
 }
 
 /// Compile a parsed expression into a cBPF [`Program`].
@@ -129,7 +148,7 @@ fn lower(ast: &Ast) -> Result<NExpr> {
             addr,
             mask,
         } => lower_net(*dir, *proto, *addr, *mask)?,
-        Ast::Port { dir, l4, spec } => lower_port(*dir, *l4, *spec),
+        Ast::Port { dir, l4, spec } => lower_port(*dir, *l4, *spec)?,
     })
 }
 
@@ -239,11 +258,11 @@ fn arp(ethertype: u16, a: [u8; 4], dir: Dir) -> NExpr {
 
 fn lower_host(dir: Dir, proto: Option<Proto>, addr: IpAddr) -> Result<NExpr> {
     match (proto, addr) {
-        (None, IpAddr::V4(a)) => Ok(or_all(vec![
+        (None, IpAddr::V4(a)) => or_all(vec![
             ipv4(a.octets(), dir),
             arp(ETH_ARP as u16, a.octets(), dir),
             arp(ETH_RARP as u16, a.octets(), dir),
-        ])),
+        ]),
         (None, IpAddr::V6(a)) => Ok(ipv6(a.octets(), dir)),
         (Some(Proto::Ip), IpAddr::V4(a)) => Ok(ipv4(a.octets(), dir)),
         (Some(Proto::Ip6), IpAddr::V6(a)) => Ok(ipv6(a.octets(), dir)),
@@ -316,7 +335,7 @@ fn lower_net(dir: Dir, proto: Option<Proto>, addr: IpAddr, mask: IpAddr) -> Resu
                     ip(dir),
                     arp_net(ETH_ARP as u16, dir),
                     arp_net(ETH_RARP as u16, dir),
-                ]),
+                ])?,
                 Some(Proto::Ip) => ip(dir),
                 Some(Proto::Arp) => arp_net(ETH_ARP as u16, dir),
                 Some(Proto::Rarp) => arp_net(ETH_RARP as u16, dir),
@@ -364,7 +383,7 @@ fn lower_net(dir: Dir, proto: Option<Proto>, addr: IpAddr, mask: IpAddr) -> Resu
     }
 }
 
-fn lower_port(dir: Dir, l4: L4, spec: PortSpec) -> NExpr {
+fn lower_port(dir: Dir, l4: L4, spec: PortSpec) -> Result<NExpr> {
     // Bare `port` matches TCP, UDP and SCTP, like tcpdump.
     let protos: &[u8] = match l4 {
         L4::Tcp => &[6],
@@ -763,6 +782,22 @@ mod tests {
         let pkt = vec![0u8; 4];
         assert!(!build("host 10.0.0.1").apply(&pkt));
         assert!(!build("udp port 53").apply(&pkt));
+    }
+
+    /// AUDIT4 P5-23: this used to be `expect("or_all called with empty list")`.
+    /// Under `panic = "abort"` (release profile) that would have killed the whole
+    /// worker - and the filter path is reachable from config files, CPM task
+    /// updates and SIGHUP reloads. It is a plain error now.
+    #[test]
+    fn or_all_rejects_an_empty_alternative_list_without_panicking() {
+        let e = or_all(Vec::new()).unwrap_err().to_string();
+        assert!(e.contains("empty alternative list"), "{e}");
+        // Non-empty lists keep their fold semantics.
+        let one = or_all(vec![t(Test::EtherType(0x0800))]).expect("one alternative");
+        assert!(matches!(one, NExpr::Test(Test::EtherType(0x0800))));
+        let two = or_all(vec![t(Test::EtherType(0x0800)), t(Test::EtherType(0x86dd))])
+            .expect("two alternatives");
+        assert!(matches!(two, NExpr::Or(_, _)));
     }
 
     #[test]

@@ -25,6 +25,7 @@ fuzz.sh repro zmq_batch fuzz/artifacts/zmq_batch/crash-...
 | `bpf` | cpworker | the pure-Rust BPF parser/compiler/interpreter |
 | `zmtp_wire` | cpworker | ZMTP greeting/frame/command codec (`zmtp::codec`) |
 | `zmtp_client` | cpworker | the non-blocking ZMTP client state machine (mock peer: malformed handshakes, disconnects, HWM) |
+| `pcap_reader` | cpworker | the pcap savefile reader: malformed global/record headers, truncation, wrong byte order, records straddling a BufReader boundary, absurd caplen |
 | `diff_oracle` | cpworker | Differential vs the **original C** implementation (persistent subprocess oracle); see `parity/difffuzz.sh` |
 
 ## Input formats
@@ -34,10 +35,15 @@ fuzz.sh repro zmq_batch fuzz/artifacts/zmq_batch/crash-...
   direct(u8) | frame }*`.
 * `sim_dst`: `seed(LE u64) | out(u8) | num_packets(u8) | slice(u8) |
   heartbeat(u8)`.
+* `pcap_reader`: a raw pcap file image. Each input is replayed twice (plain
+  `Cursor` and a 1-byte `BufReader`) and the two runs must agree record by
+  record; invariants: `data.len() == caplen <= len <= MAX_CAPLEN`.
 
 Hand-written seeds live in `seeds/<target>/` (copied into the ignored
 `corpus/<target>/` by `fuzz.sh`). `seeds/zmq_batch/vlan_slice.bin` exercises the
-safety guard added for upstream issue #231.
+safety guard added for upstream issue #231. `seeds/pcap_reader/` holds one seed
+per class of corrupt pcap file (DLT_LINUX_SLL linktype, `caplen > orig_len`,
+256 MiB caplen, every truncation point, pcap v3 header, mixed byte order).
 
 ### Differential fuzzing (`diff_oracle`)
 

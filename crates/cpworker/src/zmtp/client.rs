@@ -502,13 +502,25 @@ impl ZmtpPush {
         if !self.can_write_messages() {
             return;
         }
+        // `can_write_messages()` is exactly
+        // `conn.as_ref().is_some_and(Conn::can_write_messages)`, so a connection
+        // exists here. Move it out for the duration of the drain instead of
+        // `self.conn.as_mut().unwrap()`: with `panic = "abort"` in the release
+        // profile that unwrap would abort the whole worker on a future
+        // regression, and this is the message-forwarding hot path
+        // (AUDIT4 P5-23).
+        let mut conn = match self.conn.take() {
+            Some(conn) => conn,
+            // Cannot happen (see above); leave the queue untouched and let the
+            // next poll re-establish the connection rather than dying here.
+            None => return,
+        };
         while let Some(msg) = self.pending.pop_front() {
             self.pending_bytes = self.pending_bytes.saturating_sub(msg.len());
             let mut off = self.front_off;
             self.front_off = 0;
             let mut disconnected = false;
             while off < msg.len() {
-                let conn = self.conn.as_mut().unwrap();
                 debug_assert!(
                     !conn.out_pending(),
                     "single-FIFO invariant: handshake bytes must reach the wire first"
@@ -523,6 +535,7 @@ impl ZmtpPush {
                         self.front_off = off;
                         self.pending_bytes += msg.len();
                         self.pending.push_front(msg);
+                        self.conn = Some(conn);
                         return;
                     }
                     Err(ref e) if e.kind() == io::ErrorKind::Interrupted => continue,
@@ -539,13 +552,15 @@ impl ZmtpPush {
                     self.pending_bytes += msg.len();
                     self.pending.push_front(msg);
                 }
-                if let Some(mut conn) = self.conn.take() {
-                    conn.t.shutdown();
-                }
+                conn.t.shutdown();
+                drop(conn);
+                // schedule_reconnect() clears self.conn, which is already None
+                // because we took it above.
                 self.schedule_reconnect();
                 return;
             }
         }
+        self.conn = Some(conn);
     }
 
     fn schedule_reconnect(&mut self) {

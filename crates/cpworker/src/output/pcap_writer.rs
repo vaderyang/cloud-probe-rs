@@ -108,8 +108,8 @@ mod tests {
     /// What [`PcapWriter::flush`] actually promises: after it returns, the bytes
     /// are in the file (visible to another reader) even though the writer is
     /// still open. It does *not* fsync, and this test is the executable
-    /// documentation of that boundary (AUDIT4 P5-22: the old doc comment claimed
-    /// "call flush to fsync").
+    /// documentation of that boundary (AUDIT4 P5-22: the doc comment used to
+    /// claim that this call fsynced the file).
     #[test]
     fn flush_publishes_the_buffer_without_waiting_for_the_writer() {
         let path =

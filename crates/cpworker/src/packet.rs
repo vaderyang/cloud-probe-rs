@@ -360,10 +360,18 @@ fn extract_ipport_ipv4(pkt_data: &[u8], off: usize) -> Option<IpPort> {
     if ihl < 20 || pkt_data.len() < off + ihl {
         return None;
     }
+    // The 4/16-byte reads below are fixed-size by construction (the length
+    // checks above guarantee it), so they are written as fallible slicing
+    // helpers instead of `try_into().unwrap()`: an unreachable panic on
+    // attacker-controlled frame bytes is exactly what AUDIT4 P5-23 removes.
+    let a4 = |i: usize| <[u8; 4]>::try_from(&pkt_data[i..i + 4]).ok();
+    let (Some(src), Some(dst)) = (a4(off + 12), a4(off + 16)) else {
+        return None;
+    };
     let mut out = IpPort {
-        src: IpAddr::V4(pkt_data[off + 12..off + 16].try_into().unwrap()),
+        src: IpAddr::V4(src),
         sport: 0,
-        dst: IpAddr::V4(pkt_data[off + 16..off + 20].try_into().unwrap()),
+        dst: IpAddr::V4(dst),
         dport: 0,
         has_ip: true,
         has_port: false,
@@ -380,10 +388,14 @@ fn extract_ipport_ipv6(pkt_data: &[u8], off: usize) -> Option<IpPort> {
     if pkt_data.len() < off + 40 {
         return None;
     }
+    let a16 = |i: usize| <[u8; 16]>::try_from(&pkt_data[i..i + 16]).ok();
+    let (Some(src), Some(dst)) = (a16(off + 8), a16(off + 24)) else {
+        return None;
+    };
     let mut out = IpPort {
-        src: IpAddr::V6(pkt_data[off + 8..off + 24].try_into().unwrap()),
+        src: IpAddr::V6(src),
         sport: 0,
-        dst: IpAddr::V6(pkt_data[off + 24..off + 40].try_into().unwrap()),
+        dst: IpAddr::V6(dst),
         dport: 0,
         has_ip: true,
         has_port: false,

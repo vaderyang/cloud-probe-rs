@@ -41,4 +41,22 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "rus
 [profile.release]
 lto = true
 codegen-units = 1
+# AUDIT4 P5-23 - what "abort" means for this process, and the boundary we keep:
+#
+#   * A panic here is a *fatal*, not a recoverable, event: unwinding is compiled
+#     out, so nothing can catch_unwind() and a panic in one task's thread takes
+#     the whole worker (and every other task) with it.
+#   * Therefore no error that is reachable from input may be a panic. Everything
+#     driven by untrusted data - config JSON, CPM task updates, SIGHUP reloads,
+#     BPF expressions, pcap files, peer bytes on the ZMTP wire, packet frames -
+#     is a `Result` (cpworker::Error) or a plain early return.
+#   * Panics are reserved for programmer errors: invariant violations asserted
+#     with debug_assert! (single-FIFO write phase, ring-buffer accounting), which
+#     trip in tests/debug and compile away in release.
+#   * `parity/verify_hygiene.sh` greps the cpworker library for the panic
+#     constructors that used to hide there (unwrap/expect/panic!/unreachable!),
+#     because clippy and the test suite cannot see the difference between
+#     "provably unreachable" and "someone will hit this at 3am".
+# Tests run under the `test` profile (panic = unwind), so #[should_panic] and
+# assertion failure reporting are unaffected.
 panic = "abort"
