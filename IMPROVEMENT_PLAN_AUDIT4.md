@@ -154,7 +154,10 @@
 
 本轮三篇审计暴露的**三层共同盲区**，必须固化为固定检查项：
 
-1. **接口有无调用方**（P5-04 类）：trait 默认方法不参与 `dead_code`。→ 引入 `cargo-mutants`/自定义脚本或 CI grep 检查"公开 API 无调用点"。
+1. **接口有无调用方**（P5-04 类）：trait 默认方法不参与 `dead_code`。
+   ✅ **已落地（M3）**：`parity/verify_liveness.sh`（并加入 `parity/all.sh` 第 8 项与 CI `test` job）
+   对"必须有生产调用点"的接口逐条 grep：`Output::destroy()`、`zmtp_queued_*` 指标、
+   ZMTP 握手 deadline。测试内调用不算数——正是 P5-04 的失效形态。
 2. **测试生成器的组合深度**（P5-01/P5-06/P5-17 类）：小样本差分全绿≠语义等价。→ 对每个差分生成器设"最小组合深度/规模"下限，并在报告中显式声明覆盖的最大规模。
 3. **OS 对参数的静默修正**（P5-02/P5-05/P5-14 类）：`setsockopt`/`getsockopt` 返回 0 但语义被改。→ 所有内核参数"设置即回读 + 断言/告警"；关键 syscall 记入 `PARITY.md`。
 4. **端到端大文件差分**（已由 `read_exact` 教训得出）：所有"替换库"的路径都要有大输入/跨边界端到端对拍。
@@ -248,8 +251,11 @@ WP2 与 WP3 可并行；M1 必须最先（唯一可能"完全无数据"的缺陷
     `output::zmq::tests::{queue_backlog_is_published_as_gauges,queue_budget_is_bounded_by_hwm_and_bytes}`。
 - ✅ 新增 `PARITY.md §2.4`：libzmq 与 Rust ZMTP 的输出面差异表（linger 调用点、握手超时、
   keepalive/`TCP_USER_TIMEOUT`、DNS 重解析、hwm 校验、队列字节上限、`fwd_*` 口径）。
-- 验证：`cargo test --workspace` **137 passed / 0 failed**；clippy `-D warnings` 0；
-  `cargo fmt --all -- --check` 通过；`cargo deny check` 四项 ok；`parity/all.sh` **7/7 绿**。
+- ✅ **门禁强化 §3.1 落地**：新增 `parity/verify_liveness.sh`（"实现了却没人调用"的接口
+  grep 门禁，测试内调用不计入），已接入 `parity/all.sh`（第 8 项）与 CI `test` job。
+- 验证：`cargo test --workspace` **140 passed / 0 failed**；clippy `-D warnings` 0；
+  `cargo fmt --all -- --check` 通过；`cargo deny check` 四项 ok；`parity/all.sh` **8/8 绿**；
+  `zmtp_client` fuzz 120s / 1.04M runs 无崩溃。
 
 ### 下一步
 

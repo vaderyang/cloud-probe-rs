@@ -1165,6 +1165,24 @@ mod tests {
         assert_eq!(z.queued(), 0);
     }
 
+    /// A zero linger must be a no-op, not a blocking drain (the fuzz target
+    /// relies on this; a hang here would hang every CI run).
+    #[test]
+    fn zero_linger_does_not_touch_the_socket() {
+        let (mut z, h) = setup(valid_peer(), 10);
+        drive_until_open(&mut z);
+        h.fail_write.store(true, Ordering::Relaxed);
+        assert_eq!(z.send(b"stuck"), SendOutcome::Queued);
+        assert!(z.queued() > 0);
+
+        h.written.lock().unwrap().clear();
+        z.drain_for(Duration::from_millis(0));
+        assert!(
+            h.written.lock().unwrap().is_empty(),
+            "linger 0 must not write"
+        );
+    }
+
     #[test]
     fn queued_messages_survive_disconnect() {
         let (mut z, h) = setup(valid_peer(), 100);
