@@ -40,7 +40,7 @@ impl Rng {
         Rng(ChaCha8Rng::seed_from_u64(seed))
     }
     pub fn u64(&mut self) -> u64 {
-        use rand::RngCore;
+        use rand::Rng;
         self.0.next_u64()
     }
     pub fn below(&mut self, n: u64) -> u64 {
@@ -58,11 +58,11 @@ impl Rng {
         }
     }
     pub fn chance(&mut self, p: f64) -> bool {
-        use rand::Rng;
-        self.0.gen::<f64>() < p
+        use rand::RngExt;
+        self.0.random::<f64>() < p
     }
     pub fn fill(&mut self, buf: &mut [u8]) {
-        use rand::RngCore;
+        use rand::Rng;
         self.0.fill_bytes(buf);
     }
 }
