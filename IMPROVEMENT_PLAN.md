@@ -249,6 +249,18 @@ AUDIT3 结论 A、事实全部核验属实；作为对审计的审查，补充�
 - **订正 CI 口径**：AUDIT3.md 追加“审查备注”，说明 9 job 中 `coverage`/`dependency-review`
   为 advisory（且后者仅 PR 运行），硬门禁为 7 个。
 
+## Go ↔ Rust 差分 Fuzz（覆盖引导）
+
+在 C↔Rust 差分框架基础上增加 Go 侧（`parity/difffuzz.sh` 的 `fingerprint` /
+`task_fingerprint` 模式，oracle 为 `parity/difffuzz/go/oracle.go`）：
+
+- 将自包含的 `worker_config` 模型与指纹原语/label 提取从 `cpdaemon` 抽取到 `cpgolib`
+  （`cpgolib::{fingerprint, worker_config, worker_fingerprint}`），使 fuzz target 能进程内复用。
+- `task_fingerprint` 用固定字段名模板 JSON，只 fuzz 值与可选字段存在性，避开 JSON 解码宽容度噪声。
+- **发现并修复**：Go 的 `CustomReqPatternConfig.Pattern` 是非指针 string（即使为空也参与指纹），
+  Rust 曾用 `Option` 跳过 → 指纹不一致。已对齐并加 Go 向量回归测试。
+- 已分类记录的良性分歧：Go `encoding/json` 大小写不敏感 + 缺失字段零值填充（见 PARITY.md §2.3）。
+
 ## 注意事项
 
 - 删除 `env_logger` 已复核：`cpdaemon/src/main.rs` 用 `cpgolib::slogx::init_default(level)`

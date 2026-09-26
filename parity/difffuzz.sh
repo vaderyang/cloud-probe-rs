@@ -13,7 +13,7 @@
 #   parity/difffuzz.sh 120 packet_split
 #   DFF_SEED=7 parity/difffuzz.sh 60 config
 #
-# Modes: packet_split config req_pattern
+# Modes: packet_split config req_pattern fingerprint task_fingerprint
 set -euo pipefail
 export PATH="$HOME/.cargo/bin:$PATH"
 
@@ -29,7 +29,7 @@ fi
 
 SECS="${1:-30}"
 WHICH="${2:-all}"
-ALL_MODES="packet_split config req_pattern"
+ALL_MODES="packet_split config req_pattern fingerprint task_fingerprint"
 [ "$WHICH" = "all" ] && WHICH="$ALL_MODES"
 
 TMP="$(mktemp -d)"
@@ -69,11 +69,42 @@ gcc -O2 -w "${CINC[@]}" "$HERE/c_req_pattern.c" \
     "$PROJECT_ROOT/cpworker/src/log.c" \
     "$PROJECT_ROOT/cpworker/src/errorf.c" -o "$TMP/oracle_req_pattern"
 
+# --- compile the Go oracle -------------------------------------------------
+GO_OK=0
+if command -v go >/dev/null 2>&1; then
+    echo "==> building Go oracle (fingerprint)"
+    GODIR="$TMP/go"
+    mkdir -p "$GODIR"
+    cp "$HERE/difffuzz/go/oracle.go" "$GODIR/main.go"
+    cat > "$GODIR/go.mod" <<EOF
+module difforacle
+
+go 1.25.0
+
+require (
+	github.com/Netis/cloud-probe/cpdaemon v0.0.0
+	github.com/Netis/cloud-probe/cpgolib v0.0.0
+)
+
+replace github.com/Netis/cloud-probe/cpdaemon => $PROJECT_ROOT/cpdaemon
+
+replace github.com/Netis/cloud-probe/cpgolib => $PROJECT_ROOT/cpgolib
+EOF
+    if ( cd "$GODIR" && GOFLAGS=-mod=mod GOPROXY=off go build -o "$TMP/oracle_fingerprint" . ); then
+        GO_OK=1
+    else
+        echo "warning: Go oracle build failed; fingerprint mode will be skipped" >&2
+    fi
+else
+    echo "warning: go not found; fingerprint mode will be skipped" >&2
+fi
+
 oracle_for() {
     case "$1" in
         packet_split) echo "$TMP/oracle_packet_split" ;;
         config)       echo "$TMP/oracle_config" ;;
         req_pattern)  echo "$TMP/oracle_req_pattern" ;;
+        fingerprint|task_fingerprint) echo "$TMP/oracle_fingerprint" ;;
     esac
 }
 
@@ -101,6 +132,23 @@ PY
             printf '%s' 'host 127.0.0.1 and port 80' > "$dir/seed_hostport"
             printf '%s' '(host 10.0.0.1 or host 10.0.0.2) and port 443' > "$dir/seed_or"
             ;;
+        fingerprint)
+            # fuzz input = key/value tokens separated by NUL bytes.
+            python3 - "$dir/seed_abcd" <<'PY'
+import sys
+open(sys.argv[1], "wb").write(b"a\x00b\x00c\x00d")
+PY
+            python3 - "$dir/seed_empty" <<'PY'
+import sys
+open(sys.argv[1], "wb").write(b"\x00\x00")
+PY
+            ;;
+        task_fingerprint)
+            printf '%s' '{"capturer":{"type":"libpcap","libpcap":{"interface":"eth0"}},"outputs":[]}' > "$dir/seed_min.json"
+            printf '%s' '{"req_pattern":{"type":"custom","custom":{"pattern":"host 1.2.3.4"}},"capturer":{"type":"libpcap","libpcap":{"interface":"eth0","snaplen":65535,"bpf":"udp"}},"outputs":[{"type":"vxlan","vxlan":{"host":"10.0.0.1","port":4789,"vni1":42}},{"type":"zmq","zmq":{"host":"10.0.0.2","port":5000,"uuid":"abc"}}]}' > "$dir/seed_rich.json"
+            # custom present but pattern absent (optional-field edge case).
+            printf '%s' '{"req_pattern":{"type":"custom","custom":{}},"capturer":{"type":"libpcap","libpcap":{"interface":"eth0"}},"outputs":[]}' > "$dir/seed_nopattern.json"
+            ;;
     esac
 }
 
@@ -110,6 +158,14 @@ cargo +nightly fuzz build --target "$HOST_TRIPLE" diff_oracle >/dev/null
 
 fail=0
 for mode in $WHICH; do
+    case "$mode" in
+        fingerprint|task_fingerprint)
+            if [ "$GO_OK" != 1 ]; then
+                echo "  $mode: SKIPPED (Go oracle unavailable)"
+                continue
+            fi
+            ;;
+    esac
     seed "$mode"
     echo "=========================================================="
     echo " diff-fuzz: $mode vs C oracle (${SECS}s)"
@@ -117,8 +173,9 @@ for mode in $WHICH; do
     args=(-max_total_time="$SECS" -rss_limit_mb=4096 -timeout=25 -max_len=4096 \
           -artifact_prefix="$TMP/${mode}-")
     [ -n "${DFF_SEED:-}" ] && args+=(-seed="$DFF_SEED")
-    if DIFF_MODE="$mode" DIFF_C_ORACLE="$(oracle_for "$mode")" \
-        cargo +nightly fuzz run --target "$HOST_TRIPLE" diff_oracle -- "${args[@]}"; then
+    if DIFF_MODE="$mode" DIFF_ORACLE="$(oracle_for "$mode")" \
+        cargo +nightly fuzz run --target "$HOST_TRIPLE" diff_oracle \
+        "$CRATE/fuzz/corpus/diff_$mode" -- "${args[@]}"; then
         echo "  $mode: OK (no divergence)"
     else
         echo "  ❌ $mode: DIVERGENCE — see /tmp/difffuzz_last.txt and $TMP/${mode}-*"

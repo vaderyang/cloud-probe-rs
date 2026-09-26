@@ -86,26 +86,36 @@ collector 解码并对账。同一 seed 跨进程 trace 摘要一致，可精确
 二者互补：Python 差分 fuzz 证明“C 与 Rust 行为一致”，cargo-fuzz 在 Rust 内部搜索崩溃/不变量
 违例并给出可复现输入。
 
-### 1.6 覆盖引导的差分 Fuzz（Rust ↔ 原 C）
+### 1.6 覆盖引导的差分 Fuzz（Rust ↔ 原 C/Go）
 
 `parity/difffuzz.sh` 把两者结合：Rust 侧**在进程内**跑（libFuzzer 获得覆盖率反馈），
 原 C 代码作为**常驻 oracle 子进程**（`--sentinel` 行帧）；每个输入映射成同一请求喂给两侧，
 逐行比较规范化输出，一旦分歧即 panic，libFuzzer 保存触发输入。这能发现固定种子的差分测试
 （`parity/*.sh`，只覆盖“生成器能想到的”输入）遗漏的语义差异。
 
-| 模式 | 对象 | C oracle |
+| 模式 | 对象 | oracle |
 |---|---|---|
-| `packet_split` | `parse_packet` + 分片 + 校验和 | `c_harness.c` |
-| `config` | JSON 解析 + bpf 排除主机 | `c_config.c` |
-| `req_pattern` | 自定义模式匹配器 | `c_req_pattern.c` |
+| `packet_split` | `parse_packet` + 分片 + 校验和 | C `c_harness.c` |
+| `config` | JSON 解析 + bpf 排除主机 | C `c_config.c` |
+| `req_pattern` | 自定义模式匹配器 | C `c_req_pattern.c` |
+| `fingerprint` | `labels_to_fingerprint` + `String`/`UUID` | Go `difffuzz/go/oracle.go` |
+| `task_fingerprint` | `TaskConfig` → 反射 label → 指纹 | Go `difffuzz/go/oracle.go` |
 
 ```bash
 parity/difffuzz.sh 60 packet_split   # 一个模式 60s
 parity/difffuzz.sh 120 all           # 全部模式各 120s
 ```
 
-已知的有意分歧（如 §2.2 的 IPv4/TCP 严格校验）在 target 内被分类过滤，
-以便继续搜索**新**分歧。**本框架已发现并修复**：`req_pattern` 对 `port -0` 的负零解析不兼容。
+Go oracle 由 `difffuzz.sh` 现场用临时 module（`replace` 到参考仓库的 `cpdaemon`/`cpgolib`）
+编译；`task_fingerprint` 的输入是**固定字段名的模板 JSON**（只 fuzz 值与可选字段存在性），
+避免 Go/serde 在 JSON 解码宽容度上的差异淹没指纹逻辑。
+
+已知的有意分歧（§2.2 的 IPv4/TCP 严格校验；§2.3 的 JSON 解码宽容度）在 target 内被分类过滤，
+以便继续搜索**新**分歧。**本框架已发现并修复**：
+
+1. `req_pattern` 对 `port -0` 的负零解析不兼容（C `strtol` 接受，Rust `u16` 拒绝）。
+2. `TaskConfig` 指纹：Go 的 `CustomReqPatternConfig.Pattern` 是非指针 string（始终参与指纹，
+   即使为空），Rust 曾用 `Option` 跳过——已修正并对齐 Go 向量。
 
 差分/模糊测试（`parity/`）：
 
@@ -179,6 +189,14 @@ parity/run.sh 5000 42     # packet_split: C vs Rust
 
 * **重复 JSON key**（如 `{"command":"a","command":"b"}`）：cJSON 取**首个**，serde_json 取
   **末个**。属无效/歧义 JSON，实际客户端不会产生，未复刻。
+* **JSON 解码宽容度**（差分 fuzzer 发现）：
+  * cJSON 忽略首个 JSON 值之后的尾部垃圾（`{...},`），serde 拒绝——属非法 JSON。
+  * 非法 `\uXXXX` 转义：cJSON 宽容接受，serde 拒绝。
+  * Go `encoding/json` **大小写不敏感**匹配字段（`snAplen` → `snaplen`）且对缺失字段
+    零值填充（缺 `outputs`/`capturer` 不报错）；serde 大小写敏感且要求必填字段。
+  以上均仅在**非法/含糊 JSON**上分歧，且 `TaskConfig` 的直接 JSON 解码不是生产输入路径
+  （Rust 侧由代码构造）。差分 fuzzer 对 `config` 模式只喂**合法 JSON**、对
+  `task_fingerprint` 用固定字段名模板并分类单侧 `PARSE_FAIL`，以聚焦语义层差异。
 
 ## 3. 关键一致性向量（已通过）
 

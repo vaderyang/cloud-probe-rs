@@ -223,6 +223,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "773648b94d0e5d620f64f280777445740e61fe701025087ec8b57f45c791888b"
 
 [[package]]
+name = "cpgolib"
+version = "0.9.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "env_logger",
+ "log",
+ "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
 name = "cpsim"
 version = "0.9.0"
 dependencies = [
@@ -267,9 +280,11 @@ dependencies = [
 name = "cpworker-fuzz"
 version = "0.0.0"
 dependencies = [
+ "cpgolib",
  "cpsim",
  "cpworker",
  "libfuzzer-sys",
+ "serde_json",
 ]
 
 [[package]]

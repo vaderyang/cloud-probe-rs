@@ -7,11 +7,15 @@
 //! the fuzz run and libFuzzer saves the crashing input.
 //!
 //! Configuration (env):
-//!   DIFF_MODE        packet_split | config | req_pattern   (default packet_split)
-//!   DIFF_C_ORACLE    path to the compiled C oracle (see parity/difffuzz.sh)
+//!   DIFF_MODE        packet_split | config | req_pattern | fingerprint |
+//!                    task_fingerprint   (default packet_split)
+//!   DIFF_ORACLE      path to the compiled oracle subprocess (see
+//!                    parity/difffuzz.sh). `DIFF_C_ORACLE` is accepted as a
+//!                    fallback for the C-only modes.
 //!
 //! The oracle must support `--sentinel`: it prints each record's output then a
-//! line containing `@@END@@` (see parity/c_harness.c etc.).
+//! line containing `@@END@@` (see parity/c_harness.c and
+//! parity/difffuzz/go/oracle.go).
 
 #![no_main]
 
@@ -87,8 +91,9 @@ impl Drop for Oracle {
 fn oracle() -> &'static Mutex<Oracle> {
     static ORACLE: OnceLock<Mutex<Oracle>> = OnceLock::new();
     ORACLE.get_or_init(|| {
-        let path = std::env::var("DIFF_C_ORACLE")
-            .expect("DIFF_C_ORACLE must point at the compiled C oracle (run parity/difffuzz.sh)");
+        let path = std::env::var("DIFF_ORACLE")
+            .or_else(|_| std::env::var("DIFF_C_ORACLE"))
+            .expect("DIFF_ORACLE must point at the compiled oracle (run parity/difffuzz.sh)");
         Mutex::new(Oracle::spawn(&path))
     })
 }
@@ -231,13 +236,20 @@ fn rust_packet_split(data: &[u8]) -> Vec<String> {
 // Mode: config  (JSON schema parse + bpf host exclusion)
 // ---------------------------------------------------------------------------
 
-fn build_config(data: &[u8]) -> String {
+/// Map the fuzz bytes to a config line, but only if it is **valid JSON**.
+/// cJSON and serde disagree on how lenient to be with malformed input (trailing
+/// bytes, invalid `\u` escapes, …); gating on valid JSON keeps the differential
+/// comparison focused on config *semantics*. Malformed-input leniency is covered
+/// by the fixed-seed `parity/verify_config.sh` generator.
+fn build_config(data: &[u8]) -> Option<String> {
     let s = sanitize(data);
-    if s.trim().is_empty() {
+    let s = if s.trim().is_empty() {
         "{}".to_string()
     } else {
         s
-    }
+    };
+    serde_json::from_str::<serde_json::Value>(&s).ok()?;
+    Some(s)
 }
 
 fn rust_config(line: &str) -> Vec<String> {
@@ -271,22 +283,250 @@ fn rust_req_pattern(line: &str) -> Vec<String> {
 }
 
 // ---------------------------------------------------------------------------
+// Mode: fingerprint  (Rust cpgolib vs Go pkg/common)
+// ---------------------------------------------------------------------------
+
+/// Request tokens are `k\x1f v\x1f k\x1f v ...`; the fuzz input is split on NUL
+/// bytes into key/value tokens. Both sides build a map (last write wins) and
+/// hash the sorted labels, then print `Fingerprint.String()` and `.UUID()`.
+fn build_fingerprint(data: &[u8]) -> (String, Vec<String>) {
+    let tokens: Vec<String> = data.split(|&b| b == 0).map(sanitize).collect();
+    let mut pairs: Vec<(String, String)> = Vec::new();
+    let mut i = 0;
+    while i < tokens.len() {
+        let k = tokens[i].clone();
+        let v = tokens.get(i + 1).cloned().unwrap_or_default();
+        pairs.push((k, v));
+        i += 2;
+    }
+    let mut parts: Vec<String> = Vec::with_capacity(pairs.len() * 2);
+    for (k, v) in &pairs {
+        parts.push(k.clone());
+        parts.push(v.clone());
+    }
+    let request = format!("L{}", parts.join("\u{1f}"));
+
+    let mut map = std::collections::BTreeMap::new();
+    for (k, v) in &pairs {
+        map.insert(k.clone(), v.clone());
+    }
+    let f = cpgolib::fingerprint::labels_to_fingerprint(&map);
+    let out = vec![
+        cpgolib::fingerprint::fingerprint_string(f),
+        cpgolib::fingerprint::fingerprint_uuid_string(f),
+    ];
+    (request, out)
+}
+
+// ---------------------------------------------------------------------------
+// Mode: task_fingerprint  (Rust cpgolib vs Go worker.TaskConfig reflection)
+// ---------------------------------------------------------------------------
+
+/// Byte cursor that yields deterministic values (0 when exhausted).
+struct Rng<'a> {
+    d: &'a [u8],
+    i: usize,
+}
+
+impl<'a> Rng<'a> {
+    fn new(d: &'a [u8]) -> Self {
+        Rng { d, i: 0 }
+    }
+    fn b(&mut self) -> u8 {
+        let v = self.d.get(self.i).copied().unwrap_or(0);
+        self.i += 1;
+        v
+    }
+    fn bit(&mut self) -> bool {
+        self.b() & 1 == 1
+    }
+    fn num_i64(&mut self) -> i64 {
+        let hi = self.b() as i64;
+        let lo = self.b() as i64;
+        (hi << 8) | lo
+    }
+    fn num_u64(&mut self) -> u64 {
+        let hi = self.b() as u64;
+        let lo = self.b() as u64;
+        ((hi << 8) | lo) % 100_000
+    }
+    fn s(&mut self, max: usize) -> String {
+        const CS: &[u8] = b"abcdefghijklmnopqrstuvwxyz0123456789.-_";
+        let n = (self.b() as usize % max) + 1;
+        (0..n).map(|_| CS[(self.b() as usize) % CS.len()] as char).collect()
+    }
+}
+
+fn build_output(r: &mut Rng) -> String {
+    let rate = if r.bit() {
+        format!(",\"rate_limit_mbps\":{}", r.num_u64())
+    } else {
+        String::new()
+    };
+    let slice = if r.bit() {
+        format!(",\"slice\":{}", r.num_u64())
+    } else {
+        String::new()
+    };
+    match r.b() % 6 {
+        0 => format!("{{\"type\":\"null\"{rate}{slice}}}"),
+        1 => {
+            let mut o = format!("{{\"type\":\"vxlan\",\"vxlan\":{{\"host\":\"{}\"", r.s(8));
+            if r.bit() {
+                o += &format!(",\"port\":{}", r.num_i64());
+            }
+            if r.bit() {
+                o += &format!(",\"capture_time\":{}", r.bit());
+            }
+            if r.bit() {
+                o += &format!(",\"vni1\":{}", r.num_u64());
+            }
+            if r.bit() {
+                o += &format!(",\"vni2\":{}", r.num_u64());
+            }
+            if r.bit() {
+                o += &format!(",\"bind_device\":\"{}\"", r.s(6));
+            }
+            if r.bit() {
+                o += &format!(",\"pmtudisc\":\"{}\"", r.s(4));
+            }
+            if r.bit() {
+                o += &format!(
+                    ",\"split\":{{\"max_payload_size\":{},\"recalculate_checksum\":{}}}",
+                    r.num_i64(),
+                    r.bit()
+                );
+            }
+            format!("{o}}}{rate}{slice}}}")
+        }
+        2 => {
+            let mut o = format!("{{\"type\":\"gre\",\"gre\":{{\"host\":\"{}\"", r.s(8));
+            if r.bit() {
+                o += &format!(",\"service_tag\":{}", r.num_u64());
+            }
+            if r.bit() {
+                o += &format!(",\"bind_device\":\"{}\"", r.s(6));
+            }
+            if r.bit() {
+                o += &format!(",\"pmtudisc\":\"{}\"", r.s(4));
+            }
+            format!("{o}}}{rate}{slice}}}")
+        }
+        3 => {
+            let mut o = format!(
+                "{{\"type\":\"zmq\",\"zmq\":{{\"host\":\"{}\",\"port\":{},\"uuid\":\"{}\"",
+                r.s(8),
+                r.num_i64(),
+                r.s(8)
+            );
+            if r.bit() {
+                o += &format!(",\"hwm\":{}", r.num_i64());
+            }
+            if r.bit() {
+                o += &format!(",\"service_tag\":{}", r.num_u64());
+            }
+            if r.bit() {
+                o += &format!(",\"heartbeat_ms\":{}", r.num_i64());
+            }
+            format!("{o}}}{rate}{slice}}}")
+        }
+        4 => format!("{{\"type\":\"file\",\"file\":{{\"name\":\"{}\"}}{rate}{slice}}}", r.s(12)),
+        _ => {
+            let mut o = format!(
+                "{{\"type\":\"rotating_file\",\"rotating_file\":{{\"file_root\":\"{}\"",
+                r.s(12)
+            );
+            if r.bit() {
+                o += &format!(",\"max_file_interval\":{}", r.num_i64());
+            }
+            format!("{o}}}{rate}{slice}}}")
+        }
+    }
+}
+
+/// Build a **well-formed** `TaskConfig` JSON with canonical field names,
+/// varying only values and optional-field presence. This avoids Go/Rust JSON
+/// decoder differences (case-insensitive keys, zero-fill of missing fields) so
+/// the fuzzer compares the fingerprint *label extraction* itself.
+fn build_task_json(data: &[u8]) -> String {
+    let mut r = Rng::new(data);
+    let iface = r.s(8);
+    let mut lp = format!("{{\"interface\":\"{iface}\"");
+    if r.bit() {
+        lp += &format!(",\"snaplen\":{}", r.num_i64());
+    }
+    if r.bit() {
+        lp += &format!(",\"netns\":\"{}\"", r.s(6));
+    }
+    if r.bit() {
+        lp += &format!(",\"bpf\":\"{}\"", r.s(8));
+    }
+    if r.bit() {
+        lp += &format!(",\"buffer_size_mb\":{}", r.num_u64());
+    }
+    if r.bit() {
+        lp += &format!(",\"timeout_ms\":{}", r.num_i64());
+    }
+    if r.bit() {
+        lp += &format!(",\"not_filter_output_hosts\":{}", r.bit());
+    }
+    lp += "}";
+
+    let rp = match r.b() % 4 {
+        0 => "{\"type\":\"auto\"}".to_string(),
+        1 => "{\"type\":\"custom\"}".to_string(),
+        2 => "{\"type\":\"custom\",\"custom\":{}}".to_string(),
+        _ => format!(
+            "{{\"type\":\"custom\",\"custom\":{{\"pattern\":\"{}\"}}}}",
+            r.s(16)
+        ),
+    };
+
+    let o1 = build_output(&mut r);
+    let o2 = build_output(&mut r);
+    format!(
+        "{{\"req_pattern\":{rp},\"capturer\":{{\"type\":\"libpcap\",\"libpcap\":{lp}}},\"outputs\":[{o1},{o2}]}}"
+    )
+}
+
+fn build_task_fingerprint(data: &[u8]) -> (String, Vec<String>) {
+    let json = build_task_json(data);
+    let request = format!("J{json}");
+    let out = match serde_json::from_str::<cpgolib::worker_config::TaskConfig>(&json) {
+        Ok(t) => {
+            let labels = cpgolib::worker_fingerprint::task_fingerprint_labels(&t);
+            let f = cpgolib::fingerprint::labels_to_fingerprint(&labels);
+            vec![
+                cpgolib::fingerprint::fingerprint_string(f),
+                cpgolib::fingerprint::fingerprint_uuid_string(f),
+            ]
+        }
+        Err(_) => vec!["PARSE_FAIL".to_string()],
+    };
+    (request, out)
+}
+
+// ---------------------------------------------------------------------------
 // Driver
 // ---------------------------------------------------------------------------
 
 fn run(mode: &str, data: &[u8]) {
     let (request, rust_out) = match mode {
         "packet_split" => (build_packet_split(data), rust_packet_split(data)),
-        "config" => {
-            let line = build_config(data);
-            let out = rust_config(&line);
-            (line, out)
-        }
+        "config" => match build_config(data) {
+            Some(line) => {
+                let out = rust_config(&line);
+                (line, out)
+            }
+            None => return, // not valid JSON; skip
+        },
         "req_pattern" => {
             let line = build_req_pattern(data);
             let out = rust_req_pattern(&line);
             (line, out)
         }
+        "fingerprint" => build_fingerprint(data),
+        "task_fingerprint" => build_task_fingerprint(data),
         other => panic!("unknown DIFF_MODE={other}"),
     };
 
@@ -309,6 +549,18 @@ fn run(mode: &str, data: &[u8]) {
         && known_strict_parse_divergence(&data[3..])
     {
         return;
+    }
+    // Known JSON-decoding difference (PARITY.md §2.3): Go's encoding/json
+    // zero-fills missing struct fields, serde requires `capturer`/`outputs` (and
+    // nested required fields). Only affects direct TaskConfig JSON decoding, not
+    // a production input path. Classify one-sided PARSE_FAIL so the fuzzer keeps
+    // comparing value-level fingerprint labels.
+    if mode == "task_fingerprint" {
+        let rust_fail = rust_out == ["PARSE_FAIL".to_string()];
+        let oracle_fail = c_out == ["PARSE_FAIL".to_string()];
+        if rust_fail != oracle_fail {
+            return;
+        }
     }
     written_artifact(&request, &c_out, &rust_out, mode);
 }

@@ -38,17 +38,28 @@ safety guard added for upstream issue #231.
 
 ### Differential fuzzing (`diff_oracle`)
 
-Unlike the other targets, `diff_oracle` compares Rust against the real C code
-from `netis/cloud-probe`, which runs as a persistent oracle subprocess. It is
-driven by `parity/difffuzz.sh` (not `fuzz.sh`) because it needs the C sources
-compiled and two env vars:
+Unlike the other targets, `diff_oracle` compares Rust against the real
+original code from `netis/cloud-probe`. The C modules run as a persistent
+oracle subprocess; the fingerprint modes use a Go oracle (`parity/difffuzz/go/`).
+It is driven by `parity/difffuzz.sh` (not `fuzz.sh`) because it needs those
+sides compiled:
 
 ```bash
-parity/difffuzz.sh 60 all          # packet_split + config + req_pattern
-parity/difffuzz.sh 120 config      # one mode
+parity/difffuzz.sh 60 all          # all modes, 60s each
+parity/difffuzz.sh 120 task_fingerprint
 ```
 
-`DIFF_MODE` selects the request mapping and `DIFF_C_ORACLE` points at the
-compiled `--sentinel` C harness. Divergences abort the run and are written to
-`/tmp/difffuzz_last.txt`; known intentional divergences (PARITY.md §2.2) are
-classified and filtered so the fuzzer keeps looking for new ones.
+Modes:
+
+| `DIFF_MODE` | Rust vs | Oracle protocol |
+|---|---|---|
+| `packet_split` | C `packet_split.c` | `c_harness.c --sentinel` |
+| `config` | C `config.c` | `c_config.c --sentinel` |
+| `req_pattern` | C `req_pattern.c` | `c_req_pattern.c --sentinel` |
+| `fingerprint` | Go `pkg/common` | `difffuzz/go/oracle.go` (`L` prefix) |
+| `task_fingerprint` | Go `pkg/worker` reflection | `difffuzz/go/oracle.go` (`J` prefix) |
+
+`DIFF_ORACLE` points at the compiled oracle (`DIFF_C_ORACLE` also accepted).
+Divergences abort the run and are written to `/tmp/difffuzz_last.txt`; known
+intentional divergences (PARITY.md §2.2/§2.3) are classified and filtered so
+the fuzzer keeps looking for new ones.

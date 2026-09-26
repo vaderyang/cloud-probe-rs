@@ -13,7 +13,9 @@ cargo-fuzz = true
 [dependencies]
 libfuzzer-sys = "0.4"
 cpworker = { path = ".." }
+cpgolib = { path = "../../cpgolib" }
 cpsim = { path = "../../sim" }
+serde_json = "1"
 
 [[bin]]
 name = "packet_split"
