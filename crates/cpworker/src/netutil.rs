@@ -8,6 +8,10 @@ use nix::ifaddrs::getifaddrs;
 use nix::sys::socket::SockaddrLike;
 
 /// Resolve an interface's MAC address. Port of `get_if_mac_addr`.
+///
+/// # Errors
+/// Returns an error if `ifname` is empty, `getifaddrs` fails, or no MAC
+/// address is found for the interface.
 pub fn get_if_mac_addr(ifname: &str) -> Result<[u8; 6]> {
     if ifname.is_empty() {
         return Err(Error::new("ifname is empty"));
@@ -30,6 +34,9 @@ pub fn get_if_mac_addr(ifname: &str) -> Result<[u8; 6]> {
 }
 
 /// Resolve an interface's first IP address. Port of `get_if_ip_addr`.
+///
+/// # Errors
+/// Returns an error if `getifaddrs` fails or the interface has no IP address.
 pub fn get_if_ip_addr(ifname: &str) -> Result<IpAddr> {
     for ifa in getifaddrs().map_err(|e| Error::new(format!("getifaddrs error: {e}")))? {
         if ifa.interface_name != ifname {
@@ -50,6 +57,9 @@ pub fn get_if_ip_addr(ifname: &str) -> Result<IpAddr> {
 
 /// Replace every `nic.<ifname>` token in a BPF filter with the interface IP.
 /// Port of `bpf_filter_replace_nic`.
+///
+/// # Errors
+/// Returns an error if an interface referenced by the filter cannot be resolved.
 pub fn bpf_filter_replace_nic(bpf: &str) -> Result<String> {
     let mut out = String::with_capacity(bpf.len() * 2);
     let bytes = bpf.as_bytes();

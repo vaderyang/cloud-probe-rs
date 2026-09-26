@@ -11,7 +11,7 @@ use crate::error::{Error, Result};
 use crate::log::log;
 use crate::netutil::{get_if_ip_addr, get_if_mac_addr};
 use crate::packet::{
-    be16, extract_ipport, format_mac_addr, IpAddr, ETH_HDR_LEN, MAC_ADDR_LEN, PKT_DIR_INCOMING,
+    extract_ipport, format_mac_addr, IpAddr, ETH_HDR_LEN, MAC_ADDR_LEN, PKT_DIR_INCOMING,
     PKT_DIR_NONCHECK, PKT_DIR_OUTGOING, PKT_DIR_UNKNOWN,
 };
 
@@ -43,6 +43,10 @@ pub enum ReqPattern {
 
 impl ReqPattern {
     /// Port of `req_pattern_new_from_cfg_adv`.
+    ///
+    /// # Errors
+    /// Returns an error if an auto pattern cannot resolve the interface MAC or
+    /// a custom pattern fails to parse.
     pub fn new_from_cfg(cfg: &ReqPatternConfig, ifname: &str) -> Result<ReqPattern> {
         match cfg {
             ReqPatternConfig::None => Ok(ReqPattern::None),
@@ -63,6 +67,7 @@ impl ReqPattern {
     }
 
     /// Port of `req_pattern_judge_pkt_direction`.
+    #[must_use]
     pub fn judge_pkt_direction(&self, pkt_data: &[u8]) -> i32 {
         match self {
             ReqPattern::None => PKT_DIR_NONCHECK,
@@ -95,6 +100,7 @@ impl ReqPattern {
     }
 }
 
+#[must_use]
 pub fn custom_match_by_ipport(node: &Node, ip: &IpAddr, port: u16) -> bool {
     node.evaluate(ip, port)
 }
@@ -320,6 +326,9 @@ fn resolve_host(value: &str) -> Result<IpAddr> {
 }
 
 /// Parse a custom req_pattern expression into an AST.
+///
+/// # Errors
+/// Returns an error if the expression is syntactically invalid.
 pub fn parse_pattern(pattern: &str) -> Result<Node> {
     let mut parser = Parser::new(pattern);
     let ast = parser.parse_expression()?;

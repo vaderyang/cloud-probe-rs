@@ -38,6 +38,10 @@ pub struct PcapWriter {
 unsafe impl Send for PcapWriter {}
 
 impl PcapWriter {
+    /// Create a pcap dumper writing to `path` with the given snaplen.
+    ///
+    /// # Errors
+    /// Returns an error if the libpcap handle or dumper cannot be created.
     pub fn create(path: &Path, snaplen: i32) -> Result<Self> {
         let pcap = unsafe { pcap_open_dead(DLT_EN10MB, snaplen) };
         if pcap.is_null() {

@@ -59,7 +59,7 @@ fn set_pmtudisc(socket: &Socket, pmtudisc: i32) -> std::io::Result<()> {
 fn rte_raw_cksum(buf: &[u8]) -> u16 {
     let mut sum: u32 = 0x4a3b2d1c;
     let (words, tail) = buf.split_at(buf.len() / 2 * 2);
-    for w in words.chunks_exact(2) {
+    for w in words.as_chunks::<2>().0 {
         sum += u16::from_ne_bytes([w[0], w[1]]) as u32;
     }
     if let Some(&b) = tail.first() {
@@ -126,7 +126,6 @@ struct ErrorInfo {
 
 pub struct VxlanOutput {
     stats: Arc<OutputStats>,
-    rate_limit_mbps: u64,
     throttle: Option<TokenBucket>,
     slice: i32,
     vni_version: u8,
@@ -142,6 +141,11 @@ pub struct VxlanOutput {
 }
 
 impl VxlanOutput {
+    /// Create a VXLAN tunnel output.
+    ///
+    /// # Errors
+    /// Returns an error if the host is invalid or the tunnel socket cannot be
+    /// created or bound.
     pub fn new(cfg: &VxlanConfig, out: &OutputConfig, stats: Arc<OutputStats>) -> Result<Self> {
         let addr: Ipv4Addr = cfg
             .host
@@ -173,7 +177,6 @@ impl VxlanOutput {
 
         Ok(VxlanOutput {
             stats,
-            rate_limit_mbps: out.rate_limit_mbps,
             throttle,
             slice: out.slice,
             vni_version: cfg.vni_version,
@@ -278,8 +281,7 @@ impl Output for VxlanOutput {
             return -1;
         }
 
-        if self.rate_limit_mbps > 0 {
-            let tb = self.throttle.as_mut().unwrap();
+        if let Some(tb) = self.throttle.as_mut() {
             if !tb.consume(VXLAN_HDR_LEN + length, hdr.ts()) {
                 self.stats
                     .ratelimit_drop_bytes

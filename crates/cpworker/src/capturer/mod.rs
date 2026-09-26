@@ -24,6 +24,10 @@ pub trait Capturer: Send {
 }
 
 /// Construct a capturer. Mirrors `find_capturer_factory` dispatch in `task.c`.
+///
+/// # Errors
+/// Returns an error if the capturer type is unsupported or the underlying
+/// capturer cannot be created (e.g. interface open failure).
 pub fn new_capturer(
     tasks: &[TaskConfig],
     task: &TaskConfig,

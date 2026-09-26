@@ -225,8 +225,8 @@ impl WorkerTaskBuilder {
             outputs: Vec::new(),
         };
 
-        if let Some(bpf) = &strategy.bpf {
-            task.capturer.libpcap.as_mut().unwrap().bpf = Some(bpf.clone());
+        if let (Some(bpf), Some(lp)) = (&strategy.bpf, task.capturer.libpcap.as_mut()) {
+            lp.bpf = Some(bpf.clone());
         }
 
         let startup_args = if let Some(s) = &strategy.startup {
@@ -236,8 +236,7 @@ impl WorkerTaskBuilder {
             StartupArgs::default()
         };
 
-        {
-            let lp = task.capturer.libpcap.as_mut().unwrap();
+        if let Some(lp) = task.capturer.libpcap.as_mut() {
             if let Some(v) = startup_args.snaplen {
                 lp.snaplen = Some(v);
             }
@@ -429,10 +428,11 @@ impl WorkerTaskBuilder {
         }
 
         task.outputs.push(output);
-        let lp = task.capturer.libpcap.as_mut().unwrap();
-        lp.interface = item.nic_name.clone();
-        if !item.netns.is_empty() {
-            lp.netns = Some(item.netns.clone());
+        if let Some(lp) = task.capturer.libpcap.as_mut() {
+            lp.interface = item.nic_name.clone();
+            if !item.netns.is_empty() {
+                lp.netns = Some(item.netns.clone());
+            }
         }
         Ok(task)
     }
@@ -656,7 +656,10 @@ pub fn parse_startup(startup: &str, ignore_unknown: bool) -> Result<StartupArgs>
             }
         } else if a.starts_with('-') && a.len() > 1 {
             let rest = &a[1..];
-            let c = rest.chars().next().unwrap();
+            let c = rest
+                .chars()
+                .next()
+                .ok_or_else(|| Error::new("empty short flag"))?;
             match find_short(c) {
                 Some(d) => {
                     def = d;

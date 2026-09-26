@@ -34,6 +34,7 @@ impl Default for Chaos {
 
 impl Chaos {
     /// A moderately hostile network, used by the default DST suite.
+    #[must_use]
     pub fn harsh() -> Self {
         Chaos {
             loss: 0.05,

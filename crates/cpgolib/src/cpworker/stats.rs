@@ -81,6 +81,7 @@ pub struct BytesStats {
 
 impl BytesStats {
     /// Returns Ordering-like i8: -1 less, 0 equal, 1 greater.
+    #[must_use]
     pub fn compare(&self, other: &BytesStats) -> i8 {
         match self.eib.cmp(&other.eib) {
             std::cmp::Ordering::Equal => match self.bytes.cmp(&other.bytes) {
@@ -95,6 +96,7 @@ impl BytesStats {
 
     /// Difference `self - other`. Second value is true when `self < other`
     /// (the difference is then the absolute value).
+    #[must_use]
     pub fn sub(&self, other: &BytesStats) -> (BytesStats, bool) {
         let is_less = self.compare(other) < 0;
         let (x, y) = if is_less {
@@ -123,6 +125,7 @@ pub struct PacketsStats {
 }
 
 impl PacketsStats {
+    #[must_use]
     pub fn compare(&self, other: &PacketsStats) -> i8 {
         match self.peta.cmp(&other.peta) {
             std::cmp::Ordering::Equal => match self.packets.cmp(&other.packets) {
@@ -135,6 +138,7 @@ impl PacketsStats {
         }
     }
 
+    #[must_use]
     pub fn sub(&self, other: &PacketsStats) -> (PacketsStats, bool) {
         let is_less = self.compare(other) < 0;
         let (x, y) = if is_less {

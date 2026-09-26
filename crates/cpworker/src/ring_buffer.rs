@@ -27,6 +27,7 @@ pub enum RingMsg {
 }
 
 impl RingMsg {
+    #[must_use]
     pub fn msg_len(&self) -> u64 {
         match self {
             RingMsg::Packet { caplen, .. } => {
@@ -36,6 +37,7 @@ impl RingMsg {
         }
     }
 
+    #[must_use]
     pub fn task_index(&self) -> usize {
         match self {
             RingMsg::Packet { task_index, .. } => *task_index,
@@ -51,6 +53,7 @@ pub struct SpscRing {
 }
 
 impl SpscRing {
+    #[must_use]
     pub fn new(size: usize) -> Self {
         SpscRing {
             buf: Mutex::new(VecDeque::with_capacity(size)),
@@ -68,6 +71,9 @@ impl SpscRing {
 
     /// Returns `Err(msg)` (handing the message back) when full, mirroring
     /// the `spsc_ring_push` retry loop.
+    ///
+    /// # Errors
+    /// Returns `Err(msg)` with the original message if the ring is full.
     pub fn push(&self, msg: Box<RingMsg>) -> std::result::Result<(), Box<RingMsg>> {
         let mut buf = self.buf.lock();
         // Reserve one slot so full is distinguishable from empty, as in C.
@@ -92,6 +98,7 @@ pub struct SimpleAllocator {
 }
 
 impl SimpleAllocator {
+    #[must_use]
     pub fn new(capacity: u64) -> Self {
         SimpleAllocator {
             capacity: AtomicU64::new(capacity),

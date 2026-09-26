@@ -36,6 +36,7 @@ pub type TimeUs = u64;
 pub struct Rng(ChaCha8Rng);
 
 impl Rng {
+    #[must_use]
     pub fn new(seed: u64) -> Self {
         Rng(ChaCha8Rng::seed_from_u64(seed))
     }
@@ -87,6 +88,7 @@ impl Trace {
     pub fn record_u64(&mut self, tag: u8, v: u64) {
         self.record(tag, &v.to_le_bytes());
     }
+    #[must_use]
     pub fn digest(&self) -> u64 {
         self.hash
     }
@@ -200,6 +202,7 @@ pub struct Sim {
 }
 
 impl Sim {
+    #[must_use]
     pub fn new(cfg: SimConfig) -> Self {
         let seed = cfg.seed;
         let probe = Probe::new(ProbeConfig {
@@ -227,6 +230,7 @@ impl Sim {
     }
 
     /// Run to completion and return the final deterministic state.
+    #[must_use]
     pub fn run(mut self) -> SimResult {
         // Kick off the probe.
         self.schedule(0, Event::Inject { idx: 0 });

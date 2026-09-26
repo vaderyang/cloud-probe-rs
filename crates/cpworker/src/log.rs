@@ -9,6 +9,7 @@ use crate::config::{LOG_DEBUG, LOG_ERROR, LOG_FATAL, LOG_INFO, LOG_TRACE, LOG_WA
 
 static LEVEL: AtomicI32 = AtomicI32::new(LOG_INFO);
 
+#[must_use]
 pub fn log_level_string(level: i32) -> &'static str {
     match level {
         LOG_TRACE => "TRACE",

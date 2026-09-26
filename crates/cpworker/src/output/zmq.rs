@@ -27,6 +27,7 @@ const PKT_HDR_SIZE: usize = 16;
 const MPLS_HDR_SIZE: usize = 4;
 const ERROR_INFO_FLUSH_MAX_DUR_SEC: i64 = 5;
 
+#[must_use]
 pub fn uuid_to_bytes(uuid: &str) -> Option<[u8; 16]> {
     let clean: Vec<u8> = uuid.bytes().filter(|&b| b != b'-').collect();
     if clean.len() != 32 {
@@ -41,6 +42,7 @@ pub fn uuid_to_bytes(uuid: &str) -> Option<[u8; 16]> {
     Some(out)
 }
 
+#[must_use]
 pub fn make_mpls_hdr(direct: i32, service_tag: u32) -> u32 {
     let b0 = (1u8 << 7) | (((direct as u8) & 0x0f) << 3);
     let b1 = (service_tag >> 4) as u8;
@@ -59,6 +61,7 @@ pub struct BatchBuilder {
 }
 
 impl BatchBuilder {
+    #[must_use]
     pub fn new(service_tag: u32, uuid: &[u8; 16]) -> Self {
         let mut buf = vec![0u8; ZMQ_MAX_BATCH_BUF_SIZE];
         buf[0..2].copy_from_slice(&ZMQ_BATCH_PKTS_VERSION.to_be_bytes());
@@ -74,12 +77,15 @@ impl BatchBuilder {
         }
     }
 
+    #[must_use]
     pub fn num(&self) -> u16 {
         self.num
     }
+    #[must_use]
     pub fn pos(&self) -> usize {
         self.pos
     }
+    #[must_use]
     pub fn first_pktsec(&self) -> i64 {
         self.first_pktsec
     }
@@ -89,6 +95,7 @@ impl BatchBuilder {
 
     /// Whether the pending batch must be flushed before adding a packet of the
     /// given wire length at the given timestamp.
+    #[must_use]
     pub fn should_flush(&self, ts_sec: i64, length: usize) -> bool {
         self.num as usize >= ZMQ_PKTS_FLUSH_MAX_NUM
             || (self.first_pktsec != 0 && ts_sec > self.first_pktsec + ZMQ_PKTS_FLUSH_MAX_DUR_SEC)
@@ -226,7 +233,6 @@ struct ErrorInfo {
 
 pub struct ZmqOutput {
     stats: Arc<OutputStats>,
-    rate_limit_mbps: u64,
     throttle: Option<TokenBucket>,
     slice: i32,
 
@@ -241,6 +247,11 @@ pub struct ZmqOutput {
 }
 
 impl ZmqOutput {
+    /// Create a ZMQ output.
+    ///
+    /// # Errors
+    /// Returns an error if the uuid is invalid or the ZMQ socket cannot be
+    /// created or connected.
     pub fn new(cfg: &ZmqConfig, out: &OutputConfig, stats: Arc<OutputStats>) -> Result<Self> {
         let uuid = uuid_to_bytes(&cfg.uuid)
             .ok_or_else(|| Error::new(format!("invalid uuid: {}", cfg.uuid)))?;
@@ -270,7 +281,6 @@ impl ZmqOutput {
         let now = now_ts();
         Ok(ZmqOutput {
             stats,
-            rate_limit_mbps: out.rate_limit_mbps,
             throttle,
             slice: out.slice,
             context: context.clone(),
@@ -393,8 +403,7 @@ impl Output for ZmqOutput {
             return -1;
         }
 
-        if self.rate_limit_mbps > 0 {
-            let tb = self.throttle.as_mut().unwrap();
+        if let Some(tb) = self.throttle.as_mut() {
             if !tb.consume(length, hdr.ts()) {
                 self.stats.ratelimit_drop_bytes.add(length as u64);
                 self.stats.ratelimit_drop_packets.add(1);

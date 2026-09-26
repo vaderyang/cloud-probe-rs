@@ -17,6 +17,7 @@ const ERROR_INFO_FLUSH_MAX_DUR_SEC: i64 = 5;
 
 /// Wire-format GRE header used by the GRE output. This is the single source of
 /// truth for the 8-byte header (also used by the protocol parity harness).
+#[must_use]
 pub fn gre_header(service_tag: u32, direct: i32) -> [u8; GRE_HDR_LEN] {
     let key = service_tag | ((direct as u32) << 28);
     let mut h = [0u8; GRE_HDR_LEN];
@@ -37,7 +38,6 @@ struct ErrorInfo {
 
 pub struct GreOutput {
     stats: Arc<OutputStats>,
-    rate_limit_mbps: u64,
     throttle: Option<TokenBucket>,
     slice: i32,
     service_tag: u32,
@@ -88,6 +88,11 @@ fn set_pmtudisc(socket: &Socket, pmtudisc: i32) -> std::io::Result<()> {
 }
 
 impl GreOutput {
+    /// Create a GRE tunnel output.
+    ///
+    /// # Errors
+    /// Returns an error if the host is invalid or the tunnel socket cannot be
+    /// created or bound.
     pub fn new(cfg: &GreConfig, out: &OutputConfig, stats: Arc<OutputStats>) -> Result<Self> {
         let addr: Ipv4Addr = cfg
             .host
@@ -123,7 +128,6 @@ impl GreOutput {
 
         Ok(GreOutput {
             stats,
-            rate_limit_mbps: out.rate_limit_mbps,
             throttle,
             slice: out.slice,
             service_tag: cfg.service_tag,
@@ -169,8 +173,7 @@ impl Output for GreOutput {
             return -1;
         }
 
-        if self.rate_limit_mbps > 0 {
-            let tb = self.throttle.as_mut().unwrap();
+        if let Some(tb) = self.throttle.as_mut() {
             if !tb.consume(GRE_HDR_LEN + length, hdr.ts()) {
                 self.stats
                     .ratelimit_drop_bytes

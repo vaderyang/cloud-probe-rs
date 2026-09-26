@@ -16,7 +16,7 @@ use parking_lot::Mutex;
 
 use crate::capturer::{new_capturer, Capturer, PacketSink};
 use crate::config::{Config, ExecutionModel, TaskConfig};
-use crate::error::{Error, Result};
+use crate::error::Result;
 use crate::output::{new_output, Output, PacketHeader};
 use crate::ring_buffer::{RingMsg, SimpleAllocator, SpscRing};
 use crate::stats::{BytesStats, CaptureStats, OutputStats, PacketsStats};
@@ -101,6 +101,7 @@ impl PacketSink for PipelineSink {
     }
 }
 
+#[must_use]
 pub fn now_sec() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -154,6 +155,9 @@ pub struct TaskManager {
 impl TaskManager {
     /// Create the manager and all tasks. Returns an error only on catastrophic
     /// failure; individual task failures are recorded and reported separately.
+    ///
+    /// # Errors
+    /// Returns an error if the task set cannot be built.
     pub fn new(config: Config, config_path: String, working_dir: String) -> Result<Self> {
         let stats_capture = Arc::new(CaptureStats::default());
         let stats_output = Arc::new(OutputStats::default());
@@ -233,26 +237,32 @@ impl TaskManager {
         Ok(())
     }
 
+    #[must_use]
     pub fn inited_count(&self) -> usize {
         self.inited_count
     }
 
+    #[must_use]
     pub fn total_tasks(&self) -> usize {
         self.config.tasks.len()
     }
 
+    #[must_use]
     pub fn config_path(&self) -> &str {
         &self.config_path
     }
 
+    #[must_use]
     pub fn working_dir(&self) -> &str {
         &self.working_dir
     }
 
+    #[must_use]
     pub fn started_at(&self) -> i64 {
         self.started_at
     }
 
+    #[must_use]
     pub fn execution_model(&self) -> ExecutionModel {
         self.config.execution_model
     }
@@ -300,10 +310,17 @@ impl TaskManager {
                         None => break,
                     }
                 }
-            })
-            .expect("failed to spawn output thread");
-        crate::log_info!("output thread started");
-        self.output_thread = Some(handle);
+            });
+        match handle {
+            Ok(h) => {
+                crate::log_info!("output thread started");
+                self.output_thread = Some(h);
+            }
+            Err(e) => {
+                self.running.store(false, Ordering::Release);
+                crate::log_error!("failed to spawn output thread: {e}");
+            }
+        }
     }
 
     pub fn stop(&mut self) {
@@ -368,6 +385,9 @@ impl TaskManager {
     }
 
     /// Rebuild all tasks from a freshly parsed config. In-place reload.
+    ///
+    /// # Errors
+    /// Returns an error if the rebuilt task set cannot be constructed.
     pub fn reload(&mut self, new_config: Config) -> Result<()> {
         let was_running = self.output_thread.is_some();
         if was_running {
@@ -403,6 +423,10 @@ impl TaskManager {
     }
 
     /// Reload from the path recorded at startup.
+    ///
+    /// # Errors
+    /// Returns an error if the config file cannot be read or the tasks cannot
+    /// be rebuilt.
     pub fn reload_from_file(&mut self) -> Result<()> {
         let cfg = Config::parse_file(&self.config_path)?;
         // Preserve control config from the original (C moves control out before
@@ -412,6 +436,7 @@ impl TaskManager {
 
     /// Build the `collect_stats_summary` RPC payload. Mirrors
     /// `task_manager_collect_stats_summary_command`.
+    #[must_use]
     pub fn collect_stats_summary(&self) -> serde_json::Value {
         let (sec, nsec) = monotonic_now();
         let (ring_total, ring_used, mem_total, mem_used) = match &self.pipeline {
@@ -491,7 +516,7 @@ fn monotonic_now() -> (i64, i64) {
             tv_nsec: 0,
         };
         unsafe { libc::clock_gettime(libc::CLOCK_MONOTONIC, &mut ts) };
-        (ts.tv_sec as i64, ts.tv_nsec as i64)
+        (ts.tv_sec, ts.tv_nsec)
     }
     #[cfg(not(target_os = "linux"))]
     {

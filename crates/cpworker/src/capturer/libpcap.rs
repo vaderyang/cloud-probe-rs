@@ -38,6 +38,11 @@ fn now_sec() -> i64 {
 }
 
 impl LibpcapCapturer {
+    /// Open the capture interface (optionally inside a netns).
+    ///
+    /// # Errors
+    /// Returns an error if the netns cannot be entered, the pcap handle cannot
+    /// be opened, or the BPF filter fails to compile.
     pub fn new(
         tasks: &[TaskConfig],
         task: &TaskConfig,
@@ -153,13 +158,13 @@ impl LibpcapCapturer {
 impl Capturer for LibpcapCapturer {
     fn capture_once(&mut self, sink: &mut dyn PacketSink) -> u64 {
         let mut num_pkts = 0u64;
-        let mut now;
+        let now;
 
         match self.cap.next_packet() {
             Ok(packet) => {
                 let hdr = PacketHeader {
-                    ts_sec: packet.header.ts.tv_sec as i64,
-                    ts_usec: packet.header.ts.tv_usec as i64,
+                    ts_sec: packet.header.ts.tv_sec,
+                    ts_usec: packet.header.ts.tv_usec,
                     caplen: packet.header.caplen,
                     len: packet.header.len,
                 };

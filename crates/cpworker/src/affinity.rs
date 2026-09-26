@@ -5,6 +5,9 @@ use crate::error::{Error, Result};
 /// Parse a CPU list exactly like the C `cpu_set_parse` (strtoul base-0
 /// semantics). Returns the list of CPU indices, or an error. An empty string
 /// yields an empty list.
+///
+/// # Errors
+/// Returns an error if the value contains an invalid CPU range or index.
 pub fn cpu_set_parse(value: &str) -> Result<Vec<u32>> {
     let b = value.as_bytes();
     let mut pos = 0usize;
@@ -89,6 +92,9 @@ fn parse_ulong(b: &[u8], mut i: usize) -> Result<(u64, usize)> {
 }
 
 /// Build a `cpu_set_t` from the parsed list and apply it to the current thread.
+///
+/// # Errors
+/// Returns an error if `value` cannot be parsed or if the affinity syscall fails.
 #[cfg(target_os = "linux")]
 pub fn set_cpu_affinity(value: &str) -> Result<()> {
     let cpus = cpu_set_parse(value)?;

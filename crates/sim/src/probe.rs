@@ -83,6 +83,7 @@ pub struct Probe {
 }
 
 impl Probe {
+    #[must_use]
     pub fn new(cfg: ProbeConfig) -> Self {
         let uuid = uuid_to_bytes(&cfg.uuid).expect("sim uuid must be valid");
         // TokenBucket::new(0) is a no-op limiter; only use it when configured.

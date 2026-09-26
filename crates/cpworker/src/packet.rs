@@ -33,11 +33,13 @@ pub const PKT_DIR_INCOMING: i32 = 1;
 pub const PKT_DIR_OUTGOING: i32 = 2;
 
 #[inline]
+#[must_use]
 pub fn be16(b: &[u8]) -> u16 {
     u16::from_be_bytes([b[0], b[1]])
 }
 
 #[inline]
+#[must_use]
 pub fn be32(b: &[u8]) -> u32 {
     u32::from_be_bytes([b[0], b[1], b[2], b[3]])
 }
@@ -60,6 +62,7 @@ pub enum IpAddr {
 }
 
 impl IpAddr {
+    #[must_use]
     pub fn format(&self) -> String {
         match self {
             IpAddr::V4(a) => std::net::Ipv4Addr::from(*a).to_string(),
@@ -67,6 +70,7 @@ impl IpAddr {
         }
     }
 
+    #[must_use]
     pub fn as_bytes(&self) -> &[u8] {
         match self {
             IpAddr::V4(a) => a,
@@ -81,6 +85,7 @@ impl fmt::Display for IpAddr {
     }
 }
 
+#[must_use]
 pub fn format_mac_addr(mac: &[u8; MAC_ADDR_LEN]) -> String {
     format!(
         "{:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}",
@@ -110,6 +115,7 @@ pub struct PacketParseResult {
 }
 
 /// Parse an Ethernet frame. Mirrors `parse_packet()` from `packet_split.c`.
+#[must_use]
 pub fn parse_packet(pkt_data: &[u8]) -> Option<PacketParseResult> {
     let caplen = pkt_data.len();
     let mut r = PacketParseResult::default();
@@ -268,6 +274,7 @@ pub struct IpPort {
 }
 
 /// Mirrors `extract_ipport_from_ether_layer`.
+#[must_use]
 pub fn extract_ipport(pkt_data: &[u8], data_offset: usize) -> Option<IpPort> {
     if pkt_data.len() < data_offset + ETH_HDR_LEN {
         return None;

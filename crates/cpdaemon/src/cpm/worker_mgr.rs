@@ -353,7 +353,9 @@ impl WorkerManager {
         }
 
         let w_cfg = self.new_worker_config(&tasks, res);
-        let worker = st.worker.clone().unwrap();
+        let Some(worker) = st.worker.clone() else {
+            return Err(Error::new("worker not found for reload"));
+        };
         worker.update_config(&w_cfg)?;
         if let Some(client) = st.client.as_mut() {
             crate::log_info!("sending reload_config command to worker");

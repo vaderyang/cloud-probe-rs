@@ -25,6 +25,9 @@ pub struct Collector {
 impl Collector {
     /// Decode a delivered frame. Returns the represented packet count on
     /// success, or a reason string on malformed input.
+    ///
+    /// # Errors
+    /// Returns a `String` describing why the frame could not be decoded.
     pub fn consume(&mut self, msg: &Message) -> Result<u16, String> {
         let decode = match msg.kind {
             FrameKind::Gre => decode_gre(&msg.bytes),

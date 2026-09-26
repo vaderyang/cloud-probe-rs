@@ -10,7 +10,6 @@ use crate::stats::OutputStats;
 
 pub struct NullOutput {
     stats: Arc<OutputStats>,
-    rate_limit_mbps: u64,
     throttle: Option<TokenBucket>,
     slice: i32,
 }
@@ -24,7 +23,6 @@ impl NullOutput {
         };
         NullOutput {
             stats,
-            rate_limit_mbps: cfg.rate_limit_mbps,
             throttle,
             slice: cfg.slice,
         }
@@ -44,8 +42,7 @@ impl Output for NullOutput {
             return -1;
         }
 
-        if self.rate_limit_mbps > 0 {
-            let tb = self.throttle.as_mut().unwrap();
+        if let Some(tb) = self.throttle.as_mut() {
             if !tb.consume(length as usize, hdr.ts()) {
                 self.stats.ratelimit_drop_bytes.add(length as u64);
                 self.stats.ratelimit_drop_packets.add(1);

@@ -107,6 +107,7 @@ pub struct OutputConfig {
 }
 
 impl OutputConfig {
+    #[must_use]
     pub fn output_type(&self) -> &'static str {
         match self.kind {
             OutputKind::Vxlan(_) => OUTPUT_TYPE_VXLAN,
@@ -119,6 +120,7 @@ impl OutputConfig {
     }
 
     /// Host this output forwards frames to, if any. Mirrors `output_forward_host`.
+    #[must_use]
     pub fn forward_host(&self) -> Option<&str> {
         match &self.kind {
             OutputKind::Vxlan(c) => Some(&c.host),
@@ -162,6 +164,7 @@ pub enum CapturerKind {
 }
 
 impl CapturerKind {
+    #[must_use]
     pub fn capturer_type(&self) -> &'static str {
         match self {
             CapturerKind::Libpcap(_) => CAPTURER_TYPE_LIBPCAP,
@@ -170,6 +173,7 @@ impl CapturerKind {
         }
     }
 
+    #[must_use]
     pub fn snaplen(&self) -> i32 {
         match self {
             CapturerKind::Libpcap(c) => c.snaplen,
@@ -179,6 +183,7 @@ impl CapturerKind {
     }
 
     /// Interface name, if this capturer is backed by a network interface.
+    #[must_use]
     pub fn interface(&self) -> Option<&str> {
         match self {
             CapturerKind::Libpcap(c) => Some(&c.interface),
@@ -224,11 +229,19 @@ pub struct Config {
 }
 
 impl Config {
+    /// Parse a configuration from a JSON file.
+    ///
+    /// # Errors
+    /// Returns an error if the file cannot be read or the JSON is invalid.
     pub fn parse_file(path: impl AsRef<Path>) -> Result<Config> {
         let data = std::fs::read_to_string(path)?;
         Config::parse_str(&data)
     }
 
+    /// Parse a configuration from a JSON string.
+    ///
+    /// # Errors
+    /// Returns an error if the JSON is malformed or fails semantic validation.
     pub fn parse_str(s: &str) -> Result<Config> {
         let raw: RawConfig =
             serde_json::from_str(s).map_err(|e| Error::new(format!("JSON parse error: {e}")))?;
@@ -728,6 +741,7 @@ impl RawConfig {
 
 /// Build a BPF filter that excludes the forwarding hosts of every task.
 /// Port of `bpf_filter_exclude_task_output_hosts`.
+#[must_use]
 pub fn bpf_filter_exclude_task_output_hosts(bpf: &str, tasks: &[TaskConfig]) -> String {
     let mut hosts: Vec<&str> = Vec::new();
     for task in tasks {
@@ -751,6 +765,7 @@ pub fn bpf_filter_exclude_task_output_hosts(bpf: &str, tasks: &[TaskConfig]) -> 
 }
 
 /// Sane default snaplen for a task's capturer. Port of `task_capturer_snaplen`.
+#[must_use]
 pub fn task_capturer_snaplen(task: &TaskConfig) -> i32 {
     task.capturer.kind.snaplen()
 }

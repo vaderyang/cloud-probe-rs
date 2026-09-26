@@ -4,7 +4,7 @@
 //! GCC 4.8 compatibility. In Rust we let the compiler auto-vectorize a clean
 //! RFC 1071 implementation.
 
-use crate::packet::{be16, be32, put_be16, put_be32, PacketParseResult, IPPROTO_TCP, IPPROTO_UDP};
+use crate::packet::{be32, put_be16, put_be32, PacketParseResult, IPPROTO_TCP, IPPROTO_UDP};
 
 /// Fold a 32-bit partial one's-complement sum into a 16-bit result.
 #[inline]
@@ -43,6 +43,7 @@ fn htons(x: u16) -> u16 {
 }
 
 /// IPv4 header checksum. `ip_hdr` must begin at the IPv4 header.
+#[must_use]
 pub fn calculate_ip_checksum(ip_hdr: &[u8]) -> u16 {
     let ihl = ((ip_hdr[0] & 0x0f) as usize) * 4;
     cksum_finish(cksum_accumulate(&ip_hdr[..ihl.min(ip_hdr.len())], 0))
@@ -66,6 +67,7 @@ fn pseudo_header_sum_v6(ip_hdr: &[u8], protocol: u8, l4_len: u16) -> u32 {
 }
 
 /// TCP checksum using the appropriate pseudo-header.
+#[must_use]
 pub fn calculate_tcp_checksum(
     ipv4: Option<&[u8]>,
     ipv6: Option<&[u8]>,
@@ -83,6 +85,7 @@ pub fn calculate_tcp_checksum(
 }
 
 /// UDP checksum using the appropriate pseudo-header.
+#[must_use]
 pub fn calculate_udp_checksum(
     ipv4: Option<&[u8]>,
     ipv6: Option<&[u8]>,
@@ -107,11 +110,12 @@ fn put_ne16(b: &mut [u8], v: u16) {
 }
 
 /// Number of fragments needed; 1 means no split required.
+#[must_use]
 pub fn calculate_fragment_count(r: &PacketParseResult, max_payload_size: i32) -> i32 {
     if max_payload_size <= 0 || r.payload_len <= max_payload_size as usize {
         return 1;
     }
-    ((r.payload_len + max_payload_size as usize - 1) / max_payload_size as usize) as i32
+    r.payload_len.div_ceil(max_payload_size as usize) as i32
 }
 
 /// Build fragment `fragment_index` into `output_buf`, returning its length.

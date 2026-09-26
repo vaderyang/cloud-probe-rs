@@ -9,6 +9,7 @@ pub struct TokenBucket {
 }
 
 impl TokenBucket {
+    #[must_use]
     pub fn new(rate_bps: u64) -> Self {
         TokenBucket {
             rate_bps,

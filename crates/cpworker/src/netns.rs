@@ -14,6 +14,10 @@ mod imp {
         std::io::Error::last_os_error().raw_os_error().unwrap_or(0)
     }
 
+    /// Open a file descriptor for the current thread's network namespace.
+    ///
+    /// # Errors
+    /// Returns an error if `/proc/self/ns/net` cannot be opened.
     pub fn open_self_netns() -> Result<OwnedFd> {
         let fd = unsafe { libc::open(c"/proc/self/ns/net".as_ptr(), libc::O_RDONLY) };
         if fd < 0 {
@@ -23,6 +27,10 @@ mod imp {
     }
 
     /// Accepts either a path (`/proc/<pid>/ns/net`, `/var/run/netns/<name>`) or a bare name.
+    ///
+    /// # Errors
+    /// Returns an error if the path contains a NUL byte, cannot be opened, or if
+    /// entering the namespace fails.
     pub fn enter_netns_by_path(ns_path: &str) -> Result<OwnedFd> {
         let cpath = CString::new(ns_path).map_err(|_| Error::new("invalid netns path"))?;
         let fd = unsafe { libc::open(cpath.as_ptr(), libc::O_RDONLY) };
@@ -57,6 +65,10 @@ mod imp {
         Ok(unsafe { OwnedFd::from_raw_fd(fd) })
     }
 
+    /// Enter the network namespace referenced by an already-open fd.
+    ///
+    /// # Errors
+    /// Returns an error if the `setns` syscall fails.
     pub fn enter_netns_by_fd(fd: &OwnedFd) -> Result<()> {
         if unsafe { libc::setns(fd.as_raw_fd(), libc::CLONE_NEWNET) } != 0 {
             return Err(Error::new(format!("setns error: {}", errno())));
@@ -70,12 +82,24 @@ mod imp {
     use super::*;
     use std::os::fd::OwnedFd;
 
+    /// Open a file descriptor for the current thread's network namespace.
+    ///
+    /// # Errors
+    /// Always returns an error on non-Linux platforms.
     pub fn open_self_netns() -> Result<OwnedFd> {
         Err(Error::new("netns not supported on this platform"))
     }
+    /// Enter a network namespace by path.
+    ///
+    /// # Errors
+    /// Always returns an error on non-Linux platforms.
     pub fn enter_netns_by_path(_ns_path: &str) -> Result<OwnedFd> {
         Err(Error::new("netns not supported on this platform"))
     }
+    /// Enter a network namespace by fd.
+    ///
+    /// # Errors
+    /// Always returns an error on non-Linux platforms.
     pub fn enter_netns_by_fd(_fd: &OwnedFd) -> Result<()> {
         Err(Error::new("netns not supported on this platform"))
     }

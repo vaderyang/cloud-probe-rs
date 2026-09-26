@@ -30,6 +30,9 @@ pub struct UnixManager {
 
 impl UnixManager {
     /// Bind the socket and spawn the serving thread.
+    ///
+    /// # Errors
+    /// Returns an error if the socket cannot be bound.
     pub fn start(path: &str, mgr: Arc<Mutex<TaskManager>>) -> Result<Self> {
         let path = PathBuf::from(path);
         // Mirror `unlink(socket_file)` before bind.

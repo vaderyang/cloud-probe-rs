@@ -15,6 +15,10 @@ pub struct FileOutput {
 }
 
 impl FileOutput {
+    /// Create a pcap file output.
+    ///
+    /// # Errors
+    /// Returns an error if the output file cannot be created.
     pub fn new(cfg: &FileConfig, capturer: &CapturerKind, stats: Arc<OutputStats>) -> Result<Self> {
         let snaplen = capturer.snaplen();
         let writer = PcapWriter::create(std::path::Path::new(&cfg.name), snaplen)?;

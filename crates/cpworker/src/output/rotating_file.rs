@@ -22,6 +22,11 @@ pub struct RotatingFileOutput {
 }
 
 impl RotatingFileOutput {
+    /// Create a rotating pcap file output.
+    ///
+    /// # Errors
+    /// Returns an error if the root directory cannot be created or the first
+    /// file cannot be opened.
     pub fn new(
         cfg: &RotatingFileConfig,
         capturer: &CapturerKind,

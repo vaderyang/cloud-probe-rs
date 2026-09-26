@@ -43,6 +43,7 @@ pub struct InfoSummary {
 }
 
 impl InfoSummary {
+    #[must_use]
     pub fn started_at(&self) -> chrono::DateTime<chrono::Utc> {
         chrono::DateTime::from_timestamp(self.started_at_sec, 0).unwrap_or_default()
     }
@@ -57,11 +58,23 @@ pub struct PingResult {
 
 /// Client trait mirroring the Go `Client` interface.
 pub trait Client {
+    /// # Errors
+    /// Returns an error if the connection cannot be closed.
     fn close(&mut self) -> Result<()>;
+    /// # Errors
+    /// Returns an error if the connection cannot be established.
     fn dial(&mut self) -> Result<()>;
+    /// # Errors
+    /// Returns an error on transport failure or if the timeout elapses.
     fn collect_stats_summary(&mut self, timeout: Duration) -> Result<StatsSummary>;
+    /// # Errors
+    /// Returns an error on transport failure or if the timeout elapses.
     fn ping(&mut self, timeout: Duration) -> Result<PingResult>;
+    /// # Errors
+    /// Returns an error on transport failure or if the timeout elapses.
     fn info(&mut self, timeout: Duration) -> Result<InfoSummary>;
+    /// # Errors
+    /// Returns an error on transport failure or if the timeout elapses.
     fn reload_config(&mut self, timeout: Duration) -> Result<()>;
 }
 
@@ -72,10 +85,18 @@ pub struct UnixClient {
 }
 
 impl UnixClient {
+    /// Create a client with the default timeout.
+    ///
+    /// # Errors
+    /// Returns an error if `conn_str` is not a valid `unix://path` string.
     pub fn new(conn_str: &str) -> Result<Self> {
         Self::with_timeout(conn_str, DEFAULT_TIMEOUT)
     }
 
+    /// Create a client with an explicit timeout (zero means the default).
+    ///
+    /// # Errors
+    /// Returns an error if `conn_str` is not a valid `unix://path` string.
     pub fn with_timeout(conn_str: &str, timeout: Duration) -> Result<Self> {
         let (typ, addr) = conn_str
             .split_once("://")
@@ -158,6 +179,9 @@ impl UnixClient {
     }
 
     /// Send an arbitrary command and return the response object.
+    ///
+    /// # Errors
+    /// Returns an error on transport failure or if the timeout elapses.
     pub fn run_command(
         &mut self,
         command: &str,
@@ -235,10 +259,17 @@ impl Client for UnixClient {
 }
 
 /// Construct a client from a `unix://path` connection string.
+///
+/// # Errors
+/// Returns an error if `conn_str` is not a valid `unix://path` string.
 pub fn new_client(conn_str: &str) -> Result<UnixClient> {
     UnixClient::new(conn_str)
 }
 
+/// Construct a client with an explicit timeout.
+///
+/// # Errors
+/// Returns an error if `conn_str` is not a valid `unix://path` string.
 pub fn new_client_with_timeout(conn_str: &str, timeout: Duration) -> Result<UnixClient> {
     UnixClient::with_timeout(conn_str, timeout)
 }

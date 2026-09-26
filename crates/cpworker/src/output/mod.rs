@@ -25,6 +25,7 @@ pub struct PacketHeader {
 }
 
 impl PacketHeader {
+    #[must_use]
     pub fn ts(&self) -> (i64, i64) {
         (self.ts_sec, self.ts_usec)
     }
@@ -41,6 +42,10 @@ pub trait Output: Send {
 
 /// Construct an output from config. Mirrors `find_output_factory` dispatch in
 /// `task.c`.
+///
+/// # Errors
+/// Returns an error if the output type is unsupported or the output cannot be
+/// created (e.g. socket bind or file open failure).
 pub fn new_output(
     task: &TaskConfig,
     cfg: &OutputConfig,
