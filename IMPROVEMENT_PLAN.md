@@ -15,8 +15,10 @@
 
 ### P1 完成记录（commits `0ff95d6` / `62597d9` / `3ba6813`）
 
-- **P1.1**：`worker.rs` 已迁移到 `parking_lot`（`wait_while_for` 替代
-  `std::sync` 的 `wait_timeout_while`），消除 21 处投毒 `.lock().unwrap()`。
+- **P1.1**：`worker.rs` 已迁移到 `parking_lot`。注意 parking_lot 的 Condvar **没有**
+  std 的 `wait_timeout_while`，改用 `wait_while_for(&mut guard, cond, dur)`（返回
+  `WaitTimeoutResult`，无 `Result` 包装），因此去掉了 `.unwrap()`；消除 21 处投毒
+  `.lock().unwrap()`。
 - **P1.2**：删除 cpdaemon 的 `thiserror`/`env_logger` 与 workspace 的
   `tracing`/`tracing-subscriber`；tokio features 收窄为
   `rt-multi-thread/macros/net/signal/sync`。
@@ -56,10 +58,11 @@
   2. 根 `Cargo.toml` 删除 `tracing`、`tracing-subscriber`（若保留未来用途则加注释说明）。
   3. `tokio` 从 `features = ["full"]` 收窄为实际所需：
      `["rt-multi-thread", "macros", "net", "signal", "sync"]`
-     （已核对：用到 `#[tokio::main]`、`block_in_place`(→rt-multi-thread)、
+     （已核对：用到 `#[tokio::main]`、`Handle::current().block_on(...)`(→rt-multi-thread)、
      `TcpListener`、`signal::unix/ctrl_c`、`sync::watch`；未见 `process`/`time`/`fs`/`io-util`）。
 - **验收**：`cargo build --workspace` 通过；`cargo deny check` 四项 ok；
-  `cargo tree -p cpdaemon | grep -E "thiserror|env_logger"` 无输出（若删）。
+  `thiserror`/`env_logger` 不在 cpdaemon 的**直接**依赖中（`cargo tree -p cpdaemon --depth 1`）；
+  注意它们仍是 cpgolib 的传递依赖，完整依赖树中仍会出现。
 - **注意**：先 `grep -rn "env_logger::" crates/cpdaemon/src` 确认；`reqwest`/`axum` 可能
   通过 feature 间接启用 tokio 能力，收窄后以编译结果为准。
 
@@ -213,12 +216,30 @@ cargo test -p cpsim --test dst
 ./fuzz.sh            # smoke
 ```
 
+## AUDIT2 收尾（第二次审计复核，commit 待补）
+
+针对 `AUDIT2.md` 的“补一个小提交”清单：
+
+- **clippy 告警清零 + 门禁**：`cargo clippy --workspace --all-targets` 56 条告警 → 0；
+  CI clippy job 加 `-D warnings`，与验收总命令对齐。
+  - 机械项：删除 unused import（`SockaddrLike`、`std::sync::Arc`、`models::*`、
+    `HttpClient`）、`derivable_impls` 改 `#[derive(Default)]`、`single_match` 改 `if let`、
+    `if_same_then_else` 合并条件、`chunks_exact` 改 `as_chunks::<2>()`。
+  - 设计相关：`type_complexity` 用 `BuiltTask` 类型别名；`too_many_arguments`（VXLAN）
+    与 ZMQ `context` 字段加 `#[allow]` + 注释；删除未用的 `ensure_conn`。
+  - ported-but-unwired：`cpdaemon` 加 crate 级 `#![allow(dead_code)]` + 注释（引用
+    PARITY.md §5）；cripid 生成代码的 `doc_lazy_continuation` 在 `mod runtime` 上局部 allow。
+- **文档修正**：P1.2 验收改为“不在**直接**依赖”（thiserror/env_logger 仍是 cpgolib 的
+  传递依赖）；`block_in_place` 实为 `Handle::current().block_on`；`wait_while_for` 措辞订正
+  （parking_lot 无 std 的 `wait_timeout_while`）。
+- **一致性**：`poll_packets_batch` 的 `None` 分支改为 `log_error!` + return，与 `start()` 风格一致。
+- **PARITY.md**：测试数 69 → 71；§4 明确“纯 Rust = 不链接 C 库，libc crate 保留”。
+
 ## 注意事项
 
 - 删除 `env_logger` 已复核：`cpdaemon/src/main.rs` 用 `cpgolib::slogx::init_default(level)`
   初始化日志，`env_logger` 与 `thiserror` 在 cpdaemon 中均**零引用**，可安全删除。
-- 审计数据 `71 passed` 与 `PARITY.md` 的 `69` 有差异：当前实测为
-  cpworker 差分 34 + DST 11 + 其他单元/集成若干（`cargo test --workspace` 汇总为准），
-  执行前先跑基线记录准确数字。
+- 审计数据 `71 passed` 与 `PARITY.md` 的 `69` 有差异：已在本次收尾同步
+  `PARITY.md` 为 71（含 DST 11）。
 - `tokio` feature 收窄后若 `axum`/`reqwest` 需要额外特性，以编译错误为准调整，
   不要为了"好看"牺牲可编译性。

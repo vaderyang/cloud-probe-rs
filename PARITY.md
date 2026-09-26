@@ -54,7 +54,7 @@
 | cpgolib / cpctl 纯函数测试 | ✅ |
 | 其余 C/Go 测试文件 | ⚠️ 部分未移植 |
 
-当前 `cargo test --workspace`：**69 个测试全部通过**（含 `cpsim` 的 10 个 DST 测试）。
+当前 `cargo test --workspace`：**71 个测试全部通过**（含 `cpsim` 的 11 个 DST 测试）。
 
 ### 1.4 Deterministic Simulation Testing（`crates/sim`）
 
@@ -166,6 +166,13 @@ parity/run.sh 5000 42     # packet_split: C vs Rust
 | **libpcap** | `pcap` crate 绑定 + 少量 FFI | AF_PACKET（`pnet_datalink`）+ `pcap-file` + 自研 tcpdump BPF 子集编译器 |
 | **libzmq** | `zmq` crate 绑定 | `tmq`（纯 Rust） |
 | libc（raw socket/syscall） | `libc` crate | 系统调用，非第三方 C 库 |
+
+> **“纯 Rust”的定义**：本项目的目标是**不链接任何 C 库**（去除 libpcap / libzmq）。
+> `libc` 只是一个声明系统调用与常量 ABI 的 crate（不是任务 C 代码），移除 libpcap/libzmq
+> 后仍会保留，这是预期且符合目标的。
+>
+> 去 C 依赖对应改进计划 P3；开工前需先完成两项调研：用户配置中 BPF 表达式的分布审计、
+> collector 侧 ZMTP socket 语义确认。
 
 ## 5. 剩余工作与范围决策
 
