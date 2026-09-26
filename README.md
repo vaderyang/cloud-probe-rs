@@ -110,7 +110,9 @@ Reduced-scope port (`cpdaemon`):
 Code-quality audits: baseline (unsafe inventory, lock strategy, dependency
 hygiene, engineering baseline) in [AUDIT.md](AUDIT.md); review of the
 remediation plan and its implementation in [AUDIT2.md](AUDIT2.md); closure of
-the remediation findings in [AUDIT3.md](AUDIT3.md).
+the remediation findings in [AUDIT3.md](AUDIT3.md); the P3 (pure-Rust)
+implementation audit — including a critical pcap-reader regression found and
+fixed — in [AUDIT4.md](AUDIT4.md).
 
 ## Layout
 
