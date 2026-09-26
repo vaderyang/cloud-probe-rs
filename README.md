@@ -75,15 +75,21 @@ Faithfully ported:
   The C unit tests that covered packet splitting, req_pattern, config and
   stats are ported (see `cargo test`).
 * **cpgolib**, **cpctl**, **dockerpid**, **cripid** — full ports.
+* **cpdaemon** — worker lifecycle, cgroup-v2 CPU limiting, CPM HTTP client and
+  models, a functional register/strategy/metrics sync loop, and the
+  `worker_task_builder` heuristics (startup-arg parsing, container-ID decoding,
+  VNI→tag encoding) ported with the exact Go test vectors as unit tests
+  (including fingerprint `64393037-6336-6262-3137-333739363234`).
 
 Reduced-scope port (`cpdaemon`):
 
-* Worker lifecycle, cgroup-v2 CPU limiting, CPM HTTP client and models, and a
-  functional register/strategy/metrics sync loop are ported.
-* **Not** ported: the full `worker_task_builder` heuristics (container/VM
-  resolution via dockerpid/cripid/virsh, memory-policy tuning), PKCS#12 client
-  certificates, sync-log batching, and NIC-change detection.
+* **Not** ported: PKCS#12 client certificates, sync-log batching,
+  NIC-change detection (config fields pass through, the detection loop does
+  not), and memory-policy tuning.
   See `crates/cpdaemon/src/cpm/syncer.rs` for the documented simplifications.
+
+A code-quality audit (unsafe inventory, lock strategy, dependency hygiene,
+engineering baseline) is in [AUDIT.md](AUDIT.md).
 
 ## Layout
 
