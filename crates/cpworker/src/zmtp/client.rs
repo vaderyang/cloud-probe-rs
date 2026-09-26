@@ -1311,19 +1311,22 @@ mod robustness_tests {
         );
     }
 
-    /// Complete one server-side NULL handshake, then stop reading.
-    fn serve_one_handshake(listener: TcpListener) -> std::thread::JoinHandle<()> {
+    /// Complete one server-side NULL handshake and then **hold the socket open**
+    /// until the caller joins (returning it). A server that finished reading and
+    /// dropped the socket would tear the connection down right as the client
+    /// reaches `Open`, which is a test artefact, not the behaviour under test.
+    fn serve_one_handshake(listener: TcpListener) -> std::thread::JoinHandle<Option<TcpStream>> {
         std::thread::spawn(move || {
-            if let Ok((mut s, _)) = listener.accept() {
-                let _ = s.set_read_timeout(Some(Duration::from_secs(5)));
-                let _ = s.write_all(&codec::greeting());
-                let _ = s.write_all(&codec::ready_command("PULL"));
-                let mut g = [0u8; codec::GREETING_LEN];
-                let _ = s.read_exact(&mut g);
-                let mut hdr = [0u8; 2];
-                let _ = s.read_exact(&mut hdr);
-                let _ = s.read_exact(&mut vec![0u8; hdr[1] as usize]);
-            }
+            let (mut s, _) = listener.accept().ok()?;
+            let _ = s.set_read_timeout(Some(Duration::from_secs(10)));
+            let _ = s.write_all(&codec::greeting());
+            let _ = s.write_all(&codec::ready_command("PULL"));
+            let mut g = [0u8; codec::GREETING_LEN];
+            let _ = s.read_exact(&mut g);
+            let mut hdr = [0u8; 2];
+            let _ = s.read_exact(&mut hdr);
+            let _ = s.read_exact(&mut vec![0u8; hdr[1] as usize]);
+            Some(s)
         })
     }
 
@@ -1334,37 +1337,41 @@ mod robustness_tests {
         // implementation did) means we never reach the live one.
         let listener = TcpListener::bind(SocketAddr::from(([127, 0, 0, 1], 0))).unwrap();
         let good = listener.local_addr().unwrap();
+        // A listener that accepts but never speaks ZMTP: deterministic version of
+        // "collector process hung". It is held for the whole test, otherwise the
+        // port could be recycled by another test and start answering.
         let dead_listener = TcpListener::bind(SocketAddr::from(([127, 0, 0, 1], 0))).unwrap();
         let dead = dead_listener.local_addr().unwrap();
-        drop(dead_listener); // nothing will answer on this port
         let r = ScriptedResolver::new(vec![vec![dead, good]]);
         let mut z = ZmtpPush::new(
             tcp_connector_with_resolver("collector.example", good.port(), Box::new(r)),
             10,
         )
-        // A dead loopback address does not always answer with an immediate RST,
-        // so the handshake deadline is what rotates us onto the live address.
+        // The hung peer only clears after the handshake deadline, which is what
+        // rotates us onto the live address.
         .with_handshake_timeout(Duration::from_millis(200));
         let server = serve_one_handshake(listener);
         assert!(
             wait_connected(&mut z, Duration::from_secs(5)),
             "the client must rotate over the resolved addresses until one works"
         );
-        server.join().unwrap();
+        let _peer = server.join().unwrap();
+        drop(dead_listener);
     }
 
     #[test]
     fn connector_picks_up_a_dns_change_on_reconnect() {
+        // The old collector is a hung (silent) peer that is kept alive so its port
+        // cannot be recycled by a concurrent test.
         let old_listener = TcpListener::bind(SocketAddr::from(([127, 0, 0, 1], 0))).unwrap();
         let old = old_listener.local_addr().unwrap();
         let new_listener = TcpListener::bind(SocketAddr::from(([127, 0, 0, 1], 0))).unwrap();
         let new = new_listener.local_addr().unwrap();
-        drop(old_listener); // the old collector goes away
 
         let r = ScriptedResolver::new(vec![vec![old], vec![new]]);
         let mut connector =
             tcp_connector_with_resolver("collector.example", new.port(), Box::new(r.clone()));
-        // First connect resolves and uses the (now dead) old address.
+        // First connect resolves and uses the (now hung) old address.
         let _ = connector.start();
         assert_eq!(r.calls(), 1, "the connector must resolve on first use");
 
@@ -1383,7 +1390,8 @@ mod robustness_tests {
             r.calls() >= 2,
             "a reconnect must re-resolve the collector host"
         );
-        server.join().unwrap();
+        let _peer = server.join().unwrap();
+        drop(old_listener);
     }
 
     #[test]
