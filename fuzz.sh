@@ -29,6 +29,11 @@ ensure_toolchain() {
 ensure_toolchain
 cd "$CRATE"
 
+# cargo-fuzz may otherwise default to a musl target (statically linked libc is
+# incompatible with the address sanitizer). Pin the rustc host triple.
+HOST_TRIPLE="$(rustc -vV | sed -n 's/^host: //p')"
+[ -n "$HOST_TRIPLE" ] || HOST_TRIPLE="x86_64-unknown-linux-gnu"
+
 MODE="${1:-run}"
 case "$MODE" in
     --check)
@@ -39,7 +44,7 @@ case "$MODE" in
     repro)
         TARGET="$2"
         shift 2
-        exec cargo +nightly fuzz run "$TARGET" "$@"
+        exec cargo +nightly fuzz run --target "$HOST_TRIPLE" "$TARGET" "$@"
         ;;
     *)
         TIME="${1:-30}"
@@ -54,7 +59,7 @@ esac
 [ "$TARGETS" = "all" ] && TARGETS="$ALL_TARGETS"
 
 echo "==> building fuzz targets"
-cargo +nightly fuzz build >/dev/null
+cargo +nightly fuzz build --target "$HOST_TRIPLE" >/dev/null
 
 # Seed the corpora with the hand-written regression inputs.
 for t in $TARGETS; do
@@ -69,7 +74,7 @@ for t in $TARGETS; do
     echo "=========================================================="
     echo " fuzz: $t (max_total_time=${ARGS[0]#-max_total_time=}s)"
     echo "=========================================================="
-    if cargo +nightly fuzz run "$t" -- "${ARGS[@]}"; then
+    if cargo +nightly fuzz run --target "$HOST_TRIPLE" "$t" -- "${ARGS[@]}"; then
         echo "  $t: OK"
     else
         echo "  ❌ $t: CRASH — artifact under crates/cpworker/fuzz/artifacts/$t/"
