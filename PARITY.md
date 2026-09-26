@@ -167,10 +167,31 @@ parity/run.sh 5000 42     # packet_split: C vs Rust
 | **libzmq** | `zmq` crate 绑定 | `tmq`（纯 Rust） |
 | libc（raw socket/syscall） | `libc` crate | 系统调用，非第三方 C 库 |
 
-## 5. 剩余工作
+## 5. 剩余工作与范围决策
 
-1. 移植其余 C/Go 单测；把差分对拍扩展到 unix RPC 协议、ZMQ batch 线格式、端到端。
-2. 补齐 cpworker 的 DPDK capturer、task reload 的 fingerprint 复用/mailbox 协议、
-   `unix-manager` 的 select 单线程语义、无锁 ring buffer。
-3. cgroup v1 支持。
-4. 去 C 依赖（纯 Rust）见 §4。
+下面的未移植项已明确区分“**计划移植**”与“**不计划移植**”，避免范围漂移。
+
+### 5.1 计划移植（有明确目标）
+
+| 项 | 来源 | 现状 | 决策 / 触发条件 |
+|---|---|---|---|
+| 去 libpcap / libzmq（纯 Rust） | §4 | 未完成 | **计划移植**（P3，最大工程项）：AF_PACKET + 纯 Rust pcap I/O + BPF 子集；纯 Rust ZMTP |
+| DPDK capturer（`dpdk/pdump.c`） | C | 未 port，按类型返回不支持 | **计划移植**，仅在目标部署需要 `dpdk_pdump` 时实现；否则维持显式错误 |
+| task reload 的 fingerprint 复用 / mailbox 协议 | `task.c` | 简化为重建全部 task | **计划移植**：行为等价但效率低；仅在 reload 抖动成为实际问题时实现 |
+| `unix-manager` select 单线程语义 | `unix-manager.c` | 用“非阻塞 accept + 独立线程” | **计划移植**（可选）：当前与 C 行为对齐（1.5s 超时断开），仅在并发语义差异暴露时改 |
+| 无锁 ring buffer | `ring_buffer.c` | 语义等价的加锁实现 | **计划移植**（可选）：仅在 P3/性能复测显示锁成为瓶颈时实现 lock-free SPSC |
+| cgroup v1 支持 | Go `pkg/cgroup` | 仅 cgroup v2 CPU 限额 | **计划移植**：仅在仍需 cgroup v1 的宿主（老内核/容器）上实现 |
+| 其余 C/Go 单测移植 | 上游测试 | 部分已移植 | **持续**：随功能补齐同步移植向量 |
+
+### 5.2 不计划移植（明确排除）
+
+| 项 | 来源 | 原因 |
+|---|---|---|
+| Wire-DI 依赖注入框架 | Go `cmd/internal/asm` | 编译期注入在 Rust 中无收益；`main.rs` 手工装配已等价 |
+| Go `net/http/pprof` 端点 | Go `httpmix` | Go 运行时特有；Rust 侧用其他 profiling 手段 |
+| 重复 JSON key 的 cJSON“取首个”语义 | cJSON | 无效/歧义输入，见 §2.3；不复刻 |
+| C 的 ZMQ VLAN 越界读写 UB | `output_zmq.c` | 内存安全问题，Rust 选择安全行为并丢弃该包，见 §2.2 |
+
+### 5.3 去 C 依赖（纯 Rust）
+
+见 §4，对应改进计划 P3。完成后本文件 §4 状态更新为“已完成”，并从本表 5.1 移除前两行。

@@ -11,7 +11,7 @@
 | P1 | 快速清扫（锁策略、死依赖、脆弱 unwrap） | 3 | 0.5–1 天 | 低 | ✅ 已完成 |
 | P2 | 可靠性加固（panic 面、可观测性） | 3 | 1–2 天 | 低 | ✅ 已完成 |
 | P3 | 移除 C 依赖（纯 Rust） | 3 | 周级 | 高 | ⬜ 待开始 |
-| P4 | 可选质量项（覆盖率、文档、基准） | 3 | 1–2 天 | 低 | ⬜ 待开始 |
+| P4 | 可选质量项（覆盖率、文档、基准） | 3 | 1–2 天 | 低 | 🟡 P4.2/P4.3 完成，P4.1 待硬件 |
 
 ### P1 完成记录（commits `0ff95d6` / `62597d9` / `3ba6813`）
 
@@ -168,6 +168,20 @@
 - **验收**：`cargo deny check` 四项 ok；CI 在无 libpcap/libzmq 的镜像上构建通过。
 
 ---
+
+## P4 完成记录
+
+- **P4.2 rustdoc + `#![warn(missing_docs)]`**（已完成）
+  - `cpworker` 公共 API 补齐 rustdoc：293 条初始告警 → 0（config/packet/
+    stats/ring_buffer/req_pattern/task/output/capturer/netns 等全部公共类型、
+    字段、枚举变体、常量、函数/方法）。
+  - `crates/cpworker/src/lib.rs` 启用 `#![warn(missing_docs)]`，构建零告警。
+- **P4.3 未移植项范围决策**（已完成）
+  - `PARITY.md` §5 重写为两张表：**计划移植**（去 C 依赖、DPDK、reload
+    复用、select 语义、无锁 ring、cgroup v1、单测）与**不计划移植**（Wire DI、
+    pprof、重复 JSON key、C 的 VLAN UB），每项附触发条件/原因。
+- **P4.1 `vxlan-split` 服务器硬件复测**（待办）
+  - 需要固定 CPU/关闭频率调节的目标机器；本地无法完成。
 
 ## P4 — 可选质量项
 
