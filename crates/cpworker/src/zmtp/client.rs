@@ -327,7 +327,8 @@ impl ZmtpPush {
     /// Enqueue a message, progressing the connection. Never blocks.
     pub fn send(&mut self, msg: &[u8]) -> SendOutcome {
         self.poll();
-        let framed = 2 + msg.len(); // long frames add 7 header bytes, still < 16
+        // Exact wire size, so the budget accounting matches what is queued below.
+        let framed = msg.len() + if msg.len() > 255 { 9 } else { 2 };
         if self.pending.len() >= self.hwm || self.pending_bytes + framed > self.max_queued_bytes {
             return SendOutcome::Dropped;
         }

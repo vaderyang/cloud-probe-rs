@@ -202,6 +202,22 @@ parity/run.sh 5000 42     # packet_split: C vs Rust
   （Rust 侧由代码构造）。差分 fuzzer 对 `config` 模式只喂**合法 JSON**、对
   `task_fingerprint` 用固定字段名模板并分类单侧 `PARSE_FAIL`，以聚焦语义层差异。
 
+## 2.4 输出面与生命周期的有意分歧（AUDIT4 M3：P5-04 / P5-10 / P5-11）
+
+ZMQ 输出用纯 Rust ZMTP 客户端替代 libzmq，因此"C 的行为"= **libzmq 的行为**。下表逐项
+说明 Rust 侧在何处**刻意不同**（其余保持逐字节一致的 wire 格式，见 `parity/verify_zmtp.sh`）：
+
+| 行为 | C（libzmq） | Rust（`zmtp/`、`output/zmq.rs`） | 性质 |
+|---|---|---|---|
+| 退出/reload 排空在途批次 | `zmq_close` + `ZMQ_LINGER=5s` 尽量发完 | `TaskManager::stop()` 是 `Output::destroy()` 的**唯一调用点**：先 join 输出线程，再把所有 `Box<dyn Output>` 从共享集合中取出并逐个 `destroy()`（ZMQ：`drain_for(5s)`；pcap：显式 `flush()` 并上报错误）。`reload()` 也经过 `stop()` | 语义与 C 一致（此前 `destroy()` **无任何调用方**，reload/退出会静默丢弃最多 hwm×1 MiB 已入队批次，属回归，已修复） |
+| ZMTP 握手超时 | 默认无限（仅受 OS connect 超时约束） | 每条连接 10s deadline（`DEFAULT_HANDSHAKE_TIMEOUT`，可 `with_handshake_timeout` 覆盖），超时即断开重连并计数 `handshakes_given_up()` | **有意增强**：对端只接受 TCP 却不发 greeting 时不再永久停在握手相位 |
+| TCP keepalive / `TCP_USER_TIMEOUT` | keepalive 默认关闭 | 建 socket 时即设 `SO_KEEPALIVE`（idle 15s / interval 5s / 3 次探测）+ `TCP_USER_TIMEOUT=30s`；OS 拒绝时一次性告警 | **有意增强**：黑洞/NAT 老化导致的静默死链会在 ~30s 内被发现 |
+| 重连时重新解析 DNS | 每次 connect 重新 `getaddrinfo` | 与 libzmq 对齐：每次重连重新解析（`RESOLVE_TTL=1s` 限速），并**轮转全部**解析结果；解析暂时失败时沿用上一次结果 | 修复原实现"只解析一次、只取首个地址"的偏差（多 A/AAAA 记录、collector 换 IP 场景） |
+| 写缓冲相位 | libzmq 内部单一 pipe | 握手字节（greeting/READY/PONG）一律**追加**到 `Conn::out` FIFO；业务帧只有在 FIFO 空时才允许写（`can_write_messages()`）。`debug_assert` + 单测 + fuzz 不变式覆盖 | 协议正确性硬化：短写（`EAGAIN`）时不得覆盖未写尾部或与业务帧交错导致线序错位 |
+| `zmq.hwm` 取值 | 任意 `int`；**0 表示无限队列** | 配置期校验 `1..=4096`，越界**报错**（消息含字段名与"每批次 ≤1 MiB"换算） | **有意分歧**：hwm 直接决定队列内存上限，不再接受隐式的无限队列 |
+| 待发队列上限 | 仅按消息数（hwm） | 双重上限：`hwm` 条 **且** `min(hwm × 1 MiB, 64 MiB)` 字节（`DEFAULT_MAX_QUEUED_BYTES`）；超限按 libzmq `EAGAIN` 语义丢弃并计入 `error_drop_*` | **有意分歧**：慢/失联 collector 不能把 RSS 撑到 OOM（被 OOM killer 杀掉的是采集进程本身） |
+| `fwd_bytes` / `fwd_packets` 口径 | `zmq_send(ZMQ_DONTWAIT)` 返回 0（=进入 libzmq pipe）即计数 | **保持不变**：批次被 transport 接收即计数 | 与 C 一致（不静默改变对外数字）。积压与丢弃改由新指标观测：`output.zmtp_queued_batches` / `output.zmtp_queued_bytes`（gauge，见 `collect_stats_summary` 与 `cpctl stats`）+ `error_drop_*` |
+
 ## 3. 关键一致性向量（已通过）
 
 * `workerTaskBuilder` 产出的 task fingerprint（含 Go 反射标签算法的怪异 `UUID()`
@@ -252,8 +268,12 @@ parity/run.sh 5000 42     # packet_split: C vs Rust
 ### ZMTP（`crates/cpworker/src/zmtp/`）
 
 * `codec.rs`：ZMTP 3.x greeting / `READY` / 帧编解码（纯函数）。
-* `client.rs`：非阻塞 `PUSH` 状态机（非阻塞 connect、NULL 握手、HWM 排队/丢弃、
-  自动重连退避、`PING`→`PONG`；transport/connector 可注入）。
+* `client.rs`：非阻塞 `PUSH` 状态机（非阻塞 connect、NULL 握手、HWM/字节双重上限
+  排队/丢弃、自动重连退避、握手 deadline、`PING`→`PONG`、单一写 FIFO；
+  transport/connector/resolver 均可注入）。
+* 健壮性（AUDIT4 P5-10/11，均有回归测试）：握手 10s deadline、`SO_KEEPALIVE` +
+  `TCP_USER_TIMEOUT`、重连时重新解析 DNS 并轮转全部地址、队列字节上限 64 MiB、
+  `zmtp_queued_*` 指标。与 libzmq 的差异见 §2.4。
 * 对拍：`parity/verify_zmtp.sh` 用**真实 libzmq PULL** 验证 wire 逐字节一致。
 * fuzz：`zmtp_wire` + `zmtp_client`；真实 TCP 集成测试（并发/断开重连）。
 

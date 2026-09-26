@@ -165,7 +165,7 @@
 |---|---|---|---|
 | **M1（阻塞）** | WP1：P5-01/06/07 + P5-17 门禁 | — | 长链/方向语法与 libpcap 一致；无 abort；`all.sh` 绿 |
 | **M2（数据正确）** | WP2：P5-02/03/05/09 + P5-16 live CI | M1 | 丢包/VLAN/RXBUF 与 libpcap 对齐；live job 入 CI |
-| **M3（数据不丢）** | WP3：P5-04/10/11 | — | reload 不丢批次；握手超时/重解析有测试 |
+| **M3（数据不丢）** ✅ | WP3：P5-04/10/11 | — | reload 不丢批次；握手超时/重解析有测试 |
 | **M4（卫生）** | WP4 + WP5 的 P3 项 | M1–M3 | clippy/deny/test 全绿；文档一致；MSRV job |
 | **M5（收尾）** | P5-19 基准 + P5-18 文档 + P5-30 流程 | M1–M4 | README/基准更新；流程文件齐备 |
 
@@ -217,6 +217,41 @@ WP2 与 WP3 可并行；M1 必须最先（唯一可能"完全无数据"的缺陷
 - 验证：`cargo test --workspace` **116 passed**；clippy/deny ok；root 下 2 个 `#[ignore]`
   live 测试通过（lo 过滤 + veth VLAN 重插）。
 
+### M3 已完成
+
+- ✅ **P5-04 `Output::destroy()` 调用点**：`TaskManager::stop()` 成为**唯一**调用点
+  （先 join 输出线程，再把 outputs 从共享集合取出后逐个 `destroy()`，锁内不做 5s linger，
+  重复调用为 no-op）；`reload()` 与 `Drop` 都经过它。`RotatingFileOutput` 补上 `destroy()`。
+  - 红→绿：`tests/output_lifecycle.rs`（对端只握手不读取时，**修复前 mock peer 只收到 508/6000
+    个包**，修复后 stop()/reload() 全部送达）；`task::tests` 4 个 spy 单测（修复前 destroy 次数=0）；
+    `output::rotating_file::tests::destroy_flushes_buffered_packets`（修复前磁盘上只有 28824/32920 字节）。
+- ✅ **P5-10 ZMTP 健壮性**：握手 deadline（默认 10s，超时→重连并计数）；
+  `SO_KEEPALIVE`(15s/5s/3) + `TCP_USER_TIMEOUT`(30s)，OS 拒绝时一次性告警；
+  `TcpConnector` 保存 host/port 并在重连时**重新解析**（`RESOLVE_TTL=1s` 限速）且
+  **轮转全部**解析结果（新增可注入 `Resolver`）；写缓冲改为**单一 FIFO**
+  （握手字节只追加不覆盖，业务帧需 `can_write_messages()` 才允许写）+ `debug_assert`。
+  - 红→绿：`silent_peer_handshake_times_out_and_reconnects`、
+    `tcp_transport_enables_keepalive_and_user_timeout`（getsockopt 回读）、
+    `connector_covers_every_resolved_address`、`connector_picks_up_a_dns_change_on_reconnect`、
+    `short_write_during_greeting_keeps_the_wire_in_order`、
+    `short_write_during_ready_does_not_interleave_messages`、
+    `tests/zmtp_interop.rs::real_tcp_silent_peer_is_given_up_on`；
+    `zmtp_client` fuzz 加入"对端窗口有界（短写→EAGAIN）"分支与"上线字节必须能按
+    greeting+整帧解析"不变式。
+- ✅ **P5-11 队列内存与指标**：`zmq.hwm` 配置期校验 `1..=4096`（0/负数/超大报错并说明
+  hwm×1 MiB 换算）；队列除条数外再受字节上限 `min(hwm×1 MiB, 64 MiB)` 约束；
+  新增 gauge `zmtp_queued_batches` / `zmtp_queued_bytes`（`collect_stats_summary` 与
+  `cpctl stats` 均可见）。`fwd_*` 口径**保持不变**（与 C 的 `zmq_send(DONTWAIT)` 一致），
+  已在代码与 `PARITY.md §2.4` 明确记录。
+  - 红→绿：`config::tests::zmq_hwm_is_range_checked`、
+    `zmtp::client::tests::queue_is_bounded_in_bytes`、`queued_bytes_tracks_the_queue`、
+    `output::zmq::tests::{queue_backlog_is_published_as_gauges,queue_budget_is_bounded_by_hwm_and_bytes}`。
+- ✅ 新增 `PARITY.md §2.4`：libzmq 与 Rust ZMTP 的输出面差异表（linger 调用点、握手超时、
+  keepalive/`TCP_USER_TIMEOUT`、DNS 重解析、hwm 校验、队列字节上限、`fwd_*` 口径）。
+- 验证：`cargo test --workspace` **137 passed / 0 failed**；clippy `-D warnings` 0；
+  `cargo fmt --all -- --check` 通过；`cargo deny check` 四项 ok；`parity/all.sh` **7/7 绿**。
+
 ### 下一步
 
-- **M3**：输出与生命周期（P5-04 `destroy()`、P5-10 ZMTP 超时/keepalive/重解析、P5-11 内存上限）。
+- **M4**：卫生（WP4：P5-15/20/21/22/23 + WP5 的 P3 项）。
+
