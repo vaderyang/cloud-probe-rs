@@ -25,7 +25,7 @@ use std::time::Duration;
 use clap::{Parser, Subcommand};
 use tokio::sync::watch;
 
-use config::DaemonConfig;
+use config::{DaemonConfig, DEFAULT_HTTP_PORT};
 use cpm::client::{ClientConfig, HttpClient};
 use cpm::syncer::{generate_uuid, RegConfig, Syncer, SyncerConfig};
 use cpm::worker_mgr::{MemoryConfig, PipelineConfig, WorkerConfig, WorkerManager};
@@ -77,6 +77,23 @@ fn main() {
             }
         }
     }
+}
+
+/// Parse `listen.http.port` into a TCP port.
+///
+/// An absent/empty value means the default ([`DEFAULT_HTTP_PORT`], which is also
+/// viper's default); anything that is not a `u16` is a fatal configuration
+/// error rather than a silent fallback (AUDIT4 P5-22).
+fn parse_http_port(s: &str) -> std::result::Result<u16, String> {
+    let trimmed = s.trim();
+    if trimmed.is_empty() {
+        return Ok(DEFAULT_HTTP_PORT);
+    }
+    trimmed.parse::<u16>().map_err(|e| {
+        format!(
+            "{s:?} is not a valid port number ({e}); expected 0-65535, or an empty value for {DEFAULT_HTTP_PORT}"
+        )
+    })
 }
 
 fn parse_u64(s: &str, default: u64) -> u64 {
@@ -208,7 +225,12 @@ async fn run_server(cfg: DaemonConfig) -> anyhow::Result<()> {
     } else {
         cfg.listen.http.address.clone()
     };
-    let port = cfg.listen.http.port.parse::<u16>().unwrap_or(9022);
+    // AUDIT4 P5-22: a bad port used to fall back to 9022 *silently*, moving the
+    // health endpoint somewhere nobody was looking for it. Go handed the port
+    // string straight to `net.Listen`, so an unparseable port failed startup;
+    // do the same here.
+    let port = parse_http_port(&cfg.listen.http.port)
+        .map_err(|e| anyhow::anyhow!("invalid listen.http.port: {e}"))?;
     let listener = tokio::net::TcpListener::bind((addr.as_str(), port)).await?;
     let router = axum::Router::new().route("/", axum::routing::get(|| async { "OK" }));
     let http_shutdown = {
@@ -242,4 +264,42 @@ async fn run_server(cfg: DaemonConfig) -> anyhow::Result<()> {
     let _ = sync_handle.await;
     let _ = server.await;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_http_port;
+
+    #[test]
+    fn http_port_is_parsed_not_silently_defaulted() {
+        assert_eq!(parse_http_port("8080").unwrap(), 8080);
+        assert_eq!(parse_http_port("  9022 ").unwrap(), 9022);
+        assert_eq!(parse_http_port("0").unwrap(), 0);
+        assert_eq!(parse_http_port("65535").unwrap(), 65535);
+        // empty / absent keeps viper's default (the field default is "9022")
+        assert_eq!(
+            parse_http_port("").unwrap(),
+            crate::config::DEFAULT_HTTP_PORT
+        );
+    }
+
+    /// The regression this guards: a typo used to bind 9022 and log nothing.
+    #[test]
+    fn bad_http_port_is_a_fatal_error() {
+        for bad in [
+            "http",
+            "90222",
+            "-1",
+            "9022.5",
+            "٩٩٩",
+            "999999999999999999999",
+        ] {
+            let e = parse_http_port(bad).unwrap_err();
+            assert!(e.contains("not a valid port number"), "{bad}: {e}");
+            assert!(
+                e.contains("65535"),
+                "{bad}: message must say what is valid: {e}"
+            );
+        }
+    }
 }

@@ -26,17 +26,48 @@ pub struct Listen {
 #[serde(default)]
 pub struct HttpListen {
     pub address: String,
+    #[serde(deserialize_with = "de_string_or_number")]
     pub port: String,
+}
+
+/// Accept either a JSON string or a JSON number for a string field.
+///
+/// The Go daemon reads `listen.http.port` through viper, whose *default* is the
+/// number `9022`, and its shipped `examples/template.json` therefore writes
+/// `"port": 9022` unquoted; operators routinely keep that form. serde would
+/// reject it ("invalid type: integer"), so the port is normalised to a string
+/// here and validated by [`crate::parse_http_port`] at startup.
+fn de_string_or_number<'de, D>(d: D) -> std::result::Result<String, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Port {
+        Text(String),
+        // u16, so an out-of-range number is refused here rather than turning
+        // into a string that only fails later.
+        Num(u16),
+    }
+    Ok(match Option::<Port>::deserialize(d)? {
+        None => String::new(),
+        Some(Port::Text(s)) => s,
+        Some(Port::Num(n)) => n.to_string(),
+    })
 }
 
 impl Default for HttpListen {
     fn default() -> Self {
         HttpListen {
             address: String::new(),
-            port: "9022".into(),
+            port: DEFAULT_HTTP_PORT.to_string(),
         }
     }
 }
+
+/// Default HTTP listen port. Port of `vp.SetDefault(VKey.Listen.Http.Port, 9022)`
+/// from `cpdaemon/cmd/internal/asm/key.go`.
+pub const DEFAULT_HTTP_PORT: u16 = 9022;
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
@@ -347,4 +378,48 @@ fn humantime_from_str(s: &str) -> Option<std::time::Duration> {
         }
     }
     s.parse::<u64>().ok().map(std::time::Duration::from_secs)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn http_port(json: &str) -> Result<String> {
+        let cfg: DaemonConfig =
+            serde_json::from_str(json).map_err(|e| Error::new(format!("parse: {e}")))?;
+        Ok(cfg.listen.http.port.clone())
+    }
+
+    /// The Go daemon defaults `listen.http.port` to the *number* 9022 and its
+    /// shipped template.json keeps that form; viper tolerated both, so the Rust
+    /// port must not fail to even load a config because of it.
+    #[test]
+    fn http_port_accepts_strings_and_numbers() {
+        assert_eq!(
+            http_port(r#"{"listen":{"http":{"port":9022}}}"#).unwrap(),
+            "9022"
+        );
+        assert_eq!(
+            http_port(r#"{"listen":{"http":{"port":"8080"}}}"#).unwrap(),
+            "8080"
+        );
+        // absent -> default
+        assert_eq!(http_port(r#"{}"#).unwrap(), "9022");
+        assert_eq!(http_port(r#"{"listen":{"http":{}}}"#).unwrap(), "9022");
+        // explicit null -> empty, i.e. "use the default" (see parse_http_port)
+        assert_eq!(
+            http_port(r#"{"listen":{"http":{"port":null}}}"#).unwrap(),
+            ""
+        );
+        assert_eq!(http_port(r#"{"listen":{"http":{"port":""}}}"#).unwrap(), "");
+    }
+
+    #[test]
+    fn http_port_rejects_things_that_are_not_ports() {
+        // A JSON bool/array/object is not a port at all.
+        assert!(http_port(r#"{"listen":{"http":{"port":true}}}"#).is_err());
+        assert!(http_port(r#"{"listen":{"http":{"port":[22]}}}"#).is_err());
+        // A number outside u16 cannot be a port either.
+        assert!(http_port(r#"{"listen":{"http":{"port":70000}}}"#).is_err());
+    }
 }
