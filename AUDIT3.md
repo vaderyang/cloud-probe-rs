@@ -73,4 +73,23 @@ clippy 零告警且有硬门禁、panic 面收敛、文档与实际严格一致�
   逐项 `#[allow(dead_code)]` + 注释（仅限 ported-but-unwired 的具名项）。
 - **未声明 MSRV**：审计未提及。`be4c303` 引入的 `as_chunks::<2>()` 需要 Rust ≥ 1.88；
   依赖中最高 MSRV 也是 1.88（tonic 0.14 / icu）。本轮已在 workspace 声明
-  `rust-version = "1.88"` 并由各成员继承。
+  `rust-version = 1.88` 并由各成员继承。
+
+---
+
+## 整改验证（第三方复核，2026-09-26，commit `05aa431` / `a48258f`）
+
+上述审查备注的三点遗漏**经复核均属实**，补丁实施结果逐项验证通过：
+
+| 补丁 | 验证结果 |
+|---|---|
+| MSRV 声明（`05aa431`） | ✅ workspace `rust-version = "1.88"`，7 个成员全部 `rust-version.workspace = true` 继承；本地 rustc 1.98.1 ≥ 1.88；README Build 节已声明 |
+| dead_code 收窄（`05aa431`） | ✅ `cpdaemon/src/main.rs` crate 级 `#![allow(dead_code)]` 移除，改为逐项 allow + 注释；`cargo clippy --workspace --all-targets -- -D warnings` 仍为 **0**（逐项覆盖完整，无新增告警） |
+| CI 口径修正（`a48258f`） | ✅ AUDIT3 已补精确说明：硬门禁为 7 个 job，`coverage`/`dependency-review` 为建议性（后者仅 PR 事件运行） |
+
+全量验收（`main@a48258f`）：`cargo fmt --check` 干净 / `cargo clippy -D warnings` 0 /
+`cargo test --workspace` **71 passed** / `cargo deny check` 四项 ok / CI **9 job 全绿**
+（dependency review push 时 skipped，符合预期）。
+
+**复核结论**：维护者的审查补丁正确且必要——原 AUDIT3 未指出 crate 级 dead_code allow
+削弱了 clippy 门禁的实际覆盖，也未提及 MSRV 缺失；两者均已修正。审计闭环再次成立。
