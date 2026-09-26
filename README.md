@@ -114,6 +114,19 @@ cloud-probe-rs/
     └── sim/                   # Deterministic Simulation Testing (DST)
 ```
 
+## Supply chain & licensing
+
+* **License policy: permissive / non-GPL only.** `deny.toml` uses an explicit
+  allow-list (MIT, Apache-2.0, BSD-2/3-Clause, ISC, Unicode-3.0, Zlib, MPL-2.0,
+  CC0-1.0, Unlicense, OpenSSL, BSL-1.0, CDLA-Permissive-2.0). cargo-deny is
+  deny-by-default, so every GPL/AGPL/LGPL/SSPL-family license is rejected. CI
+  additionally asserts that no GPL-family identifier is added to `deny.toml`.
+* **CVE / advisory checks.** CI runs `cargo-deny check advisories` (RustSec DB,
+  yanked crates denied) and `cargo audit` on every push. PRs also run GitHub's
+  `dependency-review-action` (fails on high-severity advisories).
+* **Automated updates.** Dependabot watches `Cargo.lock` and the GitHub Actions
+  used by CI (`.github/dependabot.yml`).
+
 ## Benchmarks: C vs Rust
 
 Measured against the reference C `cpworker` from

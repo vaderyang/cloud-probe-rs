@@ -56,11 +56,47 @@ jobs:
       - run: cargo clippy --workspace --all-targets
 
   deny:
-    name: cargo-deny
+    name: licenses & advisories (cargo-deny)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # deny.toml: permissive / non-GPL allow-list, RustSec advisories, yanked
+      # crates denied, source/registry allow-list.
       - uses: EmbarkStudios/cargo-deny-action@v2
+      - name: Assert no GPL-family license is allowed
+        run: |
+          # The allow-list is deny-by-default, so GPL cannot pass unless someone
+          # adds it to deny.toml. Guard against that explicitly (ignoring
+          # comments, which document the policy).
+          if grep -v '^[[:space:]]*#' deny.toml | grep -Eiq 'GPL|AGPL|LGPL|SSPL'; then
+            echo '::error::deny.toml must not allow GPL-family licenses'
+            exit 1
+          fi
+          echo 'OK: no GPL-family license in deny.toml'
+
+  security:
+    name: cargo-audit (CVE)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-audit
+      - name: Audit dependencies against the RustSec advisory DB
+        run: cargo audit
+
+  dependency-review:
+    name: dependency review
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/dependency-review-action@v4
+        with:
+          fail-on-severity: high
 
   parity:
     name: differential parity (C vs Rust)
