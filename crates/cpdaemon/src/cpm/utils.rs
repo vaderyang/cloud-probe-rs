@@ -33,6 +33,7 @@ pub fn split_args(input: &str) -> Result<Vec<String>, String> {
 }
 
 /// Port of `isUnknownFlagError`.
+#[allow(dead_code)] // ported helper, not yet wired (PARITY.md §5)
 pub fn is_unknown_flag_error(err: &str) -> bool {
     err.contains("unknown flag")
 }

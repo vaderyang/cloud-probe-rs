@@ -1,4 +1,7 @@
 //! HTTP response helpers. Port of `cpdaemon/pkg/httpmix/helper.go`.
+//!
+//! Ported for parity; not yet wired into the daemon. See `PARITY.md` §5.
+#![allow(dead_code)]
 
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};

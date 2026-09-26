@@ -2,6 +2,7 @@
 name = "cpworker"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "Netis Cloud Probe packet capture and forwarding engine (Rust port)"

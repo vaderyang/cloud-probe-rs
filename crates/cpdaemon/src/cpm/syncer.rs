@@ -26,6 +26,7 @@ pub struct RegConfig {
     pub including_nics: Vec<String>,
     pub pod_name: String,
     pub namespace: String,
+    #[allow(dead_code)] // ported field, not yet wired (PARITY.md §5)
     pub uuid_file: String,
     pub uuid: String,
     pub client_version: String,
@@ -85,6 +86,7 @@ impl Syncer {
         })
     }
 
+    #[allow(dead_code)] // ported accessor, not yet wired (PARITY.md §5)
     pub fn sync_log(&self) -> SharedSyncLogBuffer {
         self.sync_log.clone()
     }

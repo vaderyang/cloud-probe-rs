@@ -18,6 +18,8 @@ a separate checkout; set `CLOUD_PROBE_SRC` when running the differential/fuzz ha
 
 ## Build
 
+Requires Rust **1.88+** (declared as `rust-version` in `Cargo.toml`).
+
 ```bash
 # from this directory
 cargo build --workspace          # debug

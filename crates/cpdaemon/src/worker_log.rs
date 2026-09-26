@@ -2,6 +2,7 @@
 
 /// Parse a `2006-01-02T15:04:05 LEVEL message` line.
 /// Returns (level, message) or None if the line is not a valid log line.
+#[allow(dead_code)] // ported parser, not yet wired (PARITY.md §5)
 pub fn parse_log_line(line: &str) -> Option<(&'static str, String)> {
     let (ts, rest) = line.split_once(' ')?;
     // Validate timestamp shape yyyy-mm-ddThh:mm:ss.

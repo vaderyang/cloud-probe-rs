@@ -12,17 +12,27 @@ pub const PACKET_CHANNEL_TYPE_FILE: &str = "FILE";
 
 pub const API_VERSION_V1: &str = "v1";
 
+// Model constants mirroring the Go `pkg/cpm/models.go` exported values. Some are
+// not yet referenced by the daemon; kept for parity (PARITY.md §5).
+#[allow(dead_code)]
 pub const STATUS_ACTIVE: &str = "active";
+#[allow(dead_code)]
 pub const STATUS_INACTIVE: &str = "inactive";
+#[allow(dead_code)]
 pub const STATUS_ERROR: &str = "error";
 
+#[allow(dead_code)]
 pub const SYNC_MODE_PULL: &str = "pull";
+#[allow(dead_code)]
 pub const SYNC_MODE_PUSH: &str = "push";
 
+#[allow(dead_code)]
 pub const DEPLOY_ENV_INSTANCE: &str = "INSTANCE";
+#[allow(dead_code)]
 pub const DEPLOY_ENV_HOST: &str = "HOST";
 
 pub const SUPPORT_API_VERSIONS: &[&str] = &[API_VERSION_V1];
+#[allow(dead_code)]
 pub const SUPPORT_PACKET_CHANNEL_TYPES: &[&str] = &[
     PACKET_CHANNEL_TYPE_GRE,
     PACKET_CHANNEL_TYPE_ZMQ,

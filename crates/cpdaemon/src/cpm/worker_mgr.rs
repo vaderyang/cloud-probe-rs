@@ -128,6 +128,8 @@ impl WorkerConfig {
 }
 
 #[derive(Debug, Default)]
+// Ported result type; some fields are not yet read by the daemon (PARITY.md §5).
+#[allow(dead_code)]
 pub struct WorkerCreateResult {
     pub warnings: Vec<Error>,
     pub buff_size_per_task: u64,

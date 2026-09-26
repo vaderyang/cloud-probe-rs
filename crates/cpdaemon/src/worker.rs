@@ -19,6 +19,7 @@ use crate::worker_config::Config;
 #[derive(Debug, Clone, Default)]
 pub struct ResLimit {
     pub cpu: Option<f64>,
+    #[allow(dead_code)] // ported limit, not yet enforced (PARITY.md §5)
     pub mem: Option<i64>,
 }
 
@@ -84,10 +85,12 @@ impl Worker {
         })
     }
 
+    #[allow(dead_code)] // ported accessor, not yet wired (PARITY.md §5)
     pub fn name(&self) -> &str {
         &self.name
     }
 
+    #[allow(dead_code)] // ported accessor, not yet wired (PARITY.md §5)
     pub fn config_file(&self) -> &str {
         &self.cfg.config_file
     }

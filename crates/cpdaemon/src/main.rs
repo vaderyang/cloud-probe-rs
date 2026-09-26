@@ -2,10 +2,9 @@
 
 // `cpdaemon` is a partial port of the Go daemon: some ported API surface (HTTP
 // helpers, model constants, log/synclog plumbing, accessors) is present for
-// parity but not yet wired up. Dead code is allowed crate-wide until it is
-// integrated; tracked in `PARITY.md` §5. Do not add new unused code without a
-// plan to wire it up or remove it.
-#![allow(dead_code)]
+// parity but not yet wired up. Those specific items carry `#[allow(dead_code)]`
+// with a pointer to `PARITY.md` §5; do not add new unused code without a plan to
+// wire it up or remove it.
 
 mod common;
 mod config;

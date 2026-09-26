@@ -25,6 +25,7 @@ impl Default for SyncLogBuffer {
 }
 
 impl SyncLogBuffer {
+    #[allow(dead_code)] // ported writer, not yet wired (PARITY.md §5)
     pub fn write(&mut self, ts_sec: i64, ts_micro: i64, level: &str, details: String) {
         self.entries[self.end] = LogEntry {
             timestamp: ts_sec,

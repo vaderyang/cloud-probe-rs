@@ -9,6 +9,7 @@ pub const CAPTURER_TYPE_LIBPCAP: &str = "libpcap";
 pub const OUTPUT_TYPE_VXLAN: &str = "vxlan";
 pub const OUTPUT_TYPE_GRE: &str = "gre";
 pub const OUTPUT_TYPE_ZMQ: &str = "zmq";
+#[allow(dead_code)] // ported constant, not yet wired (PARITY.md §5)
 pub const OUTPUT_TYPE_FILE: &str = "file";
 pub const OUTPUT_TYPE_ROTATING_FILE: &str = "rotating_file";
 
