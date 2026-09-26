@@ -24,5 +24,6 @@ pub mod ring_buffer;
 pub mod stats;
 pub mod task;
 pub mod unix_manager;
+pub mod zmtp;
 
 pub use error::{Error, Result};

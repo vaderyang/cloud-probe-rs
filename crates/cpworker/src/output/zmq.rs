@@ -5,7 +5,7 @@
 //! protocol parity harness).
 
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use super::{Output, PacketHeader};
 use crate::config::{OutputConfig, ZmqConfig};
@@ -16,6 +16,7 @@ use crate::packet::{
 };
 use crate::ratelimit::TokenBucket;
 use crate::stats::OutputStats;
+use crate::zmtp::{self, SendOutcome, ZmtpPush};
 
 const ZMQ_MAX_BATCH_BUF_SIZE: usize = 1_048_576;
 const ZMQ_PKTS_FLUSH_MAX_DUR_SEC: i64 = 1;
@@ -246,11 +247,8 @@ pub struct ZmqOutput {
     throttle: Option<TokenBucket>,
     slice: i32,
 
-    // The ZMQ sockets borrow from the context, so keep it alive for the
-    // lifetime of the output even though it is never read directly.
-    #[allow(dead_code)]
-    context: zmq::Context,
-    pusher: zmq::Socket,
+    /// Pure-Rust ZMTP `PUSH` client (non-blocking, auto-reconnect).
+    zmtp: ZmtpPush,
 
     builder: BatchBuilder,
 
@@ -269,21 +267,10 @@ impl ZmqOutput {
         let uuid = uuid_to_bytes(&cfg.uuid)
             .ok_or_else(|| Error::new(format!("invalid uuid: {}", cfg.uuid)))?;
 
-        let context = zmq::Context::new();
-        let pusher = context
-            .socket(zmq::PUSH)
-            .map_err(|e| Error::new(format!("zmq_socket() error: {e}")))?;
-        pusher
-            .set_sndhwm(cfg.hwm)
-            .map_err(|e| Error::new(format!("set hwm error: {e}")))?;
-        pusher
-            .set_linger(5 * 1000)
-            .map_err(|e| Error::new(format!("set linger error: {e}")))?;
-
         let address = format!("tcp://{}:{}", cfg.host, cfg.port);
-        pusher
-            .connect(&address)
+        let connector = zmtp::tcp_connector(&cfg.host, cfg.port)
             .map_err(|e| Error::new(format!("zmq connect address {address} error: {e}")))?;
+        let zmtp = ZmtpPush::new(connector, cfg.hwm.max(1) as usize);
 
         let throttle = if out.rate_limit_mbps > 0 {
             Some(TokenBucket::new(out.rate_limit_mbps * 1_000_000))
@@ -296,8 +283,7 @@ impl ZmqOutput {
             stats,
             throttle,
             slice: out.slice,
-            context: context.clone(),
-            pusher,
+            zmtp,
             builder: BatchBuilder::new(cfg.service_tag, &uuid),
             heartbeat_ms: cfg.heartbeat_ms,
             last_pkt_ts: now,
@@ -341,15 +327,16 @@ impl ZmqOutput {
             self.error_info.first_pktsec = self.builder.first_pktsec();
         }
 
-        let sent = self.pusher.send(&self.builder.buf[..len], zmq::DONTWAIT);
+        let sent = self.zmtp.send(&self.builder.buf[..len]);
         match sent {
-            Ok(()) => {
+            SendOutcome::Queued => {
                 self.stats.fwd_bytes.add(len as u64);
                 self.stats.fwd_packets.add(send_num as u64);
             }
-            Err(e) => {
+            SendOutcome::Dropped => {
                 if self.error_info.nb_drop_batches == 0 {
-                    self.error_info.send_error = format!("zmq_send failed: {e}");
+                    self.error_info.send_error =
+                        "zmq_send failed: EAGAIN (HWM reached)".to_string();
                 }
                 self.error_info.nb_drop_batches += 1;
                 self.error_info.nb_drop_packets += send_num as u64;
@@ -452,6 +439,8 @@ impl Output for ZmqOutput {
     }
 
     fn heartbeat(&mut self, now: i64) {
+        // Progress reconnect / flush even when no packets are flowing.
+        self.zmtp.poll();
         self.flush_if_stale(now);
         if self.heartbeat_ms <= 0 {
             return;
@@ -466,5 +455,10 @@ impl Output for ZmqOutput {
         if elapsed_ms >= self.heartbeat_ms as i64 {
             self.send_heartbeat_packet(now_tv);
         }
+    }
+
+    fn destroy(&mut self) {
+        // Linger: best-effort flush of queued batches (mirrors ZMQ_LINGER=5s).
+        self.zmtp.drain_for(Duration::from_secs(5));
     }
 }

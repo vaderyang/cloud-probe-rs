@@ -31,7 +31,6 @@ chrono.workspace = true
 socket2.workspace = true
 parking_lot.workspace = true
 pcap.workspace = true
-zmq.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]
