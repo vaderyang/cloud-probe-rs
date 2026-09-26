@@ -39,6 +39,33 @@ mod imp {
         Ok(())
     }
 
+    /// Set `TCP_USER_TIMEOUT`: how long transmitted data may stay unacknowledged
+    /// before the connection is torn down (`TCP_USER_TIMEOUT` on Linux).
+    ///
+    /// # Errors
+    /// Returns an error if `setsockopt` fails or `timeout` does not fit in
+    /// milliseconds.
+    pub fn set_tcp_user_timeout(socket: &Socket, timeout: std::time::Duration) -> io::Result<()> {
+        let ms: libc::c_int = timeout
+            .as_millis()
+            .try_into()
+            .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "tcp user timeout too big"))?;
+        // SAFETY: `ms` is a valid `c_int` for the option.
+        let ret = unsafe {
+            libc::setsockopt(
+                socket.as_raw_fd(),
+                libc::IPPROTO_TCP,
+                libc::TCP_USER_TIMEOUT,
+                std::ptr::addr_of!(ms).cast::<libc::c_void>(),
+                std::mem::size_of::<libc::c_int>() as libc::socklen_t,
+            )
+        };
+        if ret != 0 {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(())
+    }
+
     /// Set the IPv4 path-MTU-discovery mode (`IP_MTU_DISCOVER` on Linux).
     ///
     /// # Errors
@@ -67,6 +94,18 @@ mod imp {
 
     use socket2::Socket;
 
+    /// Set `TCP_USER_TIMEOUT` (unsupported on this platform: keepalive probes
+    /// are the only dead-peer detection available there).
+    ///
+    /// # Errors
+    /// Always returns an error on this platform.
+    pub fn set_tcp_user_timeout(_socket: &Socket, _timeout: std::time::Duration) -> io::Result<()> {
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "TCP_USER_TIMEOUT is only supported on Linux",
+        ))
+    }
+
     /// Bind a socket to a network device (unsupported on this platform).
     ///
     /// # Errors
@@ -90,4 +129,4 @@ mod imp {
     }
 }
 
-pub use imp::{bind_to_device, set_pmtudisc};
+pub use imp::{bind_to_device, set_pmtudisc, set_tcp_user_timeout};

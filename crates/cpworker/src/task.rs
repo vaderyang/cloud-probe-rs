@@ -597,6 +597,8 @@ fn output_stats_json(s: &OutputStats) -> serde_json::Value {
         "ratelimit_drop_bytes": bytes_stats_json(&s.ratelimit_drop_bytes),
         "ratelimit_drop_packets": packets_stats_json(&s.ratelimit_drop_packets),
         "heartbeat_packets": packets_stats_json(&s.heartbeat_packets),
+        "zmtp_queued_batches": s.zmtp_queued_batches.load(Ordering::Relaxed),
+        "zmtp_queued_bytes": s.zmtp_queued_bytes.load(Ordering::Relaxed),
     })
 }
 
@@ -680,7 +682,11 @@ mod tests {
         // The call point is idempotent: a second stop() must not destroy twice.
         mgr.stop();
         for c in &counters {
-            assert_eq!(c.load(Ordering::SeqCst), 1, "destroy() called more than once");
+            assert_eq!(
+                c.load(Ordering::SeqCst),
+                1,
+                "destroy() called more than once"
+            );
         }
     }
 
@@ -736,9 +742,9 @@ mod tests {
         )
         .expect("manager");
         let c = Arc::new(AtomicUsize::new(0));
-        mgr.out_sets.lock()[0]
-            .outputs
-            .push(Box::new(SpyOutput { destroyed: c.clone() }));
+        mgr.out_sets.lock()[0].outputs.push(Box::new(SpyOutput {
+            destroyed: c.clone(),
+        }));
         mgr.start();
         assert!(mgr.output_thread.is_some());
         mgr.stop();

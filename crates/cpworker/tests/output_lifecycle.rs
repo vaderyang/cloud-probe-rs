@@ -179,7 +179,8 @@ fn stop_drains_batches_queued_in_zmtp() {
 
     let delivered = peer.join().expect("peer thread") as u64;
     assert_eq!(
-        delivered, fwd,
+        delivered,
+        fwd,
         "stop() dropped {} packets that were still queued in the ZMTP send queue: \
          the peer saw {delivered} of {fwd} forwarded packets (ZMQ linger never ran)",
         fwd.saturating_sub(delivered)
@@ -236,10 +237,11 @@ fn stop_flushes_pcap_file_output() {
         pcap_in.display(),
         out_file.display()
     );
-    let mut mgr = TaskManager::new(Config::parse_str(&cfg).expect("parse"), "t.json".into(), dir
-        .path()
-        .display()
-        .to_string())
+    let mut mgr = TaskManager::new(
+        Config::parse_str(&cfg).expect("parse"),
+        "t.json".into(),
+        dir.path().display().to_string(),
+    )
     .expect("task manager");
     pump_all(&mut mgr);
     let fwd = packets_stat(&mgr.collect_stats_summary(), "fwd_packets");

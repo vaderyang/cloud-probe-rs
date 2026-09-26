@@ -6,4 +6,8 @@
 pub mod client;
 pub mod codec;
 
-pub use client::{tcp_connector, Connector, SendOutcome, Transport, ZmtpPush};
+pub use client::{
+    tcp_connector, tcp_connector_with_resolver, Connector, Resolver, SendOutcome, SystemResolver,
+    Transport, ZmtpPush, DEFAULT_HANDSHAKE_TIMEOUT, DEFAULT_MAX_QUEUED_BYTES, RESOLVE_TTL,
+    TCP_KEEPALIVE_IDLE, TCP_KEEPALIVE_INTERVAL, TCP_KEEPALIVE_RETRIES, TCP_USER_TIMEOUT,
+};

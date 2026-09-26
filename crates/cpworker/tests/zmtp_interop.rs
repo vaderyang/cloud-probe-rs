@@ -189,3 +189,58 @@ fn real_tcp_concurrent_send_and_slow_reader() {
     // in order and uncorrupted; messages that hit the HWM were Dropped.
     assert_eq!(got, queued);
 }
+
+/// A peer that completes the TCP handshake and then says nothing at all must not
+/// wedge the client: the handshake deadline has to give up and retry (P5-10).
+#[test]
+fn real_tcp_silent_peer_is_given_up_on() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    let accepts = Arc::new(AtomicUsize::new(0));
+    let counted = accepts.clone();
+    let server = std::thread::spawn(move || {
+        // Keep the sockets open but never write a greeting: exactly the
+        // "collector process is hung / firewall half-open" shape.
+        let mut held = Vec::new();
+        // Two accepts is what the test waits for; keep the sockets alive so the
+        // client cannot "recover" by talking to a fresh, well-behaved peer.
+        listener.set_nonblocking(true).ok();
+        let start = Instant::now();
+        while held.len() < 2 && start.elapsed() < Duration::from_secs(10) {
+            match listener.accept() {
+                Ok((s, _)) => {
+                    counted.fetch_add(1, Ordering::Relaxed);
+                    held.push(s);
+                }
+                Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                    std::thread::sleep(Duration::from_millis(2));
+                }
+                Err(_) => break,
+            }
+        }
+        held.len()
+    });
+
+    let connector = tcp_connector("127.0.0.1", addr.port()).unwrap();
+    let mut z = ZmtpPush::new(connector, 10).with_handshake_timeout(Duration::from_millis(150));
+
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while accepts.load(Ordering::Relaxed) < 2 && Instant::now() < deadline {
+        z.poll();
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert!(
+        accepts.load(Ordering::Relaxed) >= 2,
+        "a silent peer must be abandoned and reconnected (accepts: {})",
+        accepts.load(Ordering::Relaxed)
+    );
+    assert!(!z.is_connected());
+    assert!(
+        z.handshakes_given_up() >= 1,
+        "the deadline must be observable"
+    );
+    server.join().unwrap();
+}

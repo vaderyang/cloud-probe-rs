@@ -111,6 +111,14 @@ pub struct GreConfig {
     pub pmtudisc: i32,
 }
 
+/// Default ZMQ high-water mark (queued batches).
+pub const DEFAULT_ZMQ_HWM: i32 = 100;
+/// Smallest accepted ZMQ high-water mark.
+pub const ZMQ_HWM_MIN: i32 = 1;
+/// Largest accepted ZMQ high-water mark. Each queued batch can be up to 1 MiB,
+/// so this caps the message-count bound of the pending queue.
+pub const ZMQ_HWM_MAX: i32 = 4096;
+
 #[derive(Debug, Clone)]
 /// ZMQ output configuration.
 pub struct ZmqConfig {
@@ -118,7 +126,10 @@ pub struct ZmqConfig {
     pub host: String,
     /// Collector port.
     pub port: u16,
-    /// ZMQ high-water mark.
+    /// ZMQ high-water mark, in queued batches.
+    ///
+    /// Validated against [`ZMQ_HWM_MIN`]..=[`ZMQ_HWM_MAX`]; each queued batch is
+    /// at most 1 MiB, so this is also the memory bound of the output.
     pub hwm: i32,
     /// Service tag stamped into each batch.
     pub service_tag: u32,
@@ -735,10 +746,20 @@ impl RawOutput {
                     Some(v) if (0..=60000).contains(&v) => v,
                     _ => return Err(Error::new("invalid zmq.heartbeat_ms")),
                 };
+                let hwm = z.hwm.unwrap_or(DEFAULT_ZMQ_HWM);
+                // The pending queue is bounded by `hwm` messages of at most
+                // ZMQ_MAX_BATCH_BUF_SIZE each, so an unbounded hwm is an
+                // unbounded memory promise. Reject it here instead of letting
+                // the worker get OOM-killed later.
+                if !(ZMQ_HWM_MIN..=ZMQ_HWM_MAX).contains(&hwm) {
+                    return Err(Error::new(format!(
+                        "invalid zmq.hwm {hwm}: must be between {ZMQ_HWM_MIN} and                          {ZMQ_HWM_MAX} (each queued batch is up to 1 MiB)"
+                    )));
+                }
                 OutputKind::Zmq(ZmqConfig {
                     host: z.host,
                     port: z.port,
-                    hwm: z.hwm.unwrap_or(100),
+                    hwm,
                     service_tag: z.service_tag.unwrap_or(0xffff_ffff),
                     uuid: z.uuid.unwrap_or_default(),
                     heartbeat_ms,
@@ -997,5 +1018,57 @@ mod tests {
         let c = Config::parse_str(SAMPLE).unwrap();
         let out = bpf_filter_exclude_task_output_hosts("port 80", &c.tasks);
         assert_eq!(out, "(port 80) and not host 10.0.0.9");
+    }
+    /// AUDIT4 P5-11: `hwm` bounds the pending queue (hwm batches x <=1 MiB), so an
+    /// unbounded value is an unbounded memory promise and must be rejected.
+    #[test]
+    fn zmq_hwm_is_range_checked() {
+        let with_hwm = |hwm: i64| {
+            Config::parse_str(&format!(
+                r#"{{"tasks":[{{
+                    "capturer": {{"type":"libpcap","libpcap":{{"interface":"eth0"}}}},
+                    "outputs": [{{"type":"zmq","zmq":{{
+                        "host":"10.0.0.1","port":5555,"hwm":{hwm},
+                        "uuid":"550e8400-e29b-41d4-a716-446655440000"
+                    }}}}]
+                }}]}}"#
+            ))
+        };
+        assert!(
+            with_hwm(100).is_ok(),
+            "the default range must stay accepted"
+        );
+        assert!(with_hwm(i64::from(ZMQ_HWM_MAX)).is_ok());
+        let big = with_hwm(i64::from(ZMQ_HWM_MAX) + 1)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            big.contains("zmq.hwm"),
+            "error should name the field: {big}"
+        );
+        assert!(
+            with_hwm(0).is_err(),
+            "hwm 0 (infinite in libzmq) must be rejected"
+        );
+        assert!(with_hwm(-1).is_err());
+        assert!(
+            with_hwm(2_147_483_647).is_err(),
+            "i32::MAX hwm is an OOM request"
+        );
+        // Default when absent.
+        let d = Config::parse_str(
+            r#"{"tasks":[{
+                "capturer": {"type":"libpcap","libpcap":{"interface":"eth0"}},
+                "outputs": [{"type":"zmq","zmq":{
+                    "host":"10.0.0.1","port":5555,
+                    "uuid":"550e8400-e29b-41d4-a716-446655440000"
+                }}]
+            }]}"#,
+        )
+        .expect("default hwm config");
+        match &d.tasks[0].outputs[0].kind {
+            OutputKind::Zmq(c) => assert_eq!(c.hwm, DEFAULT_ZMQ_HWM),
+            other => panic!("expected zmq output, got {other:?}"),
+        }
     }
 }

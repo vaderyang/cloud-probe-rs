@@ -69,6 +69,12 @@ pub struct OutputStats {
     pub ratelimit_drop_packets: PacketsStats,
     #[serde(default)]
     pub heartbeat_packets: PacketsStats,
+    /// Batches a ZMQ output has queued for the collector right now (gauge).
+    #[serde(default)]
+    pub zmtp_queued_batches: u64,
+    /// Bytes a ZMQ output has queued for the collector right now (gauge).
+    #[serde(default)]
+    pub zmtp_queued_bytes: u64,
 }
 
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]

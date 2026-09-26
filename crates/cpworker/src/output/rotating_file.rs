@@ -172,10 +172,14 @@ mod tests {
             max_file_interval: -1,
         };
         let stats = Arc::new(OutputStats::default());
-        let mut out = RotatingFileOutput::new(&cfg, &CapturerKind::PcapFile(PcapFileConfig {
-            file_name: String::new(),
-            bpf: String::new(),
-        }), stats)
+        let mut out = RotatingFileOutput::new(
+            &cfg,
+            &CapturerKind::PcapFile(PcapFileConfig {
+                file_name: String::new(),
+                bpf: String::new(),
+            }),
+            stats,
+        )
         .expect("create rotating file output");
 
         // More than the BufWriter's 8 KiB capacity, so part of it is buffered.

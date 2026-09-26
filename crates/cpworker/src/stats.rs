@@ -129,6 +129,16 @@ pub struct OutputStats {
     pub ratelimit_drop_packets: PacketsStats,
     /// Heartbeat frames sent.
     pub heartbeat_packets: PacketsStats,
+    /// Batches currently queued in a ZMQ output, waiting for the collector.
+    ///
+    /// A gauge, not a counter: it is overwritten on every flush, so it shows
+    /// what the slow-collector backlog looks like *right now*. Together with
+    /// [`OutputStats::zmtp_queued_bytes`] it is the observable part of the
+    /// memory the send queue is costing (AUDIT4 P5-11).
+    pub zmtp_queued_batches: std::sync::atomic::AtomicU64,
+    /// Bytes currently queued in a ZMQ output (see
+    /// [`OutputStats::zmtp_queued_batches`]).
+    pub zmtp_queued_bytes: std::sync::atomic::AtomicU64,
 }
 
 #[derive(Debug, Default, Clone, Copy)]

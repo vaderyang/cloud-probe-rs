@@ -243,6 +243,8 @@ struct ErrorInfo {
 
 /// ZMQ batch output pushing to a collector.
 pub struct ZmqOutput {
+    /// Byte ceiling of the ZMTP send queue (see [`ZmqOutput::queue_budget_bytes`]).
+    queue_budget_bytes: usize,
     stats: Arc<OutputStats>,
     throttle: Option<TokenBucket>,
     slice: i32,
@@ -270,7 +272,12 @@ impl ZmqOutput {
         let address = format!("tcp://{}:{}", cfg.host, cfg.port);
         let connector = zmtp::tcp_connector(&cfg.host, cfg.port)
             .map_err(|e| Error::new(format!("zmq connect address {address} error: {e}")))?;
-        let zmtp = ZmtpPush::new(connector, cfg.hwm.max(1) as usize);
+        // Bound the backlog twice: `hwm` batches, and an absolute byte ceiling
+        // so that a large hwm cannot turn the worker into an OOM candidate.
+        let hwm = cfg.hwm.max(1) as usize;
+        let max_queued_bytes =
+            zmtp::DEFAULT_MAX_QUEUED_BYTES.min(hwm.saturating_mul(ZMQ_MAX_BATCH_BUF_SIZE));
+        let zmtp = ZmtpPush::new(connector, hwm).with_queue_limits(hwm, max_queued_bytes);
 
         let throttle = if out.rate_limit_mbps > 0 {
             Some(TokenBucket::new(out.rate_limit_mbps * 1_000_000))
@@ -284,6 +291,7 @@ impl ZmqOutput {
             throttle,
             slice: out.slice,
             zmtp,
+            queue_budget_bytes: max_queued_bytes,
             builder: BatchBuilder::new(cfg.service_tag, &uuid),
             heartbeat_ms: cfg.heartbeat_ms,
             last_pkt_ts: now,
@@ -327,6 +335,12 @@ impl ZmqOutput {
             self.error_info.first_pktsec = self.builder.first_pktsec();
         }
 
+        // Accounting policy (AUDIT4 P5-11, deliberately unchanged): a batch counts
+        // as forwarded when the transport *accepts* it, exactly like C's
+        // `zmq_send(..., ZMQ_DONTWAIT)` returning 0 while libzmq buffers the
+        // message. Backlog and loss stay visible through `error_drop_*` (batches
+        // refused by the queue) and the `zmtp_queued_*` gauges (bytes currently
+        // parked for the collector), so no C-facing number is redefined here.
         let sent = self.zmtp.send(&self.builder.buf[..len]);
         match sent {
             SendOutcome::Queued => {
@@ -335,8 +349,11 @@ impl ZmqOutput {
             }
             SendOutcome::Dropped => {
                 if self.error_info.nb_drop_batches == 0 {
-                    self.error_info.send_error =
-                        "zmq_send failed: EAGAIN (HWM reached)".to_string();
+                    self.error_info.send_error = format!(
+                        "zmq_send failed: EAGAIN (queue full: {} batches / {} bytes queued)",
+                        self.zmtp.queued(),
+                        self.zmtp.queued_bytes()
+                    );
                 }
                 self.error_info.nb_drop_batches += 1;
                 self.error_info.nb_drop_packets += send_num as u64;
@@ -346,6 +363,26 @@ impl ZmqOutput {
         }
 
         self.builder.end_flush();
+        self.publish_queue_gauges();
+    }
+
+    /// Publish the send-queue backlog as gauges (AUDIT4 P5-11).
+    fn publish_queue_gauges(&self) {
+        self.stats.zmtp_queued_batches.store(
+            self.zmtp.queued() as u64,
+            std::sync::atomic::Ordering::Relaxed,
+        );
+        self.stats.zmtp_queued_bytes.store(
+            self.zmtp.queued_bytes() as u64,
+            std::sync::atomic::Ordering::Relaxed,
+        );
+    }
+
+    /// Ceiling on the bytes this output may park while the collector is slow:
+    /// `hwm` batches, never more than [`zmtp::DEFAULT_MAX_QUEUED_BYTES`].
+    #[must_use]
+    pub fn queue_budget_bytes(&self) -> usize {
+        self.queue_budget_bytes
     }
 
     fn flush_if_stale(&mut self, now: i64) {
@@ -441,6 +478,7 @@ impl Output for ZmqOutput {
     fn heartbeat(&mut self, now: i64) {
         // Progress reconnect / flush even when no packets are flowing.
         self.zmtp.poll();
+        self.publish_queue_gauges();
         self.flush_if_stale(now);
         if self.heartbeat_ms <= 0 {
             return;
@@ -460,5 +498,89 @@ impl Output for ZmqOutput {
     fn destroy(&mut self) {
         // Linger: best-effort flush of queued batches (mirrors ZMQ_LINGER=5s).
         self.zmtp.drain_for(Duration::from_secs(5));
+        self.publish_queue_gauges();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::{OutputKind, ZmqConfig};
+    use crate::packet::PKT_DIR_NONCHECK;
+
+    fn zmq_output(hwm: i32, stats: Arc<OutputStats>) -> ZmqOutput {
+        let cfg = ZmqConfig {
+            // Nothing listens here: the queue can only grow, which is what the
+            // test wants to observe.
+            host: "127.0.0.1".into(),
+            port: 1,
+            hwm,
+            service_tag: 1,
+            uuid: "550e8400-e29b-41d4-a716-446655440000".into(),
+            heartbeat_ms: 0,
+        };
+        let out = OutputConfig {
+            kind: OutputKind::Zmq(cfg.clone()),
+            rate_limit_mbps: 0,
+            slice: 0,
+        };
+        ZmqOutput::new(&cfg, &out, stats).expect("zmq output")
+    }
+
+    fn frame() -> Vec<u8> {
+        let mut p = vec![0u8; 120];
+        p[12..14].copy_from_slice(&0x0800u16.to_be_bytes());
+        p
+    }
+
+    /// AUDIT4 P5-11: the backlog a slow collector leaves behind must be visible
+    /// as `zmtp_queued_*` gauges, otherwise "stats look fine, data is not".
+    #[test]
+    fn queue_backlog_is_published_as_gauges() {
+        let stats = Arc::new(OutputStats::default());
+        let mut z = zmq_output(10, stats.clone());
+        let body = frame();
+        let hdr = PacketHeader {
+            ts_sec: 1, // ancient, so the next heartbeat flushes it
+            ts_usec: 0,
+            caplen: body.len() as u32,
+            len: body.len() as u32,
+        };
+        for _ in 0..20 {
+            assert_eq!(z.send_packet(&hdr, &body, PKT_DIR_NONCHECK), 0);
+        }
+        assert_eq!(
+            stats
+                .zmtp_queued_batches
+                .load(std::sync::atomic::Ordering::Relaxed),
+            0,
+            "nothing is queued before the first flush"
+        );
+
+        z.heartbeat(now_ts().0);
+
+        let batches = stats
+            .zmtp_queued_batches
+            .load(std::sync::atomic::Ordering::Relaxed);
+        let bytes = stats
+            .zmtp_queued_bytes
+            .load(std::sync::atomic::Ordering::Relaxed);
+        assert_eq!(batches, 1, "the stale batch must be queued");
+        assert!(
+            bytes >= 20 * 120,
+            "queued bytes must reflect the batch size, got {bytes}"
+        );
+    }
+
+    /// The byte budget must never exceed what `hwm` batches can hold, and must be
+    /// capped for a large hwm.
+    #[test]
+    fn queue_budget_is_bounded_by_hwm_and_bytes() {
+        let stats = Arc::new(OutputStats::default());
+        let small = zmq_output(2, stats.clone());
+        assert_eq!(small.queue_budget_bytes(), 2 * ZMQ_MAX_BATCH_BUF_SIZE);
+
+        let huge = zmq_output(crate::config::ZMQ_HWM_MAX, stats);
+        assert_eq!(huge.queue_budget_bytes(), zmtp::DEFAULT_MAX_QUEUED_BYTES);
     }
 }
