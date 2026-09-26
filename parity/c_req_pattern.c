@@ -11,8 +11,9 @@
 #include "req_pattern.h"
 #include "ip.h"
 
-int main(void)
+int main(int argc, char **argv)
 {
+    int sentinel = (argc > 1 && strcmp(argv[1], "--sentinel") == 0);
     static char line[8192];
     while (fgets(line, sizeof(line), stdin))
     {
@@ -40,6 +41,8 @@ int main(void)
         if (req_pattern_custom_matcher_init(&m, pattern, get_if_ip_addr) != 0)
         {
             printf("INIT_FAIL\n");
+            if (sentinel)
+                printf("@@END@@\n");
             fflush(stdout);
             continue;
         }
@@ -54,12 +57,16 @@ int main(void)
         {
             printf("BAD_IP\n");
             req_pattern_custom_matcher_destroy(&m);
+            if (sentinel)
+                printf("@@END@@\n");
             fflush(stdout);
             continue;
         }
 
         printf("%d\n", req_pattern_custom_match_by_ipport(&m, &ip, (uint16_t)port) ? 1 : 0);
         req_pattern_custom_matcher_destroy(&m);
+        if (sentinel)
+            printf("@@END@@\n");
         fflush(stdout);
     }
     return 0;

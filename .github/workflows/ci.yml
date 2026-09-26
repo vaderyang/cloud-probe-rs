@@ -168,6 +168,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+      - name: Reference C/Go sources (for differential fuzzing)
+        uses: actions/checkout@v7
+        with:
+          repository: netis/cloud-probe
+          ref: 0.9.x
+          path: cloud-probe
       - name: System dependencies
         run: |
           sudo apt-get update
@@ -182,3 +188,7 @@ jobs:
           tool: cargo-fuzz
       - name: Fuzz smoke (5s per target)
         run: ./fuzz.sh --check
+      - name: Differential fuzz smoke vs C (5s per mode)
+        env:
+          CLOUD_PROBE_SRC: ${{ github.workspace }}/cloud-probe
+        run: ./parity/difffuzz.sh 5 all

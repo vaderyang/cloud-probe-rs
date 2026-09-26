@@ -23,8 +23,9 @@ static void print_output(OutputConfig *o)
            (unsigned long long)o->rate_limit_mbps, o->slice, host);
 }
 
-int main(void)
+int main(int argc, char **argv)
 {
+    int sentinel = (argc > 1 && strcmp(argv[1], "--sentinel") == 0);
     static char line[65536];
     while (fgets(line, sizeof(line), stdin))
     {
@@ -41,6 +42,8 @@ int main(void)
         {
             printf("PARSE_FAIL: %s\n", err.message);
             printf("---\n");
+            if (sentinel)
+                printf("@@END@@\n");
             fflush(stdout);
             continue;
         }
@@ -83,6 +86,8 @@ int main(void)
 
         free_config(c);
         printf("---\n");
+        if (sentinel)
+            printf("@@END@@\n");
         fflush(stdout);
     }
     return 0;

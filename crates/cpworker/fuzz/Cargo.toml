@@ -49,3 +49,10 @@ path = "fuzz_targets/sim_dst.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "diff_oracle"
+path = "fuzz_targets/diff_oracle.rs"
+test = false
+doc = false
+bench = false

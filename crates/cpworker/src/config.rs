@@ -364,6 +364,77 @@ impl Config {
     }
 }
 
+/// Canonical, diffable description of a parsed config.
+///
+/// Produces exactly the lines printed by the C `c_config.c` harness (and by
+/// `config_parity`), so the two can be compared line by line. Used by the
+/// differential harness and the `diff_oracle` fuzz target.
+#[must_use]
+pub fn canonical_dump(c: &Config) -> String {
+    use std::fmt::Write as _;
+    let mut s = String::new();
+    let _ = writeln!(s, "log_level={}", c.log_level);
+    let _ = writeln!(
+        s,
+        "exec_model={}",
+        if c.execution_model == ExecutionModel::Pipeline {
+            "pipeline"
+        } else {
+            "rtc"
+        }
+    );
+    let _ = writeln!(s, "cpu={}", c.cpu_affinity);
+    let _ = writeln!(s, "pipeline_mb={}", c.pipeline_buffer_size_mb);
+    match &c.control {
+        Some(ControlConfig::UnixSocket { path }) => {
+            let _ = writeln!(s, "control type=unix path={path}");
+        }
+        None => {
+            let _ = writeln!(s, "control none");
+        }
+    }
+    let _ = writeln!(s, "tasks={}", c.tasks.len());
+    for (i, t) in c.tasks.iter().enumerate() {
+        let req = match t.req_pattern {
+            ReqPatternConfig::None => "none",
+            ReqPatternConfig::Auto => "auto",
+            ReqPatternConfig::Custom { .. } => "custom",
+        };
+        let (cap_type, snaplen, bpf) = match &t.capturer.kind {
+            CapturerKind::Libpcap(l) => (CAPTURER_TYPE_LIBPCAP, l.snaplen, l.bpf.as_str()),
+            CapturerKind::PcapFile(p) => (CAPTURER_TYPE_PCAP_FILE, 262144, p.bpf.as_str()),
+            CapturerKind::DpdkPdump(d) => (CAPTURER_TYPE_DPDK_PDUMP, d.snaplen, d.bpf.as_str()),
+        };
+        let _ = writeln!(
+            s,
+            " task idx={i} fp={} req={req} capturer={cap_type} snaplen={snaplen} bpf={bpf}",
+            t.fingerprint.as_deref().unwrap_or("")
+        );
+        for o in &t.outputs {
+            let host = o.forward_host().unwrap_or("");
+            let _ = writeln!(
+                s,
+                "  output type={} rate={} slice={} host={host}",
+                o.output_type(),
+                o.rate_limit_mbps,
+                o.slice
+            );
+        }
+    }
+    let base_bpf = c
+        .tasks
+        .first()
+        .map(|t| match &t.capturer.kind {
+            CapturerKind::Libpcap(l) => l.bpf.as_str(),
+            _ => "",
+        })
+        .unwrap_or("");
+    let bpf = bpf_filter_exclude_task_output_hosts(base_bpf, &c.tasks);
+    let _ = writeln!(s, "exclude_bpf={bpf}");
+    let _ = writeln!(s, "---");
+    s
+}
+
 // ---------------------------------------------------------------------------
 // Raw deserialization types
 // ---------------------------------------------------------------------------

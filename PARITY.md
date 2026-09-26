@@ -86,6 +86,27 @@ collector 解码并对账。同一 seed 跨进程 trace 摘要一致，可精确
 二者互补：Python 差分 fuzz 证明“C 与 Rust 行为一致”，cargo-fuzz 在 Rust 内部搜索崩溃/不变量
 违例并给出可复现输入。
 
+### 1.6 覆盖引导的差分 Fuzz（Rust ↔ 原 C）
+
+`parity/difffuzz.sh` 把两者结合：Rust 侧**在进程内**跑（libFuzzer 获得覆盖率反馈），
+原 C 代码作为**常驻 oracle 子进程**（`--sentinel` 行帧）；每个输入映射成同一请求喂给两侧，
+逐行比较规范化输出，一旦分歧即 panic，libFuzzer 保存触发输入。这能发现固定种子的差分测试
+（`parity/*.sh`，只覆盖“生成器能想到的”输入）遗漏的语义差异。
+
+| 模式 | 对象 | C oracle |
+|---|---|---|
+| `packet_split` | `parse_packet` + 分片 + 校验和 | `c_harness.c` |
+| `config` | JSON 解析 + bpf 排除主机 | `c_config.c` |
+| `req_pattern` | 自定义模式匹配器 | `c_req_pattern.c` |
+
+```bash
+parity/difffuzz.sh 60 packet_split   # 一个模式 60s
+parity/difffuzz.sh 120 all           # 全部模式各 120s
+```
+
+已知的有意分歧（如 §2.2 的 IPv4/TCP 严格校验）在 target 内被分类过滤，
+以便继续搜索**新**分歧。**本框架已发现并修复**：`req_pattern` 对 `port -0` 的负零解析不兼容。
+
 差分/模糊测试（`parity/`）：
 
 | 脚本 | 对象 |
@@ -142,8 +163,17 @@ parity/run.sh 5000 42     # packet_split: C vs Rust
    `BatchBuilder::append_packet` 中检测该条件并丢弃该包。
 2. **ZMQ VLAN 遍历越界读**：同一遍历在数据不足时读取 `caplen` 之后的 4 字节。Rust 增加了
    `pkt_data.len()` 边界保护。
+3. **IPv4 IHL / TCP data offset 最小长度校验**（`packet_split.c` ↔ `packet.rs`）：C 只检查
+   `caplen >= ihl*4`（不要求 `ihl >= 5`），且不要求 TCP data offset `>= 5`；Rust 额外要求
+   两者至少 20 字节，因此会**拒绝** C 会接受的一类畸形头部（例如 IHL=1 或 TCP data offset=0）。
+   这是 Rust 有意的输入校验硬化（避免把重叠的头部当合法分片），由差分 fuzzer
+   （`parity/difffuzz.sh packet_split`）发现；其余输入逐字节一致。
 
-这两类输入在生成器中已规避，以保证差分对拍比较的是**有定义的行为**；其余全部输入逐字节一致。
+以上三类输入在生成器中已规避，以保证差分对拍比较的是**有定义的行为**；其余全部输入逐字节一致。
+
+> **由差分 fuzzing 发现并修复**：`req_pattern` 的端口解析曾用 `u16::parse`，拒绝 C 用
+> `strtol` 接受的负零（`port -0` / `port -000`）；已改为 `i64` 解析 + `0..=65535` 范围校验。
+> 见 `parity/difffuzz.sh req_pattern` 与 `req_pattern.rs` 的回归测试。
 
 ## 2.3 已知的良性分歧
 

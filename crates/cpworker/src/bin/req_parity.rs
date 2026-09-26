@@ -3,8 +3,7 @@
 
 use std::io::{self, BufRead, Write};
 
-use cpworker::packet::IpAddr;
-use cpworker::req_pattern::{custom_match_by_ipport, parse_pattern};
+use cpworker::req_pattern::canonical_eval;
 
 fn main() {
     let stdin = io::stdin();
@@ -28,25 +27,6 @@ fn main() {
             continue;
         }
         let port: u16 = port_str.trim().parse().unwrap_or(0);
-
-        let ast = match parse_pattern(pattern) {
-            Ok(a) => a,
-            Err(_) => {
-                let _ = writeln!(out, "INIT_FAIL");
-                continue;
-            }
-        };
-
-        let ip = if let Ok(v4) = ip_str.parse::<std::net::Ipv4Addr>() {
-            IpAddr::V4(v4.octets())
-        } else if let Ok(v6) = ip_str.parse::<std::net::Ipv6Addr>() {
-            IpAddr::V6(v6.octets())
-        } else {
-            let _ = writeln!(out, "BAD_IP");
-            continue;
-        };
-
-        let matched = custom_match_by_ipport(&ast, &ip, port);
-        let _ = writeln!(out, "{}", if matched { 1 } else { 0 });
+        let _ = writeln!(out, "{}", canonical_eval(pattern, ip_str, port));
     }
 }

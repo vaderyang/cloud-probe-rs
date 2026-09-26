@@ -121,6 +121,31 @@ pub fn custom_match_by_ipport(node: &Node, ip: &IpAddr, port: u16) -> bool {
     node.evaluate(ip, port)
 }
 
+/// Canonical result token for a custom req-pattern query.
+///
+/// Exactly matches the C `c_req_pattern.c` output: one of `"0"`, `"1"`,
+/// `"INIT_FAIL"`, or `"BAD_IP"`. Used by the differential harness and the
+/// `diff_oracle` fuzz target.
+#[must_use]
+pub fn canonical_eval(pattern: &str, ip_str: &str, port: u16) -> &'static str {
+    let ast = match parse_pattern(pattern) {
+        Ok(a) => a,
+        Err(_) => return "INIT_FAIL",
+    };
+    let ip = if let Ok(v4) = ip_str.parse::<std::net::Ipv4Addr>() {
+        IpAddr::V4(v4.octets())
+    } else if let Ok(v6) = ip_str.parse::<std::net::Ipv6Addr>() {
+        IpAddr::V6(v6.octets())
+    } else {
+        return "BAD_IP";
+    };
+    if custom_match_by_ipport(&ast, &ip, port) {
+        "1"
+    } else {
+        "0"
+    }
+}
+
 /// Req-pattern type discriminant: no matching.
 pub const REQ_PATTERN_TYPE_NONE: i32 = 0;
 /// Req-pattern type discriminant: automatic matching.

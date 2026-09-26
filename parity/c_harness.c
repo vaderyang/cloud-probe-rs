@@ -42,21 +42,27 @@ static size_t from_hex(const char *s, uint8_t *buf, size_t max)
     return n;
 }
 
-int main(void)
+int main(int argc, char **argv)
 {
+    int sentinel = (argc > 1 && strcmp(argv[1], "--sentinel") == 0);
     static char line[400000];
     while (fgets(line, sizeof(line), stdin))
     {
         int maxp = 0, recalc = 0;
         char hex[390000];
-        if (sscanf(line, "%d %d %s", &maxp, &recalc, hex) != 3)
-            continue;
+        hex[0] = 0;
+        /* Tolerate a missing/empty hex token (empty packet): both sides then
+         * see a zero-length frame and report FAIL. Never `continue` without
+         * emitting the sentinel, or a persistent oracle reader would hang. */
+        (void)sscanf(line, "%d %d %389998s", &maxp, &recalc, hex);
 
         size_t n = from_hex(hex, pkt, sizeof(pkt));
         packet_parse_result_t r;
         if (!parse_packet(pkt, (uint32_t)n, &r))
         {
             printf("FAIL\n");
+            if (sentinel)
+                printf("@@END@@\n");
             fflush(stdout);
             continue;
         }
@@ -75,6 +81,8 @@ int main(void)
                 printf("%02x", out[j]);
             printf("\n");
         }
+        if (sentinel)
+            printf("@@END@@\n");
         fflush(stdout);
     }
     return 0;
