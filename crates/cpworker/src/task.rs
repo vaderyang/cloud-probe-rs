@@ -24,6 +24,9 @@ use crate::stats::{BytesStats, CaptureStats, OutputStats, PacketsStats};
 /// Outputs belonging to one task.
 pub struct TaskOutputs {
     /// The task's configured outputs.
+    ///
+    /// These are taken (not merely borrowed) by [`TaskManager::stop`], which is
+    /// the single call point for [`Output::destroy`]; see there.
     pub outputs: Vec<Box<dyn Output>>,
 }
 
@@ -336,12 +339,29 @@ impl TaskManager {
         }
     }
 
-    /// Stop the pipeline output thread, if running, and join it.
+    /// Stop the pipeline output thread (if running), join it, and run the one
+    /// and only `Output::destroy()` call point for every live output.
+    ///
+    /// Shutdown (and `Drop`) and reload both funnel through here, so an
+    /// output's linger / flush can never be skipped by an implicit
+    /// `Box<dyn Output>` release. The outputs are *taken* out of the shared set
+    /// before being destroyed, which makes repeat calls a no-op (destroy is
+    /// never run twice) and keeps the shared lock held only for the O(n) swap,
+    /// not for the multi-second linger wait.
     pub fn stop(&mut self) {
         if let Some(handle) = self.output_thread.take() {
             self.running.store(false, Ordering::Release);
             let _ = handle.join();
         }
+        let mut doomed: Vec<Box<dyn Output>> = {
+            let mut sets = self.out_sets.lock();
+            sets.iter_mut().flat_map(|s| s.outputs.drain(..)).collect()
+        };
+        for o in doomed.iter_mut() {
+            o.destroy();
+        }
+        // Sockets / files are released here, after destroy() has drained them.
+        drop(doomed);
     }
 
     /// Poll each task once. Mirrors `task_manager_poll_packets`.
@@ -407,9 +427,10 @@ impl TaskManager {
     /// Returns an error if the rebuilt task set cannot be constructed.
     pub fn reload(&mut self, new_config: Config) -> Result<()> {
         let was_running = self.output_thread.is_some();
-        if was_running {
-            self.stop();
-        }
+        // Always goes through stop(): it joins the output thread *and* runs the
+        // destroy() call point, so the old outputs drain before they are
+        // replaced.
+        self.stop();
 
         // Drop old capturers/outputs before creating new ones (so sockets and
         // files are released).
@@ -577,4 +598,150 @@ fn output_stats_json(s: &OutputStats) -> serde_json::Value {
         "ratelimit_drop_packets": packets_stats_json(&s.ratelimit_drop_packets),
         "heartbeat_packets": packets_stats_json(&s.heartbeat_packets),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::output::pcap_writer::PcapWriter;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    /// Output that records how many times `destroy()` was called on it.
+    struct SpyOutput {
+        destroyed: Arc<AtomicUsize>,
+    }
+
+    impl Output for SpyOutput {
+        fn send_packet(&mut self, _hdr: &PacketHeader, _pkt: &[u8], _direct: i32) -> i32 {
+            0
+        }
+        fn destroy(&mut self) {
+            self.destroyed.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+
+    /// Create a tiny pcap file so the offline capturer can be built.
+    fn scratch_pcap(dir: &std::path::Path) -> std::path::PathBuf {
+        let path = dir.join("in.pcap");
+        {
+            let mut w = PcapWriter::create(&path, 65535).expect("create pcap");
+            let hdr = PacketHeader {
+                ts_sec: 1,
+                ts_usec: 0,
+                caplen: 16,
+                len: 16,
+            };
+            w.write(&hdr, &[0u8; 16]).expect("write");
+        }
+        path
+    }
+
+    /// A one-task RTC manager whose task also owns `n` spy outputs.
+    fn manager_with_spies(dir: &std::path::Path, n: usize) -> (TaskManager, Vec<Arc<AtomicUsize>>) {
+        let pcap = scratch_pcap(dir);
+        let cfg = format!(
+            r#"{{"execution_model":"rtc","tasks":[{{
+                "capturer": {{"type":"pcap_file","pcap_file":{{"file_name":"{}"}}}},
+                "outputs": [{{"type":"null"}}]
+            }}]}}"#,
+            pcap.display()
+        );
+        let mgr = TaskManager::new(
+            Config::parse_str(&cfg).expect("parse config"),
+            "test.json".into(),
+            dir.display().to_string(),
+        )
+        .expect("manager");
+        let mut counters = Vec::new();
+        {
+            let mut sets = mgr.out_sets.lock();
+            for _ in 0..n {
+                let c = Arc::new(AtomicUsize::new(0));
+                counters.push(c.clone());
+                sets[0].outputs.push(Box::new(SpyOutput { destroyed: c }));
+            }
+        }
+        (mgr, counters)
+    }
+
+    #[test]
+    fn stop_destroys_every_output_exactly_once() {
+        let dir = tempfile::tempdir().unwrap();
+        let (mut mgr, counters) = manager_with_spies(dir.path(), 2);
+
+        mgr.stop();
+        for c in &counters {
+            assert_eq!(
+                c.load(Ordering::SeqCst),
+                1,
+                "Output::destroy() must be called exactly once by TaskManager::stop()"
+            );
+        }
+        // The call point is idempotent: a second stop() must not destroy twice.
+        mgr.stop();
+        for c in &counters {
+            assert_eq!(c.load(Ordering::SeqCst), 1, "destroy() called more than once");
+        }
+    }
+
+    #[test]
+    fn manager_drop_destroys_outputs() {
+        let dir = tempfile::tempdir().unwrap();
+        let (mgr, counters) = manager_with_spies(dir.path(), 1);
+        drop(mgr);
+        assert_eq!(
+            counters[0].load(Ordering::SeqCst),
+            1,
+            "dropping the TaskManager must run the destroy() call point (Drop -> stop)"
+        );
+    }
+
+    #[test]
+    fn reload_destroys_replaced_outputs() {
+        let dir = tempfile::tempdir().unwrap();
+        let (mut mgr, counters) = manager_with_spies(dir.path(), 1);
+        let pcap = scratch_pcap(dir.path());
+        let cfg = format!(
+            r#"{{"execution_model":"rtc","tasks":[{{
+                "capturer": {{"type":"pcap_file","pcap_file":{{"file_name":"{}"}}}},
+                "outputs": [{{"type":"null"}}]
+            }}]}}"#,
+            pcap.display()
+        );
+        mgr.reload(Config::parse_str(&cfg).expect("parse config"))
+            .expect("reload");
+        assert_eq!(
+            counters[0].load(Ordering::SeqCst),
+            1,
+            "reload() must destroy the outputs it replaces, otherwise their buffers \
+             (ZMQ linger, pcap flush) are never drained"
+        );
+    }
+
+    #[test]
+    fn pipeline_stop_destroys_outputs_after_output_thread_joined() {
+        let dir = tempfile::tempdir().unwrap();
+        let pcap = scratch_pcap(dir.path());
+        let cfg = format!(
+            r#"{{"execution_model":"pipeline","pipeline":{{"buffer_size_mb":1}},"tasks":[{{
+                "capturer": {{"type":"pcap_file","pcap_file":{{"file_name":"{}"}}}},
+                "outputs": [{{"type":"null"}}]
+            }}]}}"#,
+            pcap.display()
+        );
+        let mut mgr = TaskManager::new(
+            Config::parse_str(&cfg).expect("parse config"),
+            "test.json".into(),
+            dir.path().display().to_string(),
+        )
+        .expect("manager");
+        let c = Arc::new(AtomicUsize::new(0));
+        mgr.out_sets.lock()[0]
+            .outputs
+            .push(Box::new(SpyOutput { destroyed: c.clone() }));
+        mgr.start();
+        assert!(mgr.output_thread.is_some());
+        mgr.stop();
+        assert_eq!(c.load(Ordering::SeqCst), 1);
+    }
 }

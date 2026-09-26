@@ -144,4 +144,69 @@ impl Output for RotatingFileOutput {
         self.stats.fwd_packets.add(1);
         0
     }
+
+    fn destroy(&mut self) {
+        // Flush the current dump file explicitly so buffer errors are reported
+        // (`BufWriter::drop` swallows them), then close it.
+        if let Some(w) = self.writer.as_mut() {
+            if let Err(e) = w.flush() {
+                crate::log_error!("flush rotating pcap output failed: {e}");
+            }
+        }
+        self.writer = None;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::PcapFileConfig;
+
+    /// `destroy()` must push the buffered packets out to the file: the writer
+    /// is still alive here, so anything readable on disk has been flushed.
+    #[test]
+    fn destroy_flushes_buffered_packets() {
+        let dir = tempfile::tempdir().unwrap();
+        let cfg = RotatingFileConfig {
+            file_root: dir.path().display().to_string(),
+            max_file_interval: -1,
+        };
+        let stats = Arc::new(OutputStats::default());
+        let mut out = RotatingFileOutput::new(&cfg, &CapturerKind::PcapFile(PcapFileConfig {
+            file_name: String::new(),
+            bpf: String::new(),
+        }), stats)
+        .expect("create rotating file output");
+
+        // More than the BufWriter's 8 KiB capacity, so part of it is buffered.
+        let body = vec![0xabu8; 4096];
+        for i in 0..8u32 {
+            let hdr = PacketHeader {
+                ts_sec: 1_700_000_000 + i as i64,
+                ts_usec: 0,
+                caplen: body.len() as u32,
+                len: body.len() as u32,
+            };
+            assert_eq!(out.send_packet(&hdr, &body, 1), 0);
+        }
+
+        out.destroy();
+
+        let pcap = std::fs::read_dir(dir.path())
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .flat_map(|e| std::fs::read_dir(e.path()).ok())
+            .flatten()
+            .filter_map(|e| e.ok())
+            .map(|e| e.path())
+            .find(|p| p.extension().is_some_and(|x| x == "pcap"))
+            .expect("a dump pcap was created");
+        let on_disk = std::fs::metadata(&pcap).expect("stat").len() as usize;
+        let expected = 24 + 8 * (16 + body.len());
+        assert_eq!(
+            on_disk, expected,
+            "destroy() must flush every buffered pcap record (wrote {expected} bytes, \
+             only {on_disk} on disk)"
+        );
+    }
 }

@@ -46,6 +46,11 @@ pub trait Output: Send {
     fn heartbeat(&mut self, _now: i64) {}
 
     /// Flush and release resources on shutdown.
+    ///
+    /// Called exactly once per output, by the single shutdown/reload call point
+    /// [`crate::task::TaskManager::stop`]. Outputs must not rely on `Drop` for
+    /// draining: `Box<dyn Output>` is released by the task manager, and the
+    /// linger/flush semantics promised here only happen through this method.
     fn destroy(&mut self) {}
 }
 
