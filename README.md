@@ -132,33 +132,49 @@ cloud-probe-rs/
 Measured against the reference C `cpworker` from
 [netis/cloud-probe](https://github.com/netis/cloud-probe) (`0.9.x`, built with
 `CMAKE_BUILD_TYPE=Release`). Both binaries replay the **same 1,000,000-packet
-PCAP** (417.5 MB, mixed Ethernet/IPv4/UDP frames) through a `pcap_file`
-capturer. Timing stops when the capturer logs `end of file`; peak RSS is the
-process `VmHWM`. Median of 3 runs after a warmup.
+PCAP** (417 MB, mixed Ethernet/IPv4/UDP frames) through a `pcap_file` capturer.
+Timing stops when the capturer logs `end of file`; peak RSS is the process
+`VmHWM`. Median of 5 runs after a warmup.
 
 **Machine:** 4 cores, Intel Core M-5Y31 @ 0.90 GHz, 7.7 GiB RAM, Linux 6.14.
 
 | Scenario | Impl | Throughput (pps) | Throughput (MB/s) | Time (s) | Peak RSS (MB) |
 |---|---|---:|---:|---:|---:|
-| `null` (parse + pipeline + discard) | C | 3.23 M | 1350 | 0.309 | 7.0 |
-| `null` | Rust | 2.57 M | 1075 | 0.389 | 6.4 |
-| `file` (parse + pcap writer) | C | 1.28 M | 536 | 0.779 | 7.0 |
-| `file` | Rust | 1.23 M | 513 | 0.814 | 6.4 |
-| `vxlan-split` (encap + checksum + split) | C | 0.13 M | 53.2 | 7.854 | 7.1 |
-| `vxlan-split` | Rust | 0.12 M | 51.9 | 8.039 | 6.5 |
+| `null` (parse + pipeline + discard) | C | 2.83 M | 1181 | 0.353 | 7.1 |
+| `null` | **Rust** | **3.05 M** | **1273** | **0.328** | **6.5** |
+| `file` (parse + pcap writer) | C | 1.16 M | 485 | 0.860 | 7.1 |
+| `file` | **Rust** | **1.27 M** | **532** | **0.784** | **6.4** |
+| `vxlan-split` (encap + checksum + split) | C | 0.10 M | 43.0 | 9.69 | 7.1 |
+| `vxlan-split` | Rust | 0.10 M | 41.1 | 10.16 | 6.6 |
 
-**Reading the numbers**
+**Findings**
 
-* **Pure pipeline (`null`)** — the Rust port reaches ~80% of C's packet rate.
-  The remaining gap is mostly per-packet allocation in the Rust task/output
-  path; it is the main tuning target.
-* **PCAP writer (`file`)** — ~96% of C; both become memcpy/IO bound.
-* **VXLAN encapsulation** — effectively at parity (~98%): the path is
-  dominated by the `sendto(2)` syscall and the kernel, which both share. This
-  confirms the encapsulation/checksum/split logic (the part most at risk of a
-  porting bug) does not regress.
-* **Memory** — the Rust binaries use ~9% less peak RSS (6.4 vs 7.0 MB here);
-  `cpdaemon`/`cpctl` are separate processes and not included.
+* `null` and `file` — the Rust port is **~8–9% faster** than C.
+* `vxlan-split` — within run-to-run noise (kernel `sendto` bound); the
+  encapsulation/checksum/split logic (the most porting-sensitive part) does not
+  regress.
+* Memory — Rust uses **~9% less** peak RSS (6.5 vs 7.1 MB).
+
+### Root cause of the original ~25% gap (and the fix)
+
+An earlier revision was **~25% slower** on `null` (3M packets: Rust 1.41 s vs C
+1.10 s). `perf record` showed the time was *not* in packet processing — the
+per-packet work was essentially identical (`perf stat`: 3.24 B vs 3.13 B
+instructions). The cost was in the Rust main loop:
+
+* every packet went through `mgr.lock().poll_packets()`, and `poll_packets`
+  acquired a **second** mutex (`out_sets`) and cloned an `Arc` — two lock/unlock
+  pairs per packet;
+* the loop also called `Instant::now()` (`elapsed()`) **once per packet** for
+  the 60-second reload check;
+* the C main loop does neither (no locks; a `difftime`, not on the per-packet
+  path in the same way).
+
+`perf` attributed ~11.6% of samples to `main` (vs ~4% for C) plus ~3.4% to
+`clock_gettime`/`Timespec`. The fix batches the poll loop:
+`TaskManager::poll_packets_batch(256)` now locks once per 256 packets and the
+clock is read once per batch. On the same 3M-packet workload the Rust/C
+wall-time ratio went **1.28 → 0.96** (Rust now faster).
 
 ### Reproduce
 
@@ -174,15 +190,13 @@ cargo build --release -p cpworker
 
 # 3. run (writes bench/RESULTS.md)
 CP_C=/path/to/cloud-probe/build/tmp/cpworker-linux-amd64/cpworker \
-N=1000000 REPEAT=3 python3 bench/bench.py
+N=1000000 REPEAT=5 python3 bench/bench.py
 ```
 
 `bench/bench.py` is self-contained: it generates the PCAP, writes the three
-configs, runs each binary, and emits the table above. Thresholds/caveats:
+configs, runs each binary, and emits the table above. Caveats:
 
-* `pcap_file` capturer only — no live `libpcap` capture, no root needed. Both
-  use the same libpcap read path.
+* `pcap_file` capturer only — no live capture, no root. Both use libpcap.
 * `vxlan-split` sends to a loopback UDP drainer to avoid ICMP back-pressure.
-* Results are relative to this (slow, 4-core) machine. Absolute numbers will
-  be much higher on server hardware; the C/Rust *ratios* are the meaningful
-  output.
+* Results are relative to this (slow, 4-core) machine; the C/Rust **ratios**
+  are the meaningful output.

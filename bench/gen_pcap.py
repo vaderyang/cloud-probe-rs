@@ -13,7 +13,8 @@ SIZES = [64, 64, 64, 128, 128, 256, 512, 1024, 1514]
 
 
 def frame(rng, size):
-    b = bytearray(size)
+    # Bulk random bytes (much faster than per-byte for large inputs).
+    b = bytearray(rng.randbytes(size))
     b[0:6] = bytes.fromhex("001122334455")
     b[6:12] = bytes.fromhex("66778899aabb")
     b[12:14] = b"\x08\x00"
@@ -34,9 +35,6 @@ def frame(rng, size):
         struct.pack_into(">H", b, udp + 2, 53)
         struct.pack_into(">H", b, udp + 4, size - 14 - 20)
         struct.pack_into(">H", b, udp + 6, 0)
-    # Random payload after the headers.
-    for i in range(42, size):
-        b[i] = rng.randrange(256)
     return bytes(b)
 
 

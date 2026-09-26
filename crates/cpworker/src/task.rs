@@ -304,35 +304,54 @@ impl TaskManager {
 
     /// Poll each task once. Mirrors `task_manager_poll_packets`.
     pub fn poll_packets(&mut self) -> u64 {
-        let mut num_pkts = 0u64;
+        self.poll_packets_batch(1)
+    }
+
+    /// Poll up to `max` packets, amortising the output-set lock (and the
+    /// caller's TaskManager lock) across a batch instead of once per packet.
+    pub fn poll_packets_batch(&mut self, max: usize) -> u64 {
+        let mut total = 0u64;
         match self.config.execution_model {
             ExecutionModel::Pipeline => {
                 let ring = self.ring.clone().unwrap();
                 let alloc = self.alloc.clone().unwrap();
-                for entry in self.entries.iter_mut() {
-                    if let Some(cap) = entry.capturer.as_mut() {
-                        let mut sink = PipelineSink {
-                            ring: ring.clone(),
-                            alloc: alloc.clone(),
-                            task_index: entry.index,
-                        };
-                        num_pkts += cap.capture_once(&mut sink);
+                for _ in 0..max {
+                    let mut n = 0u64;
+                    for entry in self.entries.iter_mut() {
+                        if let Some(cap) = entry.capturer.as_mut() {
+                            let mut sink = PipelineSink {
+                                ring: ring.clone(),
+                                alloc: alloc.clone(),
+                                task_index: entry.index,
+                            };
+                            n += cap.capture_once(&mut sink);
+                        }
+                    }
+                    total += n;
+                    if n == 0 {
+                        break;
                     }
                 }
             }
             ExecutionModel::Rtc => {
-                let out_sets = self.out_sets.clone();
-                let mut sets = out_sets.lock();
-                for entry in self.entries.iter_mut() {
-                    if let Some(cap) = entry.capturer.as_mut() {
-                        let outs = &mut sets[entry.index].outputs;
-                        let mut sink = RtcSink { outputs: outs };
-                        num_pkts += cap.capture_once(&mut sink);
+                let mut sets = self.out_sets.lock();
+                for _ in 0..max {
+                    let mut n = 0u64;
+                    for entry in self.entries.iter_mut() {
+                        if let Some(cap) = entry.capturer.as_mut() {
+                            let outs = &mut sets[entry.index].outputs;
+                            let mut sink = RtcSink { outputs: outs };
+                            n += cap.capture_once(&mut sink);
+                        }
+                    }
+                    total += n;
+                    if n == 0 {
+                        break;
                     }
                 }
             }
         }
-        num_pkts
+        total
     }
 
     /// Rebuild all tasks from a freshly parsed config. In-place reload.
