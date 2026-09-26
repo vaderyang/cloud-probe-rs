@@ -91,7 +91,9 @@ Reduced-scope port (`cpdaemon`):
 cloud-probe-rs/
 ├── Cargo.toml                 # workspace
 ├── parity/                    # C-vs-Rust differential + fuzz harnesses
+├── bench/                     # C-vs-Rust benchmarks (throughput / RSS)
 ├── fuzz.sh                    # cargo-fuzz runner
+├── deny.toml                  # cargo-deny policy
 └── crates/
     ├── cpworker/
     │   └── src/
@@ -111,3 +113,63 @@ cloud-probe-rs/
     ├── cripid/
     └── sim/                   # Deterministic Simulation Testing (DST)
 ```
+
+## Benchmarks: C vs Rust
+
+Measured against the reference C `cpworker` from
+[netis/cloud-probe](https://github.com/netis/cloud-probe) (`0.9.x`, built with
+`CMAKE_BUILD_TYPE=Release`). Both binaries replay the **same 1,000,000-packet
+PCAP** (417.5 MB, mixed Ethernet/IPv4/UDP frames) through a `pcap_file`
+capturer. Timing stops when the capturer logs `end of file`; peak RSS is the
+process `VmHWM`. Median of 3 runs after a warmup.
+
+**Machine:** 4 cores, Intel Core M-5Y31 @ 0.90 GHz, 7.7 GiB RAM, Linux 6.14.
+
+| Scenario | Impl | Throughput (pps) | Throughput (MB/s) | Time (s) | Peak RSS (MB) |
+|---|---|---:|---:|---:|---:|
+| `null` (parse + pipeline + discard) | C | 3.23 M | 1350 | 0.309 | 7.0 |
+| `null` | Rust | 2.57 M | 1075 | 0.389 | 6.4 |
+| `file` (parse + pcap writer) | C | 1.28 M | 536 | 0.779 | 7.0 |
+| `file` | Rust | 1.23 M | 513 | 0.814 | 6.4 |
+| `vxlan-split` (encap + checksum + split) | C | 0.13 M | 53.2 | 7.854 | 7.1 |
+| `vxlan-split` | Rust | 0.12 M | 51.9 | 8.039 | 6.5 |
+
+**Reading the numbers**
+
+* **Pure pipeline (`null`)** — the Rust port reaches ~80% of C's packet rate.
+  The remaining gap is mostly per-packet allocation in the Rust task/output
+  path; it is the main tuning target.
+* **PCAP writer (`file`)** — ~96% of C; both become memcpy/IO bound.
+* **VXLAN encapsulation** — effectively at parity (~98%): the path is
+  dominated by the `sendto(2)` syscall and the kernel, which both share. This
+  confirms the encapsulation/checksum/split logic (the part most at risk of a
+  porting bug) does not regress.
+* **Memory** — the Rust binaries use ~9% less peak RSS (6.4 vs 7.0 MB here);
+  `cpdaemon`/`cpctl` are separate processes and not included.
+
+### Reproduce
+
+```bash
+# 1. reference C binary (Release build!)
+cd cloud-probe/build
+BUILD_MODE=local CPWORKER_LIBRARY_ROOT=/path/to/thirdparty/libs/linux-amd64 \
+  CPWORKER_CMAKE_BUILD_TYPE=Release go run mage.go cpworker:linux
+
+# 2. Rust binary
+cd cloud-probe-rs
+cargo build --release -p cpworker
+
+# 3. run (writes bench/RESULTS.md)
+CP_C=/path/to/cloud-probe/build/tmp/cpworker-linux-amd64/cpworker \
+N=1000000 REPEAT=3 python3 bench/bench.py
+```
+
+`bench/bench.py` is self-contained: it generates the PCAP, writes the three
+configs, runs each binary, and emits the table above. Thresholds/caveats:
+
+* `pcap_file` capturer only — no live `libpcap` capture, no root needed. Both
+  use the same libpcap read path.
+* `vxlan-split` sends to a loopback UDP drainer to avoid ICMP back-pressure.
+* Results are relative to this (slow, 4-core) machine. Absolute numbers will
+  be much higher on server hardware; the C/Rust *ratios* are the meaningful
+  output.
