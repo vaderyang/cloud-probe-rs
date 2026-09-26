@@ -5,9 +5,13 @@ updates:
     schedule:
       interval: weekly
     open-pull-requests-limit: 10
+    # Group only minor/patch updates (usually compatible). Major updates are
+    # left as individual PRs so a breaking bump (and any code migration) can be
+    # reviewed on its own without hiding behind a large group.
     groups:
-      cargo-dependencies:
+      cargo-minor-patch:
         patterns: ["*"]
+        update-types: ["minor", "patch"]
 
   - package-ecosystem: github-actions
     directory: /
