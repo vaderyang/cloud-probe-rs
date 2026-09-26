@@ -372,9 +372,11 @@ impl ZmtpPush {
             conn.t.shutdown();
         }
         self.handshakes_given_up += 1;
-        if TCP_TIMEOUTS_WARNED.load(Ordering::Relaxed) || !self.pending.is_empty() {
+        // Worth a log line only when data is piling up behind it: a missing
+        // collector would otherwise emit one line per backoff step.
+        if !self.pending.is_empty() {
             crate::log_warn!(
-                "zmtp: handshake timed out after {:?}; reconnecting                  ({} batches queued)",
+                "zmtp: handshake timed out after {:?}; reconnecting with {} queued batches",
                 self.handshake_timeout,
                 self.pending.len()
             );
@@ -397,30 +399,41 @@ impl ZmtpPush {
         if self.conn.is_some() || Instant::now() < self.next_attempt {
             return;
         }
-        match self.connector.start() {
-            Ok(t) => {
-                let mut t = t;
-                let connecting = t.check_connected().map(|c| !c).unwrap_or(false);
-                let deadline = Instant::now() + self.handshake_timeout;
-                self.conn = Some(Conn {
-                    t,
-                    phase: if connecting {
-                        Phase::Connecting
-                    } else {
-                        Phase::Greeting
-                    },
-                    out: if connecting {
-                        Vec::new()
-                    } else {
-                        codec::greeting().to_vec()
-                    },
-                    out_off: 0,
-                    inbuf: Vec::new(),
-                    deadline,
-                });
+        let mut transport = match self.connector.start() {
+            Ok(t) => t,
+            Err(_) => {
+                self.schedule_reconnect();
+                return;
             }
-            Err(_) => self.schedule_reconnect(),
-        }
+        };
+        // A peer that refuses the connect outright should cost one backoff step,
+        // not a full handshake deadline: surface that error here instead of
+        // discovering it on the first write.
+        let connecting = match transport.check_connected() {
+            Ok(c) => c,
+            Err(_) => {
+                transport.shutdown();
+                self.schedule_reconnect();
+                return;
+            }
+        };
+        let deadline = Instant::now() + self.handshake_timeout;
+        self.conn = Some(Conn {
+            t: transport,
+            phase: if connecting {
+                Phase::Connecting
+            } else {
+                Phase::Greeting
+            },
+            out: if connecting {
+                Vec::new()
+            } else {
+                codec::greeting().to_vec()
+            },
+            out_off: 0,
+            inbuf: Vec::new(),
+            deadline,
+        });
     }
 
     fn drive(&mut self) {
