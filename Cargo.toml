@@ -29,7 +29,6 @@ nix = { version = "0.31", features = ["signal", "socket", "net", "fs", "process"
 log = "0.4"
 env_logger = "0.11"
 signal-hook = "0.3"
-byteorder = "1"
 rand = "0.10"
 uuid = { version = "1", features = ["v4", "v5"] }
 chrono = "0.4"

@@ -14,11 +14,9 @@ path = "src/main.rs"
 [dependencies]
 anyhow.workspace = true
 clap.workspace = true
-serde.workspace = true
 serde_json.workspace = true
 humantime.workspace = true
 log.workspace = true
-env_logger.workspace = true
 chrono.workspace = true
 
 cpgolib = { path = "../cpgolib" }
