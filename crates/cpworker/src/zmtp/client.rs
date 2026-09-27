@@ -29,9 +29,11 @@ use std::io::{self, Read, Write};
 use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
 use std::os::fd::AsFd;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{mpsc, Arc};
 use std::time::{Duration, Instant};
 
 use nix::poll::{poll, PollFd, PollFlags, PollTimeout};
+use parking_lot::Mutex;
 use socket2::{Domain, Protocol, Socket, TcpKeepalive, Type};
 
 use super::codec;
@@ -640,6 +642,117 @@ impl Resolver for SystemResolver {
     }
 }
 
+/// Resolves hostnames on a background thread so reconnect never blocks the
+/// caller.
+///
+/// `getaddrinfo` can block for tens of seconds when DNS is unreachable, and a
+/// collector disconnect often coincides with a network/DNS outage. Doing that on
+/// the capture thread (as a plain re-resolve on every reconnect would) stalls
+/// packet processing and overflows the kernel receive queue. Here a worker
+/// thread performs the lookup; [`Resolver::resolve`] returns the last known
+/// answer immediately and only *requests* a refresh when it has gone stale.
+///
+/// The one blocking lookup happens in [`BackgroundResolver::new`], on the
+/// task-setup path.
+pub struct BackgroundResolver {
+    shared: Arc<Mutex<ResolveState>>,
+    refresh: mpsc::Sender<()>,
+    pending: Arc<AtomicBool>,
+}
+
+struct ResolveState {
+    addrs: Vec<SocketAddr>,
+    last_resolve: Option<Instant>,
+}
+
+impl BackgroundResolver {
+    /// Resolve `host:port` once (blocking) and start the background worker.
+    ///
+    /// # Errors
+    /// Returns an error if the initial resolution fails or yields no address.
+    pub fn new(host: &str, port: u16) -> io::Result<Self> {
+        Self::with_worker_resolver(host, port, Box::new(SystemResolver))
+    }
+
+    /// Like [`BackgroundResolver::new`] but with an injectable worker resolver
+    /// (used to test that refreshes never block the caller).
+    ///
+    /// # Errors
+    /// Returns an error if the initial resolution fails or yields no address.
+    #[doc(hidden)]
+    pub fn with_worker_resolver(
+        host: &str,
+        port: u16,
+        mut resolver: Box<dyn Resolver>,
+    ) -> io::Result<Self> {
+        let initial = resolver.resolve(host, port)?;
+        if initial.is_empty() {
+            return Err(io::Error::new(
+                io::ErrorKind::NotFound,
+                format!("no address resolved for {host}:{port}"),
+            ));
+        }
+        let shared = Arc::new(Mutex::new(ResolveState {
+            addrs: initial,
+            last_resolve: Some(Instant::now()),
+        }));
+        let (refresh, rx) = mpsc::channel::<()>();
+        let pending = Arc::new(AtomicBool::new(false));
+
+        let worker_state = Arc::clone(&shared);
+        let worker_pending = Arc::clone(&pending);
+        let worker_host = host.to_string();
+        let spawned = std::thread::Builder::new()
+            .name("zmtp-resolver".into())
+            .spawn(move || {
+                while rx.recv().is_ok() {
+                    let resolved = resolver
+                        .resolve(&worker_host, port)
+                        .ok()
+                        .filter(|v| !v.is_empty());
+                    let mut st = worker_state.lock();
+                    if let Some(v) = resolved {
+                        st.addrs = v;
+                    }
+                    // A transient DNS failure keeps the previous answer.
+                    st.last_resolve = Some(Instant::now());
+                    drop(st);
+                    worker_pending.store(false, Ordering::SeqCst);
+                }
+            });
+        if spawned.is_err() {
+            // No worker: keep serving the initial answer (never block).
+            crate::log_warn!("failed to spawn the ZMTP DNS resolver thread");
+        }
+
+        Ok(Self {
+            shared,
+            refresh,
+            pending,
+        })
+    }
+}
+
+impl Resolver for BackgroundResolver {
+    fn resolve(&mut self, _host: &str, _port: u16) -> io::Result<Vec<SocketAddr>> {
+        let (addrs, stale) = {
+            let st = self.shared.lock();
+            (
+                st.addrs.clone(),
+                st.last_resolve.is_none_or(|t| t.elapsed() >= RESOLVE_TTL),
+            )
+        };
+        if stale && !self.pending.swap(true, Ordering::SeqCst) {
+            // An unbounded channel send never blocks; if the worker is gone,
+            // clear the flag so a later call can retry.
+            if self.refresh.send(()).is_err() {
+                self.pending.store(false, Ordering::SeqCst);
+            }
+        }
+        Ok(addrs)
+    }
+}
+
 /// Opens a non-blocking TCP connection to `addr`, with `TCP_NODELAY`,
 /// `SO_KEEPALIVE` (+ probe tuning) and `TCP_USER_TIMEOUT` applied.
 ///
@@ -765,21 +878,16 @@ impl Connector for TcpConnector {
 /// # Errors
 /// Returns an error if the host cannot be resolved at startup.
 pub fn tcp_connector(host: &str, port: u16) -> io::Result<Box<dyn Connector>> {
-    let mut resolver = SystemResolver;
-    let addrs = resolver.resolve(host, port)?;
-    if addrs.is_empty() {
-        return Err(io::Error::new(
-            io::ErrorKind::NotFound,
-            format!("no address resolved for {host}:{port}"),
-        ));
-    }
+    // Resolve once now (the task-setup path) and refresh on a worker thread from
+    // then on, so reconnects never call getaddrinfo on the capture thread.
+    let resolver = BackgroundResolver::new(host, port)?;
     Ok(Box::new(TcpConnector {
         host: host.to_string(),
         port,
-        resolver: Box::new(SystemResolver),
-        addrs,
+        resolver: Box::new(resolver),
+        addrs: Vec::new(),
         next: 0,
-        last_resolve: Some(Instant::now()),
+        last_resolve: None,
     }))
 }
 
@@ -1416,5 +1524,57 @@ mod robustness_tests {
             .expect("resolve localhost");
         assert!(!addrs.is_empty());
         assert!(addrs.iter().all(|a| a.port() == 5555));
+    }
+
+    #[test]
+    fn background_resolver_does_not_block_the_caller() {
+        use std::sync::atomic::AtomicUsize;
+
+        struct SlowRefreshResolver {
+            calls: Arc<AtomicUsize>,
+            gate: Arc<(std::sync::Mutex<bool>, std::sync::Condvar)>,
+            addr: SocketAddr,
+        }
+        impl Resolver for SlowRefreshResolver {
+            fn resolve(&mut self, _h: &str, _p: u16) -> io::Result<Vec<SocketAddr>> {
+                if self.calls.fetch_add(1, Ordering::SeqCst) == 0 {
+                    return Ok(vec![self.addr]); // initial lookup is fast
+                }
+                // Background refresh: block until the test releases it.
+                let (lock, cv) = &*self.gate;
+                let mut go = lock.lock().unwrap();
+                while !*go {
+                    go = cv.wait(go).unwrap();
+                }
+                Ok(vec![self.addr])
+            }
+        }
+
+        let addr: SocketAddr = "127.0.0.1:5555".parse().unwrap();
+        let calls = Arc::new(AtomicUsize::new(0));
+        let gate = Arc::new((std::sync::Mutex::new(false), std::sync::Condvar::new()));
+        let resolver = Box::new(SlowRefreshResolver {
+            calls: calls.clone(),
+            gate: gate.clone(),
+            addr,
+        });
+        let mut r =
+            BackgroundResolver::with_worker_resolver("collector.invalid", 5555, resolver).unwrap();
+
+        // Force the cache stale so the next resolve kicks off a refresh that
+        // blocks inside the worker thread.
+        std::thread::sleep(RESOLVE_TTL + Duration::from_millis(50));
+        let started = Instant::now();
+        let addrs = r.resolve("collector.invalid", 5555).unwrap();
+        let elapsed = started.elapsed();
+        assert_eq!(addrs, vec![addr]);
+        assert!(
+            elapsed < Duration::from_millis(200),
+            "resolve() must not block on getaddrinfo (took {elapsed:?})"
+        );
+
+        // Release the worker so it does not stay blocked.
+        *gate.0.lock().unwrap() = true;
+        gate.1.notify_all();
     }
 }
