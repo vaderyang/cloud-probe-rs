@@ -157,11 +157,24 @@ impl SimpleAllocator {
     }
 
     fn release(&self, len: u64) {
-        let _ = self
-            .used
-            .fetch_update(Ordering::Release, Ordering::Relaxed, |v| {
-                Some(v.saturating_sub(len))
-            });
+        // A CAS loop rather than `AtomicU64::fetch_update`: nightly renamed that
+        // method (`try_update`), and the new name is not in our MSRV (1.88) yet,
+        // so depending on either spelling means a fuzz/nightly build warning.
+        // Saturating is the behaviour we want and the same loop `reserve` uses:
+        // releasing more than was reserved is a bookkeeping bug, and it must not
+        // wrap `used` into a huge number that then blocks every allocation.
+        let mut cur = self.used.load(Ordering::Relaxed);
+        loop {
+            match self.used.compare_exchange_weak(
+                cur,
+                cur.saturating_sub(len),
+                Ordering::Release,
+                Ordering::Relaxed,
+            ) {
+                Ok(_) => break,
+                Err(fresh) => cur = fresh,
+            }
+        }
     }
 
     /// Allocate a packet message, or `None` if the byte budget is exceeded.
@@ -238,5 +251,30 @@ mod tests {
         assert!(used > 0);
         a.free(m.as_ref().unwrap());
         assert_eq!(a.used(), 0);
+    }
+
+    /// `release` is saturating on purpose.
+    ///
+    /// A double free (or any bookkeeping bug that releases bytes that were never
+    /// reserved) must not wrap `used` around to ~u64::MAX - that would make every
+    /// later `reserve` fail and silently starve the pipeline. This pins the
+    /// behaviour of the CAS-loop rewrite of `release` (AUDIT4 P5-27: nightly
+    /// deprecated `AtomicU64::fetch_update`, and its replacement is newer than our
+    /// MSRV, so the rewrite must not depend on either spelling).
+    #[test]
+    fn releasing_more_than_was_reserved_saturates_at_zero() {
+        let a = SimpleAllocator::new(1000);
+        let m = a
+            .alloc_heartbeat(0)
+            .expect("a heartbeat fits in 1000 bytes");
+        assert!(a.used() > 0);
+        a.free(&m);
+        assert_eq!(a.used(), 0);
+        for _ in 0..8 {
+            a.free(&m);
+            assert_eq!(a.used(), 0, "release wrapped instead of saturating");
+        }
+        // The budget is still usable afterwards.
+        assert!(a.alloc_heartbeat(1).is_some());
     }
 }
