@@ -1,0 +1,42 @@
+# CODEOWNERS
+#
+# Small team, so `*` covers everything; the extra entries are the paths where a
+# regression is cheapest to introduce and most expensive to notice, so they get
+# called out explicitly rather than relying on whoever happens to review.
+#
+# Replace the handles below when the reviewer set changes - GitHub silently ignores
+# entries that point at users who are not collaborators, so a stale entry means
+# "no required review", which is worse than no entry.
+
+# Everything
+*                        @vaderyang
+
+# Supply chain: two Cargo.lock files, the license/advisory policy, and the
+# automation that installs/updates all of it (deny.toml is a deny-by-default
+# allow-list: one added identifier changes the licensing posture of every binary).
+/Cargo.lock              @vaderyang
+/Cargo.toml              @vaderyang
+/deny.toml               @vaderyang
+/crates/cpworker/fuzz/Cargo.lock   @vaderyang
+/crates/cpworker/fuzz/Cargo.toml   @vaderyang
+/.github/                @vaderyang
+
+# Differential-parity harnesses and the anti-regression greps. These are the
+# gates that caught P5-01/P5-04/P5-15; weakening one is a change of policy, not a
+# test fix.
+/parity/                 @vaderyang
+
+# The portability-sensitive core: cBPF codegen (kernel-verifiable bytecode),
+# AF_PACKET capture semantics, and the ZMTP client that replaces libzmq on the
+# wire. Changes here need the corresponding `parity/` oracle and, for capture,
+# the privileged live-capture job.
+/crates/cpworker/src/bpf/         @vaderyang
+/crates/cpworker/src/capturer/    @vaderyang
+/crates/cpworker/src/zmtp/        @vaderyang
+/crates/cpworker/src/config.rs    @vaderyang
+
+# Security-sensitive surfaces documented in SECURITY.md: privileged capture
+# capabilities, the unauthenticated unix control socket, CPM HTTP/TLS.
+/crates/cpworker/src/unix_manager.rs  @vaderyang
+/crates/cpdaemon/src/cpm/             @vaderyang
+/SECURITY.md                          @vaderyang
