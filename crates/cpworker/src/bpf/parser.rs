@@ -334,11 +334,12 @@ impl Parser {
             .ok_or_else(|| Error::new("unexpected end of filter"))?;
 
         match kw.as_str() {
-            "host" => Ok(Ast::Host {
-                dir,
-                proto: None,
-                addr: self.parse_addr()?,
-            }),
+            "host" => {
+                let t = self
+                    .next()
+                    .ok_or_else(|| Error::new("missing host address"))?;
+                self.host_expr(dir, None, &t)
+            }
             "net" => {
                 let (addr, mask) = self.parse_net()?;
                 Ok(Ast::Net {
@@ -420,11 +421,10 @@ impl Parser {
             }
             Some("host") if matches!(proto, Proto::Ip | Proto::Ip6 | Proto::Arp | Proto::Rarp) => {
                 self.pos += 1;
-                Ok(Ast::Host {
-                    dir,
-                    proto: Some(proto),
-                    addr: self.parse_addr()?,
-                })
+                let t = self
+                    .next()
+                    .ok_or_else(|| Error::new("missing host address"))?;
+                self.host_expr(dir, Some(proto), &t)
             }
             Some("net") if matches!(proto, Proto::Ip | Proto::Ip6 | Proto::Arp | Proto::Rarp) => {
                 self.pos += 1;
@@ -507,11 +507,24 @@ impl Parser {
         parse_mac(&t)
     }
 
-    fn parse_addr(&mut self) -> Result<IpAddr> {
-        let t = self
-            .next()
-            .ok_or_else(|| Error::new("missing host address"))?;
-        parse_addr(&t)
+    /// Build `host` matching for *every* address a name resolves to.
+    ///
+    /// libpcap's `host <name>` expands to the logical OR over all A/AAAA
+    /// answers; taking only the first would leave some addresses unfiltered
+    /// (and, for the auto-generated output-host exclusion, risks mirroring our
+    /// own traffic back).
+    fn host_expr(&mut self, dir: Dir, proto: Option<Proto>, token: &str) -> Result<Ast> {
+        let addrs = resolve_addrs(token)?;
+        let mut expr: Option<Ast> = None;
+        for addr in addrs {
+            self.bump()?;
+            let node = Ast::Host { dir, proto, addr };
+            expr = Some(match expr {
+                None => node,
+                Some(prev) => Ast::Or(Box::new(prev), Box::new(node)),
+            });
+        }
+        expr.ok_or_else(|| Error::new(format!("no address for host '{token}'")))
     }
 
     fn parse_net(&mut self) -> Result<(IpAddr, IpAddr)> {
@@ -567,6 +580,26 @@ fn parse_addr(t: &str) -> Result<IpAddr> {
             .next()
             .map(|sa| sa.ip())
             .ok_or_else(|| Error::new(format!("no address for host '{t}'"))),
+        Err(_) => Err(Error::new(format!("invalid host address '{t}'"))),
+    }
+}
+
+/// Resolve `t` to *all* of its addresses (deduplicated, deterministic order).
+fn resolve_addrs(t: &str) -> Result<Vec<IpAddr>> {
+    if let Ok(ip) = IpAddr::from_str(t) {
+        return Ok(vec![ip]);
+    }
+    match (t, 0u16).to_socket_addrs() {
+        Ok(addrs) => {
+            let mut v: Vec<IpAddr> = addrs.map(|sa| sa.ip()).collect();
+            v.sort();
+            v.dedup();
+            if v.is_empty() {
+                Err(Error::new(format!("no address for host '{t}'")))
+            } else {
+                Ok(v)
+            }
+        }
         Err(_) => Err(Error::new(format!("invalid host address '{t}'"))),
     }
 }
@@ -750,6 +783,36 @@ mod tests {
         ));
         // `src ether host` is invalid, like tcpdump.
         assert!(parse("src ether host 00:11:22:33:44:55").is_err());
+    }
+
+    #[test]
+    fn host_name_expands_to_every_resolved_address() {
+        fn collect(ast: &Ast, out: &mut Vec<IpAddr>) {
+            match ast {
+                Ast::Or(a, b) => {
+                    collect(a, out);
+                    collect(b, out);
+                }
+                Ast::Host { addr, .. } => out.push(*addr),
+                _ => {}
+            }
+        }
+        let expected: std::collections::BTreeSet<IpAddr> = ("localhost", 0u16)
+            .to_socket_addrs()
+            .unwrap()
+            .map(|s| s.ip())
+            .collect();
+        if expected.is_empty() {
+            return; // environment has no localhost entry
+        }
+        let ast = parse("host localhost").unwrap();
+        let mut got = Vec::new();
+        collect(&ast, &mut got);
+        let got: std::collections::BTreeSet<IpAddr> = got.into_iter().collect();
+        assert_eq!(
+            got, expected,
+            "host <name> must cover every resolved address"
+        );
     }
 
     #[test]

@@ -146,6 +146,9 @@ def gen_long(ports):
         out.append(" or ".join(f"host 10.8.{i // 256}.{i % 256}" for i in range(n)))
     out.append(" or ".join(f"tcp dst port {80 + i}" for i in range(10)))
     out.append(" and ".join("udp" if i % 2 else f"host 10.9.0.{i % 4}" for i in range(64)))
+    # A name with several addresses: libpcap expands to the OR over all of
+    # them; taking only the first would diverge on packets to the others.
+    out.append("host localhost")
     _ = ports
     return out
 
@@ -164,8 +167,9 @@ def main():
     v4 += [bytes([10, 0, 0, 1]), bytes([10, 0, 0, 9]), bytes([192, 168, 1, 1])]
     v4 += [bytes([10, 9, 0, i]) for i in range(4)]
     v4 += [bytes([10, 8, 0, i]) for i in range(4)]
+    v4 += [bytes([127, 0, 0, 1])]
     v6 = [r.randbytes(16) for _ in range(3)]
-    v6 += [bytes([0xFE, 0x80] + [0] * 13 + [1]), bytes(16)]
+    v6 += [bytes([0xFE, 0x80] + [0] * 13 + [1]), bytes(16), bytes([0] * 15 + [1])]
     ports = [53, 80, 443, 1234, 8080, 65535, 0, 100]
     ports += [1000 + i for i in range(6)]
     macs = [mac(r) for _ in range(3)]
