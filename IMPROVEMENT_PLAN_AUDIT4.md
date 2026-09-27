@@ -335,3 +335,16 @@ WP2 与 WP3 可并行；M1 必须最先（唯一可能"完全无数据"的缺陷
 
 - **M5**：收尾（P5-19 基准重跑 + P5-18 文档一致性 + WP5 剩余 P3 项 P5-24..P5-30）。
 
+
+## 7. 补充修复（三篇 AUDIT4 + 用户复核）
+
+- ✅ **P5-08 主机名多地址**（M1 漏项）：`bpf/parser.rs` 的 `host <name>` 现按 OR 展开**全部**
+  A/AAAA 地址（此前只取首个，回环放大的风险仍在）；BPF 差分生成器新增 `host localhost` 用例
+  （本应能捕获此缺陷）。
+- ✅ **H4 剩余部分（挂载规模）**：实测 N=100 → `ENOMEM`（`net.core.optmem_max`）、
+  N≥150 → `EINVAL`（>4096 指令）。capturer 在 `SO_ATTACH_FILTER` 失败或程序 >
+  `bpf::BPF_MAXINSNS`(4096) 时**回退用户态过滤**（在 VLAN 重插前判定，语义与内核过滤一致），
+  live 测试验证 4531 条指令仍能正常抓包。
+- ✅ **M3 引入的回归（DNS 阻塞抓包线程）**：`zmtp` 重连时的 DNS 重解析改为后台线程
+  （`BackgroundResolver`），`resolve()` 立即返回缓存并异步刷新；首次解析在任务装配阶段完成。
+  新增回归测试"worker 阻塞时 `resolve()` 不阻塞调用方"。

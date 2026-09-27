@@ -269,6 +269,10 @@ M4 的问题大多不是"移植错了"，而是"移植得比原实现更宽松�
   并用 `getsockopt` 回读实际值，被 `net.core.rmem_max` 截断时告警。
 * **启动无空窗**：socket 以协议 0 创建 → 挂 BPF → 再 `bind(ETH_P_ALL, ifindex)`，
   避免 bind/挂过滤器之前收到未过滤流量。
+* **过滤器回退**：内核 `SO_ATTACH_FILTER` 有 4096 条指令上限（`BPF_MAXINSNS`），
+  且受 `net.core.optmem_max` 限制（超限返回 `ENOMEM`/`EINVAL`）。挂载失败或程序过长时，
+  capturer **回退到用户态过滤**（用同一编译结果在收到帧后判定，丢弃不匹配帧），与 libpcap 一致，
+  且用户态过滤在 VLAN 标签重插**之前**执行，保持与内核过滤相同的匹配语义。
 
 ### pcap 文件读取（AUDIT4 P5-20）
 
@@ -305,7 +309,8 @@ release profile 用 `panic = "abort"`：**panic 是致命事件，不是可恢�
   `udp src port 53`、`ip src host X`、`ether src host MAC`）；
   `ip`/`ip6`/`arp`/`rarp`/`tcp`/`udp`/`icmp`/`icmp6`；`ip proto N`/`ip6 proto N`；
   `and`/`or`/`not`/括号。
-* **语义对齐 tcpdump**：IPv6 分片头 `0x2c`、IPv4 分片偏移、bare `port` 含 SCTP、`net` 掩码。
+* **语义对齐 tcpdump**：IPv6 分片头 `0x2c`、IPv4 分片偏移、bare `port` 含 SCTP、`net` 掩码；
+  `host <name>` 解析出多个 A/AAAA 时按 **OR 展开全部地址**（不以首个为准）。
 * **限制**：表达式 ≤ 8 KiB、嵌套 ≤ 256、节点 ≤ 4096；超限**明确报错**（不会栈溢出）。
 * **长跳转**：条件跳转仅 255 指令距离，超出时由 `JA` 跳转中继（jump-around，32 位 k）
   自动处理，因此 `not host` 长链 / 多项 `port`/`host` 或链不再受此限制。
@@ -323,6 +328,9 @@ release profile 用 `panic = "abort"`：**panic 是致命事件，不是可恢�
 * 健壮性（AUDIT4 P5-10/11，均有回归测试）：握手 10s deadline、`SO_KEEPALIVE` +
   `TCP_USER_TIMEOUT`、重连时重新解析 DNS 并轮转全部地址、队列字节上限 64 MiB、
   `zmtp_queued_*` 指标。与 libzmq 的差异见 §2.4。
+* **重连 DNS 不阻塞抓包线程**：`getaddrinfo` 在后台线程执行（`BackgroundResolver`），
+  `Resolver::resolve` 立即返回缓存答案并只在过期时*请求*刷新，因此在 DNS 不可用导致
+  `getaddrinfo` 阻塞数十秒时也不会卡住 `send()/poll()`（首次解析在任务装配阶段完成）。
 * 对拍：`parity/verify_zmtp.sh` 用**真实 libzmq PULL** 验证 wire 逐字节一致。
 * fuzz：`zmtp_wire` + `zmtp_client`；真实 TCP 集成测试（并发/断开重连）。
 
