@@ -136,7 +136,7 @@
 - **P5-23** 消除 2 处可达性存疑的 panic 构造（或加 `debug_assert` + 明确不变量）；评估 `panic="abort"` 与"可恢复错误"的边界。
 - 【验收】各自配单测；clippy/deny/test 全绿。
 
-### WP5 — 工程质量与供应链（P2/P3）
+### WP5 — 工程质量与供应链（P2/P3）  ✅ **已完成（M5，见 §6）**
 
 - **P5-16 实时采集进 CI**：privileged 容器（`--cap-add=NET_ADMIN,NET_RAW`）或 `unshare -n`+veth 脚本跑 `af_packet_live`；覆盖 VLAN（P5-03）、丢包统计（P5-02）、启动空窗（P5-09）。
 - **P5-17 差分门禁加深**：`gen_bpf_cases.py` 增加算子 3/10/50 项、`not host` 长链、方向语法；`verify_bpf.sh` 失败时打印种子。
@@ -177,8 +177,8 @@
 | **M1（阻塞）** | WP1：P5-01/06/07 + P5-17 门禁 | — | 长链/方向语法与 libpcap 一致；无 abort；`all.sh` 绿 |
 | **M2（数据正确）** | WP2：P5-02/03/05/09 + P5-16 live CI | M1 | 丢包/VLAN/RXBUF 与 libpcap 对齐；live job 入 CI |
 | **M3（数据不丢）** ✅ | WP3：P5-04/10/11 | — | reload 不丢批次；握手超时/重解析有测试 |
-| **M4（卫生）** ✅ | WP4（P5-15/20/21/22/23 + §3 门禁扩展）已完成；WP5 的 P3 项（P5-24..28）随 M5 | M1–M3 | clippy/deny/test 全绿；MSRV job 待 M5 |
-| **M5（收尾）** | P5-19 基准 + P5-18 文档 + P5-30 流程 | M1–M4 | README/基准更新；流程文件齐备 |
+| **M4（卫生）** ✅ | WP4（P5-15/20/21/22/23 + §3 门禁扩展）已完成；WP5 的 P3 项（P5-24..28）随 M5 | M1–M3 | clippy/deny/test 全绿；MSRV job 已入 CI |
+| **M5（收尾）** ✅ | WP5 全部（P5-18/19/24..30） | M1–M4 | 基准重测并更新 README；流程文件齐备；CI/parity 全部 --locked + 最小权限 + MSRV job |
 
 WP2 与 WP3 可并行；M1 必须最先（唯一可能"完全无数据"的缺陷）。
 
@@ -189,6 +189,15 @@ WP2 与 WP3 可并行；M1 必须最先（唯一可能"完全无数据"的缺陷
 3. **`af_packet_live` 在 root 下是否真通过**：需在带 `CAP_NET_RAW` 环境实测并在 CI 固化。
 4. **libpcap TPACKET ring 相对 `SO_RCVBUF` 的真实容量优势**：核心结论（256 MiB→8 MiB）已实测；"ring 可用 MB 级"需高负载实测。
 5. **VLAN/H3 的现场影响**：需在 trunk/镜像口实测确认严重度。
+6. **实时抓取面的“同流不同包数”（M5 新增，待根因分析）**：`bench/live_bench.py` 在 lo 上对拍两个实现
+   （C=libpcap、Rust=裸 AF_PACKET，同配置 buffer_size_mb=256、bpf="udp and dst port N"）：Rust 侧
+   `cap_packets` 恒等于“发包数 ×2”（loopback 上出站与回环入站各一份，都命中过滤器），C 侧只有
+   “发包数 ×0.79”，而两侧 `drop_packets` 都报 0；每百万捕获帧的 CPU 成本反而接近（C 3.3 s /
+   Rust 3.2 s）。**尚不能定性**：需先排除本地 `cloud-probe` 树中 `libpcap.c` 的本地改动（immediate
+   mode / retire timeout 回退）与 `pcap_stats` 计数口径差异，再判断是否升级为采集面一致性缺陷。
+   在根因清楚之前，README / CHANGELOG 不引用这组数字做任何性能或一致性结论。
+7. **实时抓包吞吐门禁**：`live_bench.py` 是手工工具（需 root、需真实接口、发送端通常是瓶颈），不进 CI。
+   若要固化成回归网，需要 veth + 可控注入速率与丢包断言，属独立工程项。
 
 ## 6. 执行进度
 
@@ -331,9 +340,85 @@ WP2 与 WP3 可并行；M1 必须最先（唯一可能"完全无数据"的缺陷
   `pcap_writer` 文档不得再声称 flush 会 fsync；`fuzz/Cargo.toml` 声明的每个 target 必须出现在 `fuzz.sh`。
   四条都已做反向验证：把对应违例重新插入一处，该行即变 ❌ 且脚本退出 1。
 
+### M5 已完成（WP5：工程质量与供应链）
+
+- ✅ **P5-24 零引用依赖**：逐条用 `grep -w` 扫全 crate 的 `*.rs`（src / bin / tests / fuzz）核实后再删 ——
+  cpworker `thiserror`（error.rs 为手写）、`env_logger`（日志走 `cpgolib::slogx`）、`byteorder`
+  （字节序用 from_be_bytes/to_be_bytes）；cpctl `serde`（只用 serde_json，全 crate 无 Serialize/Deserialize
+  derive）、`env_logger`；cpgolib `anyhow`；cpdaemon `libc`（syscall 走 nix）。`byteorder` 删完已无任何成员
+  引用 → 连 `[workspace.dependencies]` 条目一并删；`axum`/`reqwest`/`rand` 是反向症状（表里声明、成员内又
+  内联一份），改为 `.workspace = true` 继承，顺带消掉 nightly cargo 新增的 unused-workspace-dependency 告警。
+  两份 lockfile 同步刷新（根 -13 行、fuzz -10 行，均为被删的包/依赖边）。
+- ✅ **P5-25 release 矩阵**：删除 macOS 的 `brew install libpcap zeromq`。矩阵核对结论：**protoc 必须保留**
+  —— 把 PATH 里的 protoc 换成失败桩后 `cargo build -p cripid` 即在 build.rs 报 "protoc failed"（release 产物
+  含 cripid）；它是构建期代码生成工具，不链接任何 C 库，README 的 System dependencies 段早已如此描述。
+- ✅ **P5-26 MSRV 1.88 job**：CI 新增 `msrv` job（`dtolnay/rust-toolchain@1.88.0` +
+  `cargo build --workspace --locked`，rust-cache 用独立 key，避免与 stable 产物互串）。本地用 rustc 1.88.0
+  实跑全 workspace build 通过（4 核 2m18s），故按计划用 build 而非 check。
+- ✅ **P5-27 CI 确定性 + 最小权限**：ci.yml 的 build/test/live-capture/clippy/coverage、release.yml 的 build、
+  `parity/` 六个 harness 的 `cargo build` 全部加 `--locked`；两份 workflow 顶层
+  `permissions: contents: read`，仅 dependency-review（`pull-requests: write`）与 release.yml 的 publish job
+  （`contents: write`）自行放宽。`parity/verify_bpf.sh` 默认种子由 `$RANDOM` 改为固定 `20260927`（位置参数与
+  `BPF_SEED` 仍可覆盖），不匹配时打印 seed/pkts/exprs 与可直接粘贴的重放命令；`all.sh` 只把规模放进环境
+  （800×96），避免默认种子在两处各存一份。反向验证：伪造一次 rs.out 差异 → 输出
+  `MISMATCH ... seed=20260927 ... reproduce with: parity/verify_bpf.sh 20260927 400 80` 且退出 1。
+  顺带修掉 fuzz 构建（nightly）唯一告警：`AtomicU64::fetch_update` 被改名 `try_update`（1.88 尚无新名），
+  `ring_buffer.rs::release` 改为与 `reserve` 同形的 CAS 环，并加
+  `releasing_more_than_was_reserved_saturates_at_zero` 钉住“重复释放不得把 used 回绕成天文数字”。
+  actionlint 1.7.12 对两份 workflow 零告警。
+- ✅ **P5-28 deny 收紧 + 覆盖 fuzz workspace**：`wildcards` 与 `unknown-registry`/`unknown-git` 提到 `deny`。
+  为让 workspace 内部无版本 path 依赖合法，7 个成员显式声明 `publish = false`（事实成立：path 依赖无版本、
+  `repository` 指向上游 C/Go 树，本就不可发布）并配 `allow-wildcard-paths = true`；
+  `[licenses.private] ignore` 保持 false，私有 crate 的许可证照旧检查。fuzz 独立 workspace 采用
+  **“CI 里对该目录再跑一次”**（`cargo deny --manifest-path crates/cpworker/fuzz/Cargo.toml check`，复用根
+  deny.toml），而不是把 fuzz 并入主 workspace —— 后者会让 nightly + libfuzzer 依赖污染 stable 依赖图，且
+  `cargo fuzz` 本身就要求 publish=false 的独立 workspace。前置 `cargo metadata --locked` 断言两份 lockfile
+  不漂移。首次覆盖即抓到真问题：`libfuzzer-sys 0.4.13` 许可证为 `(MIT OR Apache-2.0) AND NCSA` →
+  白名单补 `NCSA`（注明仅 fuzz 开发依赖、不进任何发布产物）；`cpworker-fuzz` 缺 `license` 字段（cargo-deny
+  视为硬错误）→ 补 BSD-3-Clause。反向验证：插入 `byteorder = "*"` → `error[wildcard]`；
+  `allow-registry = []` → 多条 `error[source-not-allowed]`；人为让 Cargo.lock 过期 → `cargo metadata --locked`
+  退出 101；CI 的 GPL grep 断言仍为空。
+- ✅ **P5-30 仓库约定文件**：`CONTRIBUTING.md`（门禁清单 + 每条门禁对应哪个历史缺陷、red→绿 纪律、无 C 库
+  政策、加 fuzz target / 加对拍用例 / 跑 live 测试的具体步骤、提交与评审约定）、`CHANGELOG.md`
+  （Keep-a-Changelog：`[Unreleased]` = M5 全部改动，`[0.9.0]` 按 WP1–WP4 归类并附 commit 与实测证据）、
+  `.github/CODEOWNERS`、`SECURITY.md`（输入面表、结构性防护、能力/监听端口部署指引、**CPM
+  `danger_accept_invalid_certs(true)` 已知 TLS 缺口与缓解措施**、上报通道与响应预期）。
+- ✅ **P5-18 文档矛盾清零**：`PARITY.md` 头部“纯 Rust 尚未完成”→ 已完成；§1.1 的“ZMQ 仍用 libzmq”、
+  “⚠️ 仍链接 libpcap”→ 纯 Rust（并注明配置键 `libpcap` 为兼容 C/Go 配置文件而保留）；§5.1 首行
+  “去 libpcap/libzmq：未完成”整条删除、§5.3 改为“已完成、不再在此跟踪”；§1.3 计数一次改齐
+  （C 向量 34、Go 6 个测试函数 → 8 个 Rust 测试、165 passed / 3 ignored、cpgolib+cpctl 7+2）；
+  `IMPROVEMENT_PLAN.md` 删除与“✅ libpcap 已移除”并存的“⬜ libpcap 待移除”，并把 BPF 语法与 AF_PACKET
+  描述同步到 M1/M2 之后的现状；README 快速上手不再指向仓库里不存在的
+  `../cpworker/examples/libpcap_null.json`，改用仓库内新增、且实际运行过的
+  `crates/cpworker/examples/live_null.json` 与 `pcap_file_replay.json`（后者 200 包进 / 200 包出且 tcpdump
+  可读；前者 root 下在 lo 建任务成功并写出 pcap）；目录树 `capturer/ # libpcap, pcap_file` 更正为
+  af_packet/pcap_file，并补 bpf/、zmtp/、examples/、fuzz/。
+- ✅ **P5-19 基准重跑（离线三场景）**：纯 Rust reader 上线后重测（1M 包 / 417 MB、median of 5、连续两次独立
+  运行）：`null` Rust 0.201/0.203 s vs C 0.303/0.301 s（**1.48–1.51×**）、`file` 0.549/0.543 vs 0.738/0.754
+  （**1.34–1.39×**）、`vxlan-split` 8.995/8.852 vs 9.373/9.658（1.04–1.09×，kernel `sendto` 受限 → 读作
+  “无回归”）、峰值 RSS **2.8 vs 7.3 MB（约 -62%）**。README 表格整体替换并标注来源与环境（旧表是 libpcap
+  时代数字；本机内核已从 6.14 变为 7.0.0-34，绝对值不可跨机比较，只看比值）。新增 `bench/live_bench.py`：
+  手工、需 root 的实时抓包 A/B，报“每百万捕获帧 CPU 秒”，并把 `cap_packets` 与发包数并列以便判断是否真的
+  收全 —— 该测量暴露的“同流不同包数”已登记到 §5-6，**未据此下任何性能或一致性结论**。
+- ⚠️ **P5-29 保守处理，未做**：`crates/cpworker/src/bin/` 的 7 个 parity/oracle 工具仍随默认 `cargo build`
+  编译。原因：`run.sh / verify_config.sh / verify_req.sh / fuzz_proto.sh / fuzz_rpc.sh / verify_zmtp.sh /
+  verify_bpf.sh` 全部按 `cargo build -p cpworker --bin X` + `target/debug/X` 调用；加 `required-features` 或
+  移入 `examples/` 需同步改 7 处脚本与 CI `parity` job，而且这些 bin 会因此**退出
+  `cargo clippy --workspace --all-targets` 的 lint 覆盖**（静默变差）。若要动，建议：新建 bin-only crate
+  `crates/cpworker-parity`（留在 workspace 但不属于发布产物集合），脚本改为 `-p cpworker-parity`，并在
+  `verify_hygiene.sh` 补一条“每个 oracle bin 必须被某个脚本引用”的门禁。根目录审计/计划文档保持原位。
+- 验证：`cargo build --workspace --locked` ok；`cargo fmt --all -- --check` ok；
+  `cargo clippy --workspace --all-targets -- -D warnings` 0 告警；`cargo test --workspace`
+  **165 passed / 0 failed（3 个 live 测试 `#[ignore]`）**；`cargo deny check`（根 + fuzz workspace）四项 ok；
+  `./parity/all.sh` **9/9 绿**；`./fuzz.sh --check` 9 个 target 无崩溃；actionlint 零告警。
+
 ### 下一步
 
-- **M5**：收尾（P5-19 基准重跑 + P5-18 文档一致性 + WP5 剩余 P3 项 P5-24..P5-30）。
+- **§5-6**：实时抓取面“同流不同包数”的根因分析（先核对本地 cloud-probe 树 `libpcap.c` 的本地改动与
+  `pcap_stats` 计数口径），必要时升级为采集面一致性缺陷并补对拍门禁。
+- **P4.1**（IMPROVEMENT_PLAN）：`vxlan-split` 在服务器硬件上复测（需固定 CPU、关频率调节）。
+- 可选加固：把 `actionlint` 固化成 CI job；给 coverage 设阈值（目前仅 advisory artifact）；
+  `live_bench` 若要进门禁需 veth + 可控注入速率与丢包断言。
 
 
 ## 7. 补充修复（三篇 AUDIT4 + 用户复核）
