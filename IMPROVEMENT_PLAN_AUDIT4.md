@@ -378,6 +378,8 @@ WP2 与 WP3 可并行；M1 必须最先（唯一可能"完全无数据"的缺陷
   视为硬错误）→ 补 BSD-3-Clause。反向验证：插入 `byteorder = "*"` → `error[wildcard]`；
   `allow-registry = []` → 多条 `error[source-not-allowed]`；人为让 Cargo.lock 过期 → `cargo metadata --locked`
   退出 101；CI 的 GPL grep 断言仍为空。
+  Dependabot 同步补了 `directory: /crates/cpworker/fuzz` 条目，让这份 lockfile 也能收到升级 PR
+  （此前只有检查、没有更新渠道）。
 - ✅ **P5-30 仓库约定文件**：`CONTRIBUTING.md`（门禁清单 + 每条门禁对应哪个历史缺陷、red→绿 纪律、无 C 库
   政策、加 fuzz target / 加对拍用例 / 跑 live 测试的具体步骤、提交与评审约定）、`CHANGELOG.md`
   （Keep-a-Changelog：`[Unreleased]` = M5 全部改动，`[0.9.0]` 按 WP1–WP4 归类并附 commit 与实测证据）、

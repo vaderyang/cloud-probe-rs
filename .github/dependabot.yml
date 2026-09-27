@@ -13,6 +13,20 @@ updates:
         patterns: ["*"]
         update-types: ["minor", "patch"]
 
+  # AUDIT4 P5-28: crates/cpworker/fuzz is a standalone workspace with its own
+  # Cargo.lock, so the entry above never resolves it and that lockfile would drift
+  # unnoticed (the deny job now checks it; nothing kept it current). Dependabot
+  # needs one entry per workspace root.
+  - package-ecosystem: cargo
+    directory: /crates/cpworker/fuzz
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      fuzz-cargo-minor-patch:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+
   - package-ecosystem: github-actions
     directory: /
     schedule:

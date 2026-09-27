@@ -191,8 +191,9 @@ cloud-probe-rs/
   on high-severity advisories).
 * **Reproducible builds.** Every cargo invocation in CI and in `parity/` uses
   `--locked`; the MSRV (1.88) is built in CI, not just declared.
-* **Automated updates.** Dependabot watches `Cargo.lock` and the GitHub Actions
-  used by CI (`.github/dependabot.yml`).
+* **Automated updates.** Dependabot watches **both** `Cargo.lock` files (the
+  workspace and the standalone `crates/cpworker/fuzz` workspace) and the GitHub
+  Actions used by CI (`.github/dependabot.yml`).
 
 ## Benchmarks: C vs Rust
 

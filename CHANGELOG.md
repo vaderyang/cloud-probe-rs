@@ -24,7 +24,9 @@ Two conventions worth knowing before reading:
   `rust-version` is actually verified instead of asserted (P5-26).
 - `cargo deny` now also checks `crates/cpworker/fuzz/Cargo.lock` (a standalone
   workspace, previously invisible to the policy) and the `deny` job asserts that
-  both lockfiles match their manifests (P5-28).
+  both lockfiles match their manifests (P5-28). Dependabot gained the matching
+  second entry (`directory: /crates/cpworker/fuzz`), so that lockfile now gets
+  update PRs instead of only being policed.
 - `bench/live_bench.py`: manual, root-only live-capture A/B (C/libpcap vs the Rust
   `AF_PACKET` path) reporting frames captured, drop counters and CPU seconds per
   captured million frames. Not a CI gate and not a throughput ceiling - see its
