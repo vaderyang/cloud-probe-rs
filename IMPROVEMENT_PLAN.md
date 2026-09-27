@@ -148,10 +148,13 @@
   `capturer/pcap_file.rs` 自写 pcap 读取（大小端 + 微秒/纳秒 + 越界保护）。
 - ✅ **libpcap 已移除**（P3.1）：
   - `crates/cpworker/src/bpf/`：平台无关的 tcpdump 子集编译器 + 安全 cBPF 解释器
-    （`host`/`net`/`port`/`portrange`/`ether host`、`ip`/`ip6`/`arp`/`rarp`/`tcp`/`udp`/`icmp`/`icmp6`、
-    `and`/`or`/`not`/括号；不支持的关键字明确报错）。
-  - `crates/cpworker/src/capturer/af_packet.rs`：裸 `AF_PACKET`（`SOCK_RAW` + `SO_RCVBUF` +
-    `SO_TIMESTAMPNS` + `PACKET_STATISTICS` 丢包统计），替换 `capturer/libpcap.rs`。
+    （`host`/`net`/`port`/`portrange`/`ether host`、方向限定 `src`/`dst`（`tcp dst port 80`、
+    `udp src port 53`、`ether src host`）、`ip`/`ip6`/`arp`/`rarp`/`tcp`/`udp`/`icmp`/`icmp6`、
+    `ip proto N`/`ip6 proto N`、`and`/`or`/`not`/括号；不支持的关键字（`vlan`、`greater`、
+    `len`、算术等）明确报错，完整清单见 `PARITY.md §4`）。
+  - `crates/cpworker/src/capturer/af_packet.rs`：裸 `AF_PACKET`（`SOCK_RAW` + `SO_RCVBUFFORCE`/`SO_RCVBUF`
+    回读+告警 + `SO_TIMESTAMPNS` + `PACKET_AUXDATA`（VLAN 重插）+ `PACKET_STATISTICS` 丢包统计），
+    替换 `capturer/libpcap.rs`；先挂 BPF 再 `bind`，避免启动空窗。
   - BPF 经 `SO_ATTACH_FILTER` 挂载；离线 `pcap_file` 用解释器过滤。
   - 删除 `pcap` 依赖；CI `test/clippy/coverage/release` 不再需 `libpcap-dev`
     （parity/fuzz job 保留，用于 C oracle）。
@@ -168,8 +171,6 @@
   - **与 libzmq 端到端对拍**：`parity/verify_zmtp.sh`（small/empty/long/64KiB 逐字节一致）。
   - **强 fuzz**：`zmtp_wire` + `zmtp_client`（混沌状态机）+ 真实 TCP 集成测试（并发/中途断开重连）。
   - 过程中发现并修复：`pong_command` 命令名长度写错（由 PING→PONG 单测捕获）。
-- ⬜ **libpcap 待移除**（P3.1）：实时抓包 `capturer/libpcap.rs` 待改裸 `AF_PACKET` + 自研 BPF
-  子集（决策已定：1A + 2A）。
 
 ### P3.1 采集侧去 libpcap（已完成）
 

@@ -1,0 +1,25 @@
+{
+    "tasks": [
+        {
+            "req_pattern": {
+                "type": "auto"
+            },
+            "capturer": {
+                "type": "libpcap",
+                "libpcap": {
+                    "interface": "lo",
+                    "snaplen": 2048,
+                    "buffer_size_mb": 256,
+                    "bpf": "tcp or udp",
+                    "timeout_ms": 1000
+                }
+            },
+            "outputs": [
+                {
+                    "type": "null",
+                    "rate_limit_mbps": 1000
+                }
+            ]
+        }
+    ]
+}

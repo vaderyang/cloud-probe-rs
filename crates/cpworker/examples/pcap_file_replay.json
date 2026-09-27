@@ -1,0 +1,21 @@
+{
+    "tasks": [
+        {
+            "capturer": {
+                "type": "pcap_file",
+                "pcap_file": {
+                    "file_name": "/tmp/input.pcap",
+                    "bpf": "udp or tcp"
+                }
+            },
+            "outputs": [
+                {
+                    "type": "file",
+                    "file": {
+                        "name": "/tmp/output.pcap"
+                    }
+                }
+            ]
+        }
+    ]
+}

@@ -3,7 +3,8 @@
 > 结论：**核心引擎与工具已高度完整；cpdaemon 已补齐主要模块。一致性通过差分对拍
 > 与测试向量移植来证明，而非阅读代码。**
 >
-> "纯 Rust"（去除 libpcap/libzmq）**尚未完成**，见 §4。
+> “纯 Rust”（去除 libpcap/libzmq）**已完成**：`cargo build`/`cargo test` 不链接任何
+> C 库，实现与取舍见 §4。
 
 ## 1. 覆盖状态
 
@@ -18,8 +19,8 @@
 | `stats.c` / `log.c` / `errorf.c` / `ratelimit.c` | 同名 | ✅ |
 | `affinity_linux.c` | `affinity.rs` | ✅ 测试向量移植 |
 | `netns_linux.c` | `netns.rs` | ✅ |
-| `output_*.c`（6） | `output/*.rs` | ✅（ZMQ 仍用 libzmq） |
-| `libpcap.c` / `pcap_file.c` | `capturer/*.rs` | ⚠️ 仍链接 libpcap |
+| `output_*.c`（6） | `output/*.rs` | ✅ 纯 Rust（含 ZMTP 3.x PUSH，替代 libzmq；差异见 §2.4） |
+| `libpcap.c` / `pcap_file.c` | `capturer/*.rs` | ✅ 纯 Rust（裸 `AF_PACKET` + 自研 BPF + pcap 读写；配置键 `libpcap` 保留以兼容 C 配置文件） |
 | `ring_buffer.c` | `ring_buffer.rs` | ⚠️ 语义等价，非无锁 |
 | `task.c` | `task.rs` | ⚠️ reload 简化为重建 |
 | `unix-manager.c` / `unix_rpc_basic.c` | `unix_manager.rs` | ✅ |
@@ -49,12 +50,14 @@
 
 | 来源 | 状态 |
 |---|---|
-| C 单测向量（`misc.c` 等） | ✅ 33 个移植到 `cpworker/tests/port_parity.rs` |
-| Go `worker_task_builder_test.go` 向量 | ✅ 10 个移植到 `cpm/task_builder.rs` |
-| cpgolib / cpctl 纯函数测试 | ✅ |
+| C 单测向量（`misc.c` 等） | ✅ 34 个移植到 `cpworker/tests/port_parity.rs` |
+| Go `worker_task_builder_test.go` 向量 | ✅ 6 个 Go 测试函数全都移植到 `cpdaemon/src/cpm/task_builder.rs`（展开为 8 个 Rust 测试） |
+| cpgolib / cpctl 纯函数测试 | ✅ 7 + 2 |
 | 其余 C/Go 测试文件 | ⚠️ 部分未移植 |
 
-当前 `cargo test --workspace`：**160 个测试全部通过**（含 `cpsim` 的 DST 测试），另有 2 个需要 `CAP_NET_RAW` 的实时抓包测试标记为 `#[ignore]`，由 CI 的 privileged job 运行。
+当前 `cargo test --workspace`：**165 个测试全部通过**（含 `cpsim` 的 DST 测试），另有 3 个需要 `CAP_NET_RAW`（其中两个还需要 `CAP_NET_ADMIN` / 创建 veth）的
+实时抓包测试标记为 `#[ignore]`，由 CI 的 privileged job 运行：`live_capture_on_loopback_with_filter`、
+`live_capture_reinserts_vlan_on_veth`、`live_capture_falls_back_to_userspace_filtering`。
 
 ### 1.4 Deterministic Simulation Testing（`crates/sim`）
 
@@ -342,8 +345,14 @@ release profile 用 `panic = "abort"`：**panic 是致命事件，不是可恢�
 
 > **实现差异（已知取舍）**：`AF_PACKET` 抓包用 `recvmsg` 而非 libpcap 的 TPACKET_V3
 > mmap 环形缓冲，因此**高吞吐下的丢包特征可能与 libpcap 不同**；`PACKET_STATISTICS` 是
-> **读后清零**，实现按"本窗口增量直接累加"处理（详见上文采集面语义）。若需要与
+> **读后清零**，实现按“本窗口增量直接累加”处理（详见上文采集面语义）。若需要与
 > libpcap 完全一致的吞吐/丢包曲线，可后续在 `af_packet.rs` 内加 mmap ring（不影响其他模块）。
+
+> **实时抓取面的包数一致性尚未对拍**（AUDIT4 M5 登记）：实时路径没有 C 侧 oracle 可用（需
+> 真实接口 + root），`bench/live_bench.py`（手工工具）在 lo 上用同一份 UDP 灼流对拍时发现
+> Rust 侧 `cap_packets` 恒为“发包数 ×2”（loopback 出站 + 回环入站各一份，都命中过滤器），
+> 而本地 C/libpcap 构建为“×0.79”，两侧 `drop_packets` 都报 0。尚未定性为哪一侧错，因此
+> **不作为一致性结论、也不作为性能结论引用**；根因分析入口见 `IMPROVEMENT_PLAN_AUDIT4.md §5-6`。
 
 > **”纯 Rust”的定义**：不链接任何 C 库（`libc`/`nix` 仅声明 syscall ABI，保留）。
 > 去 C 依赖对应改进计划 P3，**已完成**。离线 `pcap_file` 过滤也已接入纯 Rust BPF。
@@ -356,7 +365,6 @@ release profile 用 `panic = "abort"`：**panic 是致命事件，不是可恢�
 
 | 项 | 来源 | 现状 | 决策 / 触发条件 |
 |---|---|---|---|
-| 去 libpcap / libzmq（纯 Rust） | §4 | 未完成 | **计划移植**（P3，最大工程项）：AF_PACKET + 纯 Rust pcap I/O + BPF 子集；纯 Rust ZMTP |
 | DPDK capturer（`dpdk/pdump.c`） | C | 未 port，按类型返回不支持 | **计划移植**，仅在目标部署需要 `dpdk_pdump` 时实现；否则维持显式错误 |
 | task reload 的 fingerprint 复用 / mailbox 协议 | `task.c` | 简化为重建全部 task | **计划移植**：行为等价但效率低；仅在 reload 抖动成为实际问题时实现 |
 | `unix-manager` select 单线程语义 | `unix-manager.c` | 用“非阻塞 accept + 独立线程” | **计划移植**（可选）：当前与 C 行为对齐（1.5s 超时断开），仅在并发语义差异暴露时改 |
@@ -375,4 +383,5 @@ release profile 用 `panic = "abort"`：**panic 是致命事件，不是可恢�
 
 ### 5.3 去 C 依赖（纯 Rust）
 
-见 §4，对应改进计划 P3。完成后本文件 §4 状态更新为“已完成”，并从本表 5.1 移除前两行。
+**已完成**（对应改进计划 P3 与 AUDIT4 整改）：实现、验收与已知取舍见 §4，与 libzmq 的输出面
+差异见 §2.4。本节不再跟踪该项；本表 5.1 只保留尚未移植的模块。
