@@ -33,6 +33,11 @@ jobs:
 
       - name: System dependencies (Linux)
         if: runner.os == 'Linux'
+        # protoc is a *build-time* tool for cripid's `build.rs` (prost/tonic code
+        # generation from the vendored proto/api.proto). Nothing links a C library:
+        # AUDIT4 P5-25 removed the macOS `brew install libpcap zeromq`, which was a
+        # leftover from before the pure-Rust pcap/ZMTP ports and only made the
+        # release job depend on packages the build never reads.
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
@@ -40,7 +45,7 @@ jobs:
 
       - name: System dependencies (macOS)
         if: runner.os == 'macOS'
-        run: brew install libpcap zeromq protobuf
+        run: brew install protobuf
 
       - uses: dtolnay/rust-toolchain@stable
         with:
