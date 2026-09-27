@@ -1,4 +1,14 @@
 # This template contains all of the possible sections and their default values
+#
+# Scope: this file is the supply-chain policy for BOTH lockfiles in the repo:
+#
+#   Cargo.lock                                  -> cargo deny check
+#   crates/cpworker/fuzz/Cargo.lock             -> cargo deny --manifest-path \
+#     crates/cpworker/fuzz/Cargo.toml --config deny.toml check
+#
+# The fuzz crate is a standalone workspace on a nightly toolchain, so a plain
+# `cargo deny check` at the repo root never sees its dependency graph (AUDIT4
+# P5-28). The CI `deny` job runs both commands; run them the same way locally.
 
 # Note that all fields that take a lint level have these possible values:
 # * deny - An error will be produced and the check will fail
@@ -108,6 +118,13 @@ allow = [
     "OpenSSL",
     "BSL-1.0",
     "CDLA-Permissive-2.0",
+    # University of Illinois/NCSA Open Source License: BSD-3-Clause with an extra
+    # acknowledgement clause, OSI-approved and non-copyleft. Required by
+    # `libfuzzer-sys` (= "(MIT OR Apache-2.0) AND NCSA"), which is only ever a
+    # dev-time dependency of the standalone fuzz workspace - it is not linked
+    # into any shipped binary. Checked by `cargo deny check licenses` against
+    # crates/cpworker/fuzz/Cargo.lock.
+    "NCSA",
 ]
 # Allow the list to be a superset of what is actually used.
 unused-allowed-license = "allow"
@@ -162,7 +179,23 @@ registries = [
 # Lint level for when multiple versions of the same crate are detected
 multiple-versions = "warn"
 # Lint level for when a crate version requirement is `*`
-wildcards = "allow"
+#
+# AUDIT4 P5-28: this was "allow", so a `dep = "*"` anywhere in the graph - ours
+# or a transitive one - reached main unnoticed. A floating wildcard means the
+# resolved version is decided by whoever happens to resolve the graph, which is
+# exactly what Cargo.lock is supposed to prevent.
+#   deny: any `*` version requirement fails `cargo deny check bans`.
+#   allow-wildcard-paths: version-less path dependencies inside *private* crates
+#   stay legal, because crates.io forbids path dependencies in published crates
+#   anyway and `cpgolib = { path = "../cpgolib" }` is how this workspace wires
+#   itself together. "Private" is read from the manifest, so every crate here
+#   declares `publish = false` (true today: they are an internal port, their path
+#   dependencies have no version, and `repository` points at the upstream C/Go
+#   tree). If a crate is ever made publishable, cargo-deny will start demanding a
+#   real version requirement on its path dependencies - which is the correct
+#   outcome, not an annoyance.
+wildcards = "deny"
+allow-wildcard-paths = true
 # The graph highlighting used when creating dotgraphs for crates
 # with multiple versions
 # * lowest-version - The path to the lowest versioned duplicate is highlighted
@@ -238,10 +271,14 @@ skip-tree = [
 [sources]
 # Lint level for what to happen when a crate from a crate registry that is not
 # in the allow list is encountered
-unknown-registry = "warn"
+# AUDIT4 P5-28: both of these were "warn", i.e. a dependency swapped over to a
+# mirror registry or an arbitrary git repository printed a warning line and went
+# green. `allow-registry` below is crates.io only and `allow-git` is empty, so
+# anything else is a policy change and must be an explicit, reviewed edit here.
+unknown-registry = "deny"
 # Lint level for what to happen when a crate from a git repository that is not
 # in the allow list is encountered
-unknown-git = "warn"
+unknown-git = "deny"
 # List of URLs for allowed crate registries. Defaults to the crates.io index
 # if not specified. If it is specified but empty, no registries are allowed.
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]

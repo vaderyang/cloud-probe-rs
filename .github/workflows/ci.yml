@@ -144,9 +144,24 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      # AUDIT4 P5-28: the repo has TWO dependency graphs. crates/cpworker/fuzz is
+      # a standalone workspace (nightly + libFuzzer), so the root `cargo deny
+      # check` never looked at its lockfile - and it turned out to be holding a
+      # license the policy had never considered (libfuzzer-sys: NCSA). Assert both
+      # lockfiles are the committed ones, then check both graphs.
+      - name: Both Cargo.lock files are current
+        run: |
+          cargo metadata --locked --format-version 1 > /dev/null
+          cargo metadata --locked --format-version 1 \
+            --manifest-path crates/cpworker/fuzz/Cargo.toml > /dev/null
       # deny.toml: permissive / non-GPL allow-list, RustSec advisories, yanked
-      # crates denied, source/registry allow-list.
+      # crates denied, source/registry allow-list, wildcard versions denied.
       - uses: EmbarkStudios/cargo-deny-action@v2
+      - name: cargo deny (fuzz workspace)
+        uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          manifest-path: ./crates/cpworker/fuzz/Cargo.toml
       - name: Assert no GPL-family license is allowed
         run: |
           # The allow-list is deny-by-default, so GPL cannot pass unless someone

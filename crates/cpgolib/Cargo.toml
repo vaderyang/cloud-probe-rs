@@ -6,6 +6,7 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "Shared library for Cloud Probe clients (Rust port of cpgolib)"
+publish = false   # internal port; see deny.toml [bans] allow-wildcard-paths
 
 [lib]
 name = "cpgolib"

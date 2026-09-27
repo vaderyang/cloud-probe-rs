@@ -6,6 +6,7 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "Deterministic Simulation Testing (DST) harness for the Cloud Probe Rust pipeline"
+publish = false   # internal port; see deny.toml [bans] allow-wildcard-paths
 
 [dependencies]
 cpworker = { path = "../cpworker" }

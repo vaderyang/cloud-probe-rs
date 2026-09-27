@@ -6,6 +6,7 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "Cloud Probe management daemon (Rust port of cpdaemon)"
+publish = false   # internal port; see deny.toml [bans] allow-wildcard-paths
 
 [[bin]]
 name = "cpdaemon"

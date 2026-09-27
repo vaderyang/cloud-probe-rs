@@ -3,6 +3,10 @@ name = "cpworker-fuzz"
 version = "0.0.0"
 publish = false
 edition = "2021"
+# Same license as the crate under test. Declared because `cargo deny check
+# licenses` treats a missing license as a hard error, and the fuzz workspace has
+# its own lockfile/graph: it is checked with the root deny.toml (AUDIT4 P5-28).
+license = "BSD-3-Clause"
 
 [package.metadata]
 cargo-fuzz = true

@@ -6,6 +6,7 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "Return the host PID of a Docker container (Rust port of dockerpid)"
+publish = false   # internal port; see deny.toml [bans] allow-wildcard-paths
 
 [[bin]]
 name = "dockerpid"

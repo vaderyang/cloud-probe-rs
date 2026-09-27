@@ -6,6 +6,7 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "Netis Cloud Probe packet capture and forwarding engine (Rust port)"
+publish = false   # internal port; see deny.toml [bans] allow-wildcard-paths
 
 [[bin]]
 name = "cpworker"
