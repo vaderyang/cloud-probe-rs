@@ -45,6 +45,11 @@ pub struct Program {
     pub insns: Vec<Insn>,
 }
 
+/// Maximum number of instructions the Linux kernel accepts for a socket filter
+/// (`BPF_MAXINSNS`). A longer program cannot be installed with
+/// `SO_ATTACH_FILTER` and must be applied in userspace instead.
+pub const BPF_MAXINSNS: usize = 4096;
+
 impl Program {
     /// True if the program has no instructions (matches everything).
     #[must_use]
@@ -118,6 +123,23 @@ mod tests {
     fn evaluate_no_match_on_short_frame() {
         let p = compile("udp").unwrap();
         assert!(!p.apply(&[0, 1, 2]));
+    }
+
+    #[test]
+    fn long_filters_exceed_the_kernel_instruction_limit() {
+        // A realistic output-host exclusion chain reaches the kernel's
+        // 4096-instruction cap quickly; the AF_PACKET capturer must then fall
+        // back to userspace filtering instead of failing to attach.
+        let expr = std::iter::once("port 80".to_string())
+            .chain((0..150u32).map(|i| format!("not host 10.9.{}.{}", i / 256, i % 256)))
+            .collect::<Vec<_>>()
+            .join(" and ");
+        let p = compile(&expr).unwrap();
+        assert!(
+            p.insns.len() > BPF_MAXINSNS,
+            "expected > {BPF_MAXINSNS} instructions, got {}",
+            p.insns.len()
+        );
     }
 
     #[cfg(target_os = "linux")]

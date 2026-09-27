@@ -226,3 +226,70 @@ fn live_capture_reinserts_vlan_on_veth() {
     // Payload that followed the original ethertype must still be intact.
     assert_eq!(frame[18], 0x12, "payload after reinserted VLAN tag shifted");
 }
+
+/// A filter too large for the kernel (or whose attach fails) must still capture,
+/// by falling back to userspace filtering instead of failing the task.
+#[test]
+#[ignore = "requires CAP_NET_RAW (run with sudo) on lo"]
+fn live_capture_falls_back_to_userspace_filtering() {
+    if !privileged() {
+        eprintln!("skipping: not root / no CAP_NET_RAW");
+        return;
+    }
+    const PORT: u16 = 41239;
+
+    // >4096 instructions: SO_ATTACH_FILTER is refused (EINVAL), so the capturer
+    // must filter in userspace and still deliver matching frames.
+    let mut parts = vec![format!("port {PORT}")];
+    for i in 0..150u32 {
+        parts.push(format!("not host 10.9.{}.{}", i / 256, i % 256));
+    }
+    let bpf = parts.join(" and ");
+
+    let json = format!(
+        r#"{{
+            "log_level": "INFO",
+            "execution_model": "rtc",
+            "tasks": [{{
+                "capturer": {{ "type": "libpcap", "libpcap": {{
+                    "interface": "lo",
+                    "bpf": {bpf:?},
+                    "timeout_ms": 200
+                }} }},
+                "outputs": []
+            }}]
+        }}"#
+    );
+    let cfg = Config::parse_str(&json).expect("parse config");
+    let tasks = cfg.tasks.clone();
+    let stats = Arc::new(CaptureStats::default());
+    let mut cap = new_capturer(&tasks, &tasks[0], stats).expect("capturer");
+
+    let sender = std::thread::spawn(move || {
+        let sock = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
+        let dst = format!("127.0.0.1:{PORT}");
+        for _ in 0..200 {
+            let _ = sock.send_to(b"fallback", &dst);
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+    });
+
+    let mut sink = Collect::default();
+    for _ in 0..50 {
+        cap.capture_once(&mut sink);
+        if !sink.pkts.is_empty() {
+            break;
+        }
+    }
+    sender.join().unwrap();
+
+    assert!(
+        !sink.pkts.is_empty(),
+        "userspace-filtered capture delivered nothing"
+    );
+    for pkt in &sink.pkts {
+        assert!(pkt.len() >= 38, "frame too short: {}", pkt.len());
+        // Destination port at 14 + 20 + 2.
+        assert_eq!(u16::from_be_bytes([pkt[36], pkt[37]]), PORT);
+    }
+}

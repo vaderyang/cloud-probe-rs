@@ -60,6 +60,8 @@ struct RecvMeta {
     ts_usec: i64,
     caplen: u32,
     len: u32,
+    /// A stripped 802.1Q tag to reinsert after filtering.
+    vlan: Option<VlanTag>,
 }
 
 /// Accumulates `PACKET_STATISTICS` drops on the 2-second cadence.
@@ -188,15 +190,11 @@ fn create_socket() -> Result<OwnedFd> {
     Ok(unsafe { OwnedFd::from_raw_fd(raw) })
 }
 
-/// Configure the socket and finally bind it to `interface`.
-fn configure_and_bind(
-    fd: RawFd,
-    interface: &str,
-    buffer_size: i32,
-    program: Option<&Program>,
-) -> Result<()> {
+/// Configure the socket receive buffer, timestamps and VLAN auxdata. The BPF
+/// filter and the bind happen separately so the filter is installed before the
+/// bind (no unfiltered startup window).
+fn configure_socket(fd: RawFd, buffer_size: i32) {
     set_rcvbuf(fd, buffer_size);
-
     if let Err(e) = setsockopt_i32(fd, libc::SOL_SOCKET, libc::SO_TIMESTAMPNS, 1) {
         crate::log_warn!(
             "enable SO_TIMESTAMPNS failed: {e}; timestamps will fall back to wall clock"
@@ -205,13 +203,10 @@ fn configure_and_bind(
     if let Err(e) = setsockopt_i32(fd, libc::SOL_PACKET, libc::PACKET_AUXDATA, 1) {
         crate::log_warn!("enable PACKET_AUXDATA failed: {e}; VLAN tags may be missing");
     }
+}
 
-    // Attach the filter before bind so the very first received packet is filtered.
-    if let Some(p) = program {
-        bpf::attach_filter(fd, p)
-            .map_err(|e| Error::new(format!("attach bpf filter error: {e}")))?;
-    }
-
+/// Bind the socket to `interface` with `ETH_P_ALL`.
+fn bind_socket(fd: RawFd, interface: &str) -> Result<()> {
     let ifindex = i32::try_from(interface_index(interface)?).unwrap_or(i32::MAX);
     // SAFETY: zeroed sockaddr_ll is a valid initial state.
     let mut sll: libc::sockaddr_ll = unsafe { std::mem::zeroed() };
@@ -313,6 +308,10 @@ pub struct AfPacketCapturer {
     timeout_ms: i32,
     /// Frame buffer; `snaplen` usable bytes plus 4 spare for VLAN reinsertion.
     buf: Vec<u8>,
+    /// Set when the BPF program could not be installed in the kernel (program
+    /// too long, or `SO_ATTACH_FILTER` failed); the frames are then filtered
+    /// here instead. This mirrors libpcap's fallback to userspace filtering.
+    userspace_filter: Option<Program>,
 
     drops: DropCounter,
     next_error: Option<String>,
@@ -391,12 +390,37 @@ impl AfPacketCapturer {
         };
 
         let fd = create_socket()?;
-        configure_and_bind(
-            fd.as_raw_fd(),
-            &cfg.interface,
-            buffer_size,
-            program.as_ref(),
-        )?;
+        configure_socket(fd.as_raw_fd(), buffer_size);
+
+        // Install the filter in the kernel when possible (before the bind, so no
+        // unfiltered packet slips in). A program over the kernel's instruction
+        // limit, or any attach failure (e.g. ENOMEM from optmem_max), falls back
+        // to filtering in userspace so the task still captures correctly.
+        let userspace_filter = match program {
+            None => None,
+            Some(p) if p.insns.len() <= bpf::BPF_MAXINSNS => {
+                match bpf::attach_filter(fd.as_raw_fd(), &p) {
+                    Ok(()) => None,
+                    Err(e) => {
+                        crate::log_warn!(
+                            "attach bpf filter failed ({e}); filtering {} instructions in userspace",
+                            p.insns.len()
+                        );
+                        Some(p)
+                    }
+                }
+            }
+            Some(p) => {
+                crate::log_warn!(
+                    "bpf program has {} instructions (kernel limit {}); filtering in userspace",
+                    p.insns.len(),
+                    bpf::BPF_MAXINSNS
+                );
+                Some(p)
+            }
+        };
+
+        bind_socket(fd.as_raw_fd(), &cfg.interface)?;
 
         let snaplen = cfg.snaplen.max(1) as usize;
         Ok(AfPacketCapturer {
@@ -408,6 +432,7 @@ impl AfPacketCapturer {
             snaplen,
             timeout_ms: cfg.timeout_ms,
             buf: vec![0u8; snaplen + VLAN_HDR_LEN],
+            userspace_filter,
             drops: DropCounter::default(),
             next_error: None,
             last_error_log: 0,
@@ -438,26 +463,46 @@ impl AfPacketCapturer {
                 _ => return Err(e),
             }
         }
-        let mut len = n as u32;
-        let mut caplen = len.min(self.snaplen as u32);
+        let len = n as u32;
+        let caplen = len.min(self.snaplen as u32);
 
         // SAFETY: `msg` was filled by recvmsg above.
         let (ts, vlan) = unsafe { parse_control(&msg) };
-        if let Some(v) = vlan {
-            let new_caplen = insert_vlan(&mut self.buf, caplen as usize, v);
-            if new_caplen != caplen as usize {
-                caplen = new_caplen as u32;
-                len += VLAN_HDR_LEN as u32;
-            }
-        }
-
         let (ts_sec, ts_usec) = ts.unwrap_or_else(|| (now_sec(), 0));
         Ok(Some(RecvMeta {
             ts_sec,
             ts_usec,
             caplen,
             len,
+            vlan,
         }))
+    }
+
+    /// Receive the next frame that passes the filter (kernel or userspace),
+    /// reinserting any stripped VLAN tag. `Ok(None)` means "would block".
+    fn recv_matching(&mut self) -> std::io::Result<Option<RecvMeta>> {
+        loop {
+            let Some(mut meta) = self.recv_into_buf()? else {
+                return Ok(None);
+            };
+            // Userspace fallback: apply the compiled program to the frame the
+            // way the kernel would have, i.e. *before* the VLAN tag is put back.
+            let matched = self
+                .userspace_filter
+                .as_ref()
+                .is_none_or(|p| p.apply(&self.buf[..meta.caplen as usize]));
+            if !matched {
+                continue;
+            }
+            if let Some(v) = meta.vlan {
+                let new_caplen = insert_vlan(&mut self.buf, meta.caplen as usize, v);
+                if new_caplen != meta.caplen as usize {
+                    meta.caplen = new_caplen as u32;
+                    meta.len += VLAN_HDR_LEN as u32;
+                }
+            }
+            return Ok(Some(meta));
+        }
     }
 
     fn read_stats(&self) -> Option<u32> {
@@ -497,7 +542,7 @@ impl Capturer for AfPacketCapturer {
     fn capture_once(&mut self, sink: &mut dyn PacketSink) -> u64 {
         // Try to receive first (the socket is always non-blocking); only when it
         // would block and a timeout is configured do we wait for readability.
-        let mut res = self.recv_into_buf();
+        let mut res = self.recv_matching();
         if self.timeout_ms > 0 && matches!(res, Ok(None)) {
             let mut pfd = libc::pollfd {
                 fd: self.fd.as_raw_fd(),
@@ -507,7 +552,7 @@ impl Capturer for AfPacketCapturer {
             // SAFETY: single valid pollfd.
             let r = unsafe { libc::poll(&mut pfd, 1, self.timeout_ms) };
             if r > 0 && (pfd.revents & libc::POLLIN) != 0 {
-                res = self.recv_into_buf();
+                res = self.recv_matching();
             }
         }
 
