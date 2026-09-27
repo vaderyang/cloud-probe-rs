@@ -6,6 +6,11 @@ on:
   pull_request:
   workflow_dispatch:
 
+# Least privilege for every job by default (AUDIT4 P5-27). A job that needs more
+# says so on its own (dependency-review: pull-requests: write).
+permissions:
+  contents: read
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -36,8 +41,8 @@ jobs:
             protobuf-compiler
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - run: cargo build --workspace --all-targets
-      - run: cargo test --workspace
+      - run: cargo build --workspace --all-targets --locked
+      - run: cargo test --workspace --locked
       # AUDIT4 §3.1: interfaces that are implemented but never called are invisible
       # to dead_code/clippy (P5-04). Guard them explicitly.
       - run: bash parity/verify_liveness.sh
@@ -45,6 +50,30 @@ jobs:
       # on library paths (release uses panic="abort"), docs that overstate what
       # they do, fuzz targets that exist but are never run.
       - run: bash parity/verify_hygiene.sh
+
+  msrv:
+    name: MSRV 1.88 build
+    # Cargo.toml declares `rust-version = "1.88"`; until now every job ran on
+    # @stable, so "requires Rust 1.88+" was a claim nothing checked (AUDIT4
+    # P5-26). This job is the check: if a feature newer than 1.88 slips into a
+    # code path, or a dependency bump raises its own MSRV, it fails here instead
+    # of on a downstream user's machine. --locked is what makes the dependency
+    # half of that statement reproducible.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: System dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            protobuf-compiler
+      - uses: dtolnay/rust-toolchain@1.88.0
+      - uses: Swatinem/rust-cache@v2
+        with:
+          # Do not share a cache with the stable jobs: artifacts built by 1.88
+          # and by stable are not interchangeable.
+          key: msrv-1.88
+      - run: cargo build --workspace --locked
 
   live-capture:
     name: live capture (privileged)
@@ -54,7 +83,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Build the live-capture test
-        run: cargo test -p cpworker --test af_packet_live --no-run
+        run: cargo test -p cpworker --test af_packet_live --no-run --locked
       - name: Run AF_PACKET capture test on lo as root
         # Covers the real AF_PACKET path (socket/bind ordering, SO_ATTACH_FILTER,
         # SO_RCVBUFFORCE with CAP_NET_ADMIN, timestamps) that the other jobs skip.
@@ -77,7 +106,7 @@ jobs:
         with:
           components: clippy
       - uses: Swatinem/rust-cache@v2
-      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
 
   coverage:
     name: coverage (llvm-cov)
@@ -100,7 +129,7 @@ jobs:
         with:
           tool: cargo-llvm-cov
       - name: Collect coverage
-        run: cargo llvm-cov --workspace --lcov --output-path lcov.info
+        run: cargo llvm-cov --workspace --locked --lcov --output-path lcov.info
       - name: Summary
         run: cargo llvm-cov report --summary-only
       - name: Upload lcov artifact

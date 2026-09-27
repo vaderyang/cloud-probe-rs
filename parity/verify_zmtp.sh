@@ -18,7 +18,7 @@ echo "==> compiling libzmq PULL harness"
 gcc -O2 -w "$HERE/zmtp_pull.c" -lzmq -o "$TMP/zmtp_pull"
 
 echo "==> building Rust ZMTP push helper"
-( cd "$RUST_DIR" && cargo build -q -p cpworker --bin zmtp_push )
+( cd "$RUST_DIR" && cargo build -q --locked -p cpworker --bin zmtp_push )
 RUST_BIN="$RUST_DIR/target/debug/zmtp_push"
 
 fail=0

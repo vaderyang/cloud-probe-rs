@@ -36,7 +36,12 @@ echo "=========================================================="
 echo "=========================================================="
 echo " 7/9 BPF filter    (pure-Rust compiler vs libpcap)"
 echo "=========================================================="
-"$HERE/verify_bpf.sh" "${BPF_SEED:-$RANDOM}" "${BPF_PKTS:-800}" "${BPF_EXPRS:-96}"
+# No seed here on purpose: verify_bpf.sh uses a fixed default corpus (AUDIT4
+# P5-27), and BPF_SEED / BPF_PKTS / BPF_EXPRS override it. The sizes are set in
+# the environment so a local run and the CI `parity` job exercise the same corpus
+# without the default seed being written down twice.
+BPF_PKTS="${BPF_PKTS:-800}" BPF_EXPRS="${BPF_EXPRS:-96}" \
+    "$HERE/verify_bpf.sh"
 
 echo "=========================================================="
 echo " 8/9 API liveness  (implemented-but-never-called guard)"
