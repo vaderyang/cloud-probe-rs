@@ -337,3 +337,12 @@ jobs:
         env:
           CLOUD_PROBE_SRC: ${{ github.workspace }}/cloud-probe
         run: ./parity/difffuzz.sh 5 all
+      - name: Upload mismatch artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: difffuzz-artifacts
+          path: |
+            crates/cpworker/fuzz/artifacts/
+            /tmp/difffuzz_last.txt
+          if-no-files-found: ignore
