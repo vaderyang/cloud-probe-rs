@@ -6,7 +6,23 @@
 > 除 `#231`（ZMQ VLAN 越界，已报）外，以下均未见已报 issue。
 >
 > 用法：每条可直接贴进 GitHub issue（用仓库自带模板）。`测试环境` 里的 CP 版本/OS 请替换为你的实际值。
-> 标 **[请确认]** 的是"可能是 by design"、希望维护者答复的。
+> 标 **[请确认]** 的是“可能是 by design”、希望维护者答复的。
+
+## 已提交的上游 issue（2026-09-28）
+
+| # | 主题 | 上游链接 |
+|---|---|---|
+| S1 | CPM 无条件 `InsecureSkipVerify` | [#232](https://github.com/Netis/cloud-probe/issues/232) |
+| S2-2 | `packet_split` 接受畸形 ihl/TCP offset | [#233](https://github.com/Netis/cloud-probe/issues/233) |
+| S2-3 | 配置数值越界被 cJSON 钳位 | [#234](https://github.com/Netis/cloud-probe/issues/234) |
+| S2-4 | `zmq.hwm=0` 无限队列 | [#235](https://github.com/Netis/cloud-probe/issues/235) |
+| S2-5 | 接口 down 时 task 创建失败 | [#236](https://github.com/Netis/cloud-probe/issues/236) |
+| S2-6 | Go 配置解码过宽容 | [#237](https://github.com/Netis/cloud-probe/issues/237) |
+| S3-7 | cJSON 宽容语义（确认 by design） | [#238](https://github.com/Netis/cloud-probe/issues/238) |
+| S3-8 | `req_pattern` 接受 `-0` | [#239](https://github.com/Netis/cloud-probe/issues/239) |
+| S3-9 | libpcap TPACKET_V3 分批延迟残留 | [#240](https://github.com/Netis/cloud-probe/issues/240) |
+
+（已报过的：[#231](https://github.com/Netis/cloud-probe/issues/231) ZMQ VLAN 越界。）
 
 ---
 
