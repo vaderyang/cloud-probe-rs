@@ -510,11 +510,53 @@ fn build_task_fingerprint(data: &[u8]) -> (String, Vec<String>) {
 // Driver
 // ---------------------------------------------------------------------------
 
+/// Detect duplicate JSON object keys in the raw text. Imprecise for nested
+/// structures but sufficient as a filter for the documented duplicate-key
+/// divergence (C first-wins vs serde's duplicate-field rejection).
+fn has_duplicate_keys(s: &str) -> bool {
+    let bytes = s.as_bytes();
+    let mut keys: Vec<&str> = Vec::new();
+    let mut i = 0usize;
+    while i < bytes.len() {
+        if bytes[i] != b'"' {
+            i += 1;
+            continue;
+        }
+        let start = i + 1;
+        let mut j = start;
+        while j < bytes.len() && bytes[j] != b'"' {
+            j += 1;
+        }
+        if j >= bytes.len() {
+            break;
+        }
+        let mut k = j + 1;
+        while k < bytes.len() && bytes[k].is_ascii_whitespace() {
+            k += 1;
+        }
+        if k < bytes.len() && bytes[k] == b':' {
+            keys.push(&s[start..j]);
+        }
+        i = j + 1;
+    }
+    let raw_len = keys.len();
+    keys.sort_unstable();
+    keys.dedup();
+    raw_len != keys.len()
+}
+
 fn run(mode: &str, data: &[u8]) {
     let (request, rust_out) = match mode {
         "packet_split" => (build_packet_split(data), rust_packet_split(data)),
         "config" => match build_config(data) {
             Some(line) => {
+                // Known benign divergence (PARITY.md Â§2.3): C (cJSON) keeps the
+                // first occurrence of a duplicate JSON key while serde's
+                // generated deserializer rejects duplicate fields. Skip that
+                // documented class so the fuzzer searches for new divergences.
+                if has_duplicate_keys(&line) {
+                    return;
+                }
                 let out = rust_config(&line);
                 (line, out)
             }
