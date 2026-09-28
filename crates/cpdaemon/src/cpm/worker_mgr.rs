@@ -511,3 +511,140 @@ fn num_items(res: &SyncStrategyResponse, active_instances: &[String]) -> usize {
     }
     n
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::cpm::models::{StrategyEntry, PACKET_CHANNEL_TYPE_FILE};
+    use crate::worker_config::ControlUnixConfig;
+
+    fn base_worker_config() -> WorkerConfig {
+        WorkerConfig {
+            pid_file: String::new(),
+            config_file: String::new(),
+            executable: String::new(),
+            env: Default::default(),
+            work_dir: None,
+            cgroup_cfg: CgroupCfg::default(),
+            cpu_affinity: String::new(),
+            log_level: "INFO".into(),
+            control: ControlConfig {
+                ty: "unix".into(),
+                unix: Some(ControlUnixConfig {
+                    path: "/tmp/cpdaemon-test.sock".into(),
+                }),
+            },
+            execution_model: EXECUTION_MODEL_RTC.into(),
+            pipeline: PipelineConfig::default(),
+            update_policy: UPDATE_POLICY_RESTART.into(),
+            memory: MemoryConfig {
+                policy: MEMORY_POLICY_FIXED_NIC_BUFFER.into(),
+                default_limit_mb: 512,
+                libpcap: LibpcapMemConfig {
+                    fixed_buffer_size_mb: 8,
+                },
+            },
+        }
+    }
+
+    /// A FILE-channel strategy over the given interface/container/instance names.
+    fn strategy(
+        interfaces: &[&str],
+        containers: &[&str],
+        instances: &[&str],
+    ) -> SyncStrategyResponse {
+        SyncStrategyResponse {
+            id: 1,
+            daemon_id: 1,
+            version: 1,
+            sync_interval: 15,
+            cpu_limit: None,
+            mem_limit: None,
+            strategy: vec![StrategyEntry {
+                interface_names: interfaces.iter().map(|s| (*s).to_string()).collect(),
+                container_ids: containers.iter().map(|s| (*s).to_string()).collect(),
+                instance_names: instances.iter().map(|s| (*s).to_string()).collect(),
+                packet_channel_type: PACKET_CHANNEL_TYPE_FILE.into(),
+                dump_dir: Some("/tmp/probe".into()),
+                dump_interval: Some(60),
+                ..Default::default()
+            }],
+        }
+    }
+
+    #[test]
+    fn num_items_counts_containers_interfaces_and_live_instances() {
+        assert_eq!(num_items(&strategy(&["eth0", "eth1"], &[], &[]), &[]), 2);
+        assert_eq!(num_items(&strategy(&[], &["c1", "c2", "c3"], &[]), &[]), 3);
+        // Instances only count when they are currently active.
+        let active = vec!["vm1".to_string()];
+        assert_eq!(num_items(&strategy(&[], &[], &["vm1", "vm2"]), &active), 1);
+        assert_eq!(num_items(&strategy(&[], &[], &[]), &[]), 0);
+    }
+
+    /// The config bridge: a strategy becomes a serialised task with the expected
+    /// capturer and output, with no warnings.
+    #[test]
+    fn build_tasks_serialises_a_file_channel_strategy() {
+        let mgr = WorkerManager::new(base_worker_config(), Tool::default());
+        let res = strategy(&["eth0"], &[], &[]);
+        let (tasks, warnings, buff) = mgr.build_tasks(&res, "daemon-uuid", &[]).unwrap();
+        assert!(warnings.is_empty(), "warnings: {warnings:?}");
+        assert_eq!(buff, 8, "fixed buffer policy");
+        assert_eq!(tasks.len(), 1);
+        let t = &tasks[0];
+        assert_eq!(t.capturer.ty, crate::worker_config::CAPTURER_TYPE_LIBPCAP);
+        assert_eq!(t.capturer.libpcap.as_ref().unwrap().interface, "eth0");
+        assert_eq!(t.capturer.libpcap.as_ref().unwrap().buffer_size_mb, Some(8));
+        assert!(
+            t.outputs[0].rotating_file.is_some(),
+            "FILE => rotating_file"
+        );
+    }
+
+    #[test]
+    fn build_tasks_is_empty_without_items() {
+        let mgr = WorkerManager::new(base_worker_config(), Tool::default());
+        let (tasks, warnings, buff) = mgr
+            .build_tasks(&strategy(&[], &[], &[]), "daemon-uuid", &[])
+            .unwrap();
+        assert!(tasks.is_empty());
+        assert!(warnings.is_empty());
+        assert_eq!(buff, 0, "no items => no buffer budget");
+    }
+
+    #[test]
+    fn task_buffer_size_follows_the_memory_policy() {
+        let mut wc = base_worker_config();
+        wc.memory.policy = MEMORY_POLICY_AUTO_NIC_BUFFER.into();
+        wc.memory.default_limit_mb = 512;
+        wc.memory.libpcap.fixed_buffer_size_mb = 0;
+        let mgr = WorkerManager::new(wc, Tool::default());
+        let res = strategy(&["eth0", "eth1"], &[], &[]);
+        // 512 MB / 2 tasks.
+        assert_eq!(mgr.get_task_buffer_size_mb(&res, &[]).unwrap(), 256);
+
+        // Too small for the task count is an error, not a silent 0.
+        let mut tiny = base_worker_config();
+        tiny.memory.policy = MEMORY_POLICY_AUTO_NIC_BUFFER.into();
+        tiny.memory.default_limit_mb = 1;
+        let mgr = WorkerManager::new(tiny, Tool::default());
+        assert!(mgr.get_task_buffer_size_mb(&res, &[]).is_err());
+    }
+
+    #[test]
+    fn pipeline_buffer_subtracts_task_memory() {
+        let mut wc = base_worker_config();
+        wc.execution_model = EXECUTION_MODEL_PIPELINE.into();
+        wc.memory.default_limit_mb = 512;
+        wc.memory.libpcap.fixed_buffer_size_mb = 256;
+        wc.pipeline.min_buffer_size_mb = 128;
+        let mgr = WorkerManager::new(wc, Tool::default());
+        let res = strategy(&["eth0"], &[], &[]);
+        let tasks = mgr.build_tasks(&res, "daemon-uuid", &[]).unwrap().0;
+        assert_eq!(tasks.len(), 1);
+        let cfg = mgr.new_worker_config(&tasks, &res);
+        // 512 (limit) - 256 (task capture buffer) = 256 > min 128.
+        assert_eq!(cfg.pipeline.as_ref().unwrap().buffer_size_mb, 256);
+    }
+}

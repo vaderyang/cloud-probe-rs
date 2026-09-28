@@ -82,6 +82,11 @@ async fn sync_strategy_parses_a_changed_strategy() {
         rec.lock().unwrap().strategy_versions,
         vec!["-1".to_string()]
     );
+    assert_eq!(
+        rec.lock().unwrap().strategy_ids,
+        vec![42],
+        "the daemon id must be in the request path"
+    );
 }
 
 #[tokio::test]
@@ -155,4 +160,48 @@ async fn sync_metrics_posts_the_metrics_body() {
     assert_eq!(sent.len(), 1);
     assert_eq!(sent[0]["pid"], 1234);
     assert!(sent[0]["metrics"].is_object(), "metrics must be sent");
+    assert_eq!(
+        rec.lock().unwrap().metrics_ids,
+        vec![42],
+        "the daemon id must be in the request path"
+    );
+}
+
+#[tokio::test]
+async fn sync_strategy_http_error_is_reported_with_status() {
+    let mock = MockCpm::new().strategy_status(500);
+    let (url, _rec) = mock.spawn().await;
+
+    let err = client(&url)
+        .sync_strategy(42, -1)
+        .await
+        .expect_err("500 must fail");
+    assert!(err.to_string().contains("status_code: 500"), "{err}");
+}
+
+#[tokio::test]
+async fn sync_metrics_http_error_is_reported_with_status() {
+    let mock = MockCpm::new().metrics_status(503);
+    let (url, _rec) = mock.spawn().await;
+
+    let err = client(&url)
+        .sync_metrics(42, SyncMetricsRequest::default())
+        .await
+        .expect_err("503 must fail");
+    assert!(err.to_string().contains("status_code: 503"), "{err}");
+}
+
+/// `sync_metrics` deliberately validates only the HTTP status, not the
+/// `{"code": >= 400}` envelope - matching the Go client's `SyncMetrics`, which
+/// does `assert2xx` and discards the body (`cpdaemon/pkg/cpm/client.go`).
+/// Pinning that here stops a well-meaning "fix" from diverging from the CPM.
+#[tokio::test]
+async fn sync_metrics_accepts_a_body_code_like_the_go_client() {
+    let mock = MockCpm::new().metrics_body(json!({"code": 500, "msg": "boom"}));
+    let (url, _rec) = mock.spawn().await;
+
+    client(&url)
+        .sync_metrics(42, SyncMetricsRequest::default())
+        .await
+        .expect("a 200 with a body code is accepted, as in Go");
 }

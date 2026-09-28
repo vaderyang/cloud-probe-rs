@@ -34,6 +34,13 @@ Two conventions worth knowing before reading:
     `collect_stats_summary`), a reload preserves the process, and `stop()`
     removes the pid file. Runs unprivileged (empty task list), so it is a normal
     gate rather than another `#[ignore]` live test.
+- The new daemon tests were hardened after an independent adversarial review
+  (GLM-5.3 and DeepSeek-V4.1): shutdown-on-drop and worker RAII guards so a
+  mid-test failure can neither hang CI nor orphan a `cpworker`, an OS-level
+  `kill(pid, 0)` assertion for `stop()` (the previous `is_alive()` check was
+  tautological), daemon-id path assertions, in-loop `304` coverage, and a test
+  pinning that `sync_metrics` ignores the body `code` envelope exactly like the
+  Go client. Findings and triage: [REVIEW_CPDAEMON_TESTS.md](REVIEW_CPDAEMON_TESTS.md).
 - A minimal CPM mock (axum, ephemeral port, request recording) lives in
   `crates/cpdaemon/tests/common/mod.rs` for reuse by future daemon tests.
 

@@ -10,11 +10,15 @@
 
 mod common;
 
+use std::sync::Arc;
 use std::time::Duration;
 
 use cpdaemon::worker::{ExecConfig, Worker};
 use cpdaemon::worker_config::{Config, ControlConfig, ControlUnixConfig};
 use cpgolib::cpworker::{Client, UnixClient};
+use nix::errno::Errno;
+use nix::sys::signal::kill;
+use nix::unistd::Pid;
 
 use common::{cpworker_binary, wait_until};
 
@@ -31,6 +35,24 @@ fn base_config(socket_path: &str, log_level: &str) -> Config {
             }),
         },
         tasks: Vec::new(),
+    }
+}
+
+/// True while `pid` still names a process (`kill(pid, 0)`).
+fn os_process_exists(pid: i32) -> bool {
+    match kill(Pid::from_raw(pid), None) {
+        Ok(()) | Err(Errno::EPERM) => true,
+        Err(_) => false,
+    }
+}
+
+/// Stop the supervised worker even if the test panics mid-way; `Worker` itself
+/// has no `Drop`, so an early `expect` would otherwise orphan a running cpworker.
+struct WorkerGuard(Arc<Worker>);
+
+impl Drop for WorkerGuard {
+    fn drop(&mut self) {
+        self.0.stop();
     }
 }
 
@@ -53,13 +75,13 @@ fn daemon_supervises_the_real_cpworker() {
             cgroup_cfg: Default::default(),
         },
     );
+    let _guard = WorkerGuard(worker.clone());
 
     worker
         .start(&base_config(&sock_str, "INFO"))
         .expect("start worker");
     let pid = worker.pid();
     assert!(pid > 0, "worker pid must be recorded");
-    assert!(worker.is_alive(), "worker must be alive right after start");
 
     // The daemon writes the config the worker consumes; pin its shape so a
     // schema drift between the two crates is caught here.
@@ -70,11 +92,17 @@ fn daemon_supervises_the_real_cpworker() {
     assert_eq!(written["control"]["type"], "unix");
     assert_eq!(written["tasks"].as_array().map(Vec::len), Some(0));
 
-    // PID file and control socket are created asynchronously by the child.
-    assert!(
-        wait_until(Duration::from_secs(5), || pid_path.exists()),
-        "pid file must be written"
-    );
+    // The pid file is written by the *daemon* synchronously in `start()`, before
+    // the child does anything; it only proves the daemon's bookkeeping.
+    let recorded_pid: i32 = std::fs::read_to_string(&pid_path)
+        .expect("pid file must exist")
+        .trim()
+        .parse()
+        .expect("pid file must hold a pid");
+    assert_eq!(recorded_pid, pid, "pid file must record the worker pid");
+
+    // Real evidence the child is up and using the daemon-written config: it can
+    // only create the control socket at the path parsed from that file.
     assert!(
         wait_until(Duration::from_secs(5), || sock.exists()),
         "control socket must appear"
@@ -97,20 +125,31 @@ fn daemon_supervises_the_real_cpworker() {
         "no packets are captured in this test"
     );
 
-    // Reload: the daemon rewrites the config and asks the worker to reload, and
-    // the worker must survive it.
+    // Liveness is asserted *after* the handshake, where `is_alive()` (which is
+    // satisfied by a zombie too) is corroborated by a responding control client.
+    assert!(
+        worker.is_alive(),
+        "worker must be alive while serving control"
+    );
+
+    // Reload: the daemon rewrites the config and asks the worker to reload. The
+    // worker replies OK only after parsing the rewritten file, so this pins
+    // "the rewrite was accepted"; the process must also survive it.
     worker
         .update_config(&base_config(&sock_str, "DEBUG"))
         .expect("rewrite worker config");
     client
         .reload_config(Duration::from_secs(3))
         .expect("reload_config command");
-    std::thread::sleep(Duration::from_millis(300));
     assert!(worker.is_alive(), "worker must survive a reload");
 
-    // Stop: SIGINT, then the pid file is removed and the process is gone.
+    // Stop: SIGINT, then the worker must be gone at the OS level. `is_alive()`
+    // alone is tautological here (stop() sets pid=0), so check the captured pid.
     let _ = client.close();
     worker.stop();
-    assert!(!worker.is_alive(), "worker must be stopped");
+    assert!(
+        wait_until(Duration::from_secs(5), || !os_process_exists(pid)),
+        "the worker process {pid} must actually be terminated by stop()"
+    );
     assert!(!pid_path.exists(), "pid file must be removed on stop");
 }

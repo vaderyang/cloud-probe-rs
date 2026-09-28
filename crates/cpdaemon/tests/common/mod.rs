@@ -6,6 +6,12 @@
 //!   daemon tests exercise the actual worker process instead of a stub.
 //! * [`MockCpm`], a tiny axum server that speaks the CPM HTTP API and records
 //!   every request, so the client/syncer tests can assert on the wire contract.
+//!
+//! This module is compiled once per integration-test binary, and each binary
+//! uses only a subset of it (e.g. the worker-supervision test never touches the
+//! mock), so a module-wide `dead_code` allow is deliberate here - it is not
+//! hiding rot, it is the cost of sharing a helper across binaries with different
+//! needs.
 
 #![allow(dead_code)]
 
@@ -23,11 +29,15 @@ use serde_json::{json, Value};
 
 /// Absolute path to the `cpworker` binary built alongside the test binary.
 ///
-/// `cargo test --workspace` (the gate) builds it at
+/// The supported invocation is `cargo test --workspace` (the gate), which builds
 /// `target/<profile>/cpworker`. The test binary lives in `target/<profile>/deps/`,
 /// so going up one or two levels finds it in both the workspace and the
 /// `-p cpdaemon` case. A missing binary is a hard error (AUDIT4 P2-2: never let
 /// an end-to-end test pass by silently skipping).
+///
+/// Caveat: `cargo test -p cpdaemon` alone neither builds nor refreshes the
+/// worker, so use `--workspace` (or `cargo build -p cpworker`) after touching
+/// `crates/cpworker`, else this drives a stale binary.
 pub fn cpworker_binary() -> PathBuf {
     let mut dir = std::env::current_exe().expect("current_exe");
     dir.pop(); // the test binary file name
@@ -62,7 +72,11 @@ pub fn wait_until(timeout: Duration, mut f: impl FnMut() -> bool) -> bool {
 pub struct Recorded {
     pub register_bodies: Vec<Value>,
     pub strategy_versions: Vec<String>,
+    /// The `{id}` path segment of each strategy request (the CPM daemon id).
+    pub strategy_ids: Vec<i64>,
     pub metrics_bodies: Vec<Value>,
+    /// The `{id}` path segment of each metrics request.
+    pub metrics_ids: Vec<i64>,
 }
 
 /// A minimal CPM HTTP API server.
@@ -79,6 +93,7 @@ pub struct MockCpm {
     strategy_body: Value,
     strategy_not_modified_version: Option<String>,
     metrics_status: u16,
+    metrics_body: Value,
 }
 
 impl Default for MockCpm {
@@ -98,6 +113,7 @@ impl MockCpm {
             strategy_body: json!({"id": 1, "daemonId": 1, "version": 1, "syncInterval": 1, "strategy": []}),
             strategy_not_modified_version: None,
             metrics_status: 200,
+            metrics_body: json!({}),
         }
     }
 
@@ -138,6 +154,12 @@ impl MockCpm {
         self
     }
 
+    #[must_use]
+    pub fn metrics_body(mut self, body: Value) -> Self {
+        self.metrics_body = body;
+        self
+    }
+
     /// Handle to the recorded requests (shared with the spawned server).
     #[must_use]
     pub fn recorded(&self) -> Arc<Mutex<Recorded>> {
@@ -174,15 +196,15 @@ async fn register_handler(State(st): State<MockCpm>, Json(body): Json<Value>) ->
 
 async fn strategy_handler(
     State(st): State<MockCpm>,
-    Path(_id): Path<i64>,
+    Path(id): Path<i64>,
     Query(q): Query<HashMap<String, String>>,
 ) -> Response {
     let version = q.get("version").cloned().unwrap_or_default();
-    st.rec
-        .lock()
-        .unwrap()
-        .strategy_versions
-        .push(version.clone());
+    {
+        let mut rec = st.rec.lock().unwrap();
+        rec.strategy_versions.push(version.clone());
+        rec.strategy_ids.push(id);
+    }
     if st.strategy_not_modified_version.as_deref() == Some(version.as_str()) {
         return StatusCode::NOT_MODIFIED.into_response();
     }
@@ -192,11 +214,14 @@ async fn strategy_handler(
 
 async fn metrics_handler(
     State(st): State<MockCpm>,
-    Path(_id): Path<i64>,
+    Path(id): Path<i64>,
     Json(body): Json<Value>,
 ) -> Response {
-    st.rec.lock().unwrap().metrics_bodies.push(body);
-    StatusCode::from_u16(st.metrics_status)
-        .expect("valid status")
-        .into_response()
+    {
+        let mut rec = st.rec.lock().unwrap();
+        rec.metrics_bodies.push(body);
+        rec.metrics_ids.push(id);
+    }
+    let code = StatusCode::from_u16(st.metrics_status).expect("valid status");
+    (code, Json(st.metrics_body.clone())).into_response()
 }
