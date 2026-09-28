@@ -7,6 +7,7 @@
 //! * The pipeline output thread and ring are safe abstractions, not the
 //!   original lock-free SPSC structures.
 
+use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread::JoinHandle;
@@ -672,30 +673,151 @@ pub fn warm_task_names(config: &Config) -> Vec<String> {
     problems
 }
 
-/// Reload the configuration from the path recorded at startup, without holding the
-/// task-manager lock while host names are resolved (AUDIT4 P2-10).
+/// The result of preparing a reload: a parsed configuration, plus the filters that
+/// will not compile (resolved and validated before any running task is touched).
+#[derive(Debug)]
+pub struct ReloadPlan {
+    /// The freshly parsed configuration.
+    pub config: Config,
+    /// One message per filter that cannot compile. The task build reports the same
+    /// errors per task; this is the early, once-per-expression view.
+    pub problems: Vec<String>,
+}
+
+/// Read the configuration and resolve every name its filters need.
+///
+/// This is the part that can block for as long as the resolver takes, so it is kept
+/// separate from the swap and is only ever called from a thread that is allowed to
+/// wait - see [`reload_from_file`] (the RPC handler thread) and [`ReloadWorker`] (the
+/// capture loop's thread, which is not allowed to wait at all).
+///
+/// # Errors
+/// Returns an error if the file cannot be read or parsed.
+pub fn prepare_reload(path: &str) -> Result<ReloadPlan> {
+    let config = Config::parse_file(Path::new(path))?;
+    let problems = warm_task_names(&config);
+    Ok(ReloadPlan { config, problems })
+}
+
+/// Reload from the path recorded in the manager, preparing it (file read, parse,
+/// name resolution) *before* the manager lock is taken (AUDIT4 P2-10).
 ///
 /// `TaskManager::reload()` rebuilds every task, which compiles each BPF expression,
-/// which may resolve a name - and `getaddrinfo()` is a blocking call with a timeout
+/// which may resolve a name - and `getaddrinfo()` is a blocking call whose timeout
 /// the process does not control. Both callers used to write `mgr.lock()
 /// .reload_from_file()`: the SIGHUP path (whose thread *is* the capture loop) and
-/// the `reload_config` RPC (whose thread is not). Either way, packet polling and
-/// `cpctl stats` were frozen for as long as DNS took while every drop counter kept
-/// reporting 0. Parsing and name resolution now happen unlocked, and only the swap
-/// takes the mutex.
+/// the `reload_config` RPC (whose thread is not). Either way packet polling and
+/// `cpctl stats` were frozen for as long as DNS took, with every drop counter still
+/// reporting 0. Only the swap takes the mutex now.
+///
+/// This still blocks *its* caller, which is fine for the RPC handler and wrong for the
+/// capture loop - use [`ReloadWorker`] there.
 ///
 /// # Errors
 /// Returns an error if the config file cannot be read or parsed, or if the rebuilt
 /// task set cannot be constructed.
 pub fn reload_from_file(mgr: &Arc<Mutex<TaskManager>>) -> Result<()> {
     let path = mgr.lock().config_path().to_string();
-    let cfg = Config::parse_file(&path)?;
-    for problem in warm_task_names(&cfg) {
+    let plan = prepare_reload(&path)?;
+    for problem in plan.problems {
         crate::log_warn!("reload: {problem}");
     }
     // Preserve control config from the original (C moves control out before
     // handing config to the task manager).
-    mgr.lock().reload(cfg)
+    mgr.lock().reload(plan.config)
+}
+
+/// A reload being prepared on a worker thread.
+///
+/// The SIGHUP flag is consumed by the capture loop itself, so a reload that resolved
+/// names there stopped packet polling for the resolver's whole timeout. `start()`
+/// moves that work away; the loop only ever calls [`ReloadWorker::is_done`], which
+/// never blocks, and takes the manager lock once the names are already memoised - so
+/// the swap is fast. While a name server is unreachable the reload simply stays
+/// pending (and the worker keeps capturing) instead of freezing with it.
+pub struct ReloadWorker {
+    done: Arc<AtomicBool>,
+    plan: Arc<Mutex<Option<Result<ReloadPlan>>>>,
+    handle: Option<JoinHandle<()>>,
+}
+
+impl ReloadWorker {
+    /// Start preparing a reload of `path` on a worker thread.
+    #[must_use]
+    pub fn start(path: &str) -> Self {
+        let path = path.to_string();
+        Self::start_with(move || prepare_reload(&path))
+    }
+
+    /// `start()` with the blocking work injected - how "the caller never waits" is
+    /// tested without depending on a name server.
+    #[must_use]
+    fn start_with<F>(work: F) -> Self
+    where
+        F: FnOnce() -> Result<ReloadPlan> + Send + 'static,
+    {
+        let done = Arc::new(AtomicBool::new(false));
+        let slot: Arc<Mutex<Option<Result<ReloadPlan>>>> = Arc::new(Mutex::new(None));
+        let (flag, result_slot) = (done.clone(), slot.clone());
+        let handle = std::thread::Builder::new()
+            .name("cp-reload".to_string())
+            .spawn(move || {
+                *result_slot.lock() = Some(work());
+                flag.store(true, Ordering::Release);
+            });
+        if let Err(e) = handle {
+            // No thread means no reload, reported. Falling back to resolving inline
+            // would put the capture loop back on the critical path.
+            *slot.lock() = Some(Err(crate::error::Error::new(format!(
+                "spawn reload worker: {e}"
+            ))));
+            done.store(true, Ordering::Release);
+            return ReloadWorker {
+                done,
+                plan: slot,
+                handle: None,
+            };
+        }
+        ReloadWorker {
+            done,
+            plan: slot,
+            handle: handle.ok(),
+        }
+    }
+
+    /// Whether the plan is ready. Never blocks.
+    #[must_use]
+    pub fn is_done(&self) -> bool {
+        self.done.load(Ordering::Acquire)
+    }
+
+    /// Take the prepared plan. Call it once [`Self::is_done`] is true: the join must
+    /// not become a wait on the resolver, which is the whole point.
+    ///
+    /// # Errors
+    /// Propagated from reading/parsing the configuration, or from failing to spawn
+    /// the worker.
+    pub fn take(mut self) -> Result<ReloadPlan> {
+        if let Some(handle) = self.handle.take() {
+            let _ = handle.join();
+        }
+        self.plan
+            .lock()
+            .take()
+            .unwrap_or_else(|| Err(crate::error::Error::new("reload plan vanished")))
+    }
+}
+
+impl Drop for ReloadWorker {
+    fn drop(&mut self) {
+        // Abandoned (e.g. the process quits while a lookup hangs): the thread is left
+        // to finish on its own and holds no lock, so shutdown is not delayed. One
+        // abandoned reload leaks at most one thread - deliberately not the
+        // "spawn a thread per lookup" design `bpf::resolvers` documents.
+        if let Some(handle) = self.handle.take() {
+            drop(handle);
+        }
+    }
 }
 
 #[cfg(test)]
@@ -703,6 +825,106 @@ mod tests {
     use super::*;
     use crate::output::pcap_writer::PcapWriter;
     use std::sync::atomic::{AtomicUsize, Ordering};
+
+    /// AUDIT4 P2-10: the SIGHUP handler runs on the capture loop's own thread, and
+    /// the old code resolved every host name in every filter right there (and under
+    /// `mgr.lock()`, which the loop also takes every batch). A reload must therefore
+    /// be *prepared* somewhere else and only polled from the loop.
+    ///
+    /// The blocking work is injected, so this measures the property that matters -
+    /// the caller never waits - rather than a name server's behaviour.
+    #[test]
+    fn reload_worker_does_not_block_the_capture_loop() {
+        let slow = || {
+            // Stands in for `getaddrinfo()` against an unreachable name server.
+            std::thread::sleep(std::time::Duration::from_millis(250));
+            Err(crate::error::Error::new("resolver unreachable"))
+        };
+        let start = std::time::Instant::now();
+        let worker = ReloadWorker::start_with(slow);
+        let polled = start.elapsed();
+        assert!(
+            polled < std::time::Duration::from_millis(50),
+            "`start` + first poll took {polled:?}; the loop must not wait on the resolver"
+        );
+        assert!(!worker.is_done(), "the plan is not ready yet");
+
+        // ... and a lock taken here stays free while the worker works, which is what
+        // `cpctl stats` and the next batch of packets need.
+        let other = std::sync::Arc::new(Mutex::new(0u32));
+        assert!(
+            other.try_lock().is_some(),
+            "preparation must not hold any lock the loop needs"
+        );
+
+        while !worker.is_done() && start.elapsed() < std::time::Duration::from_secs(5) {
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        assert!(worker.is_done(), "the worker must finish on its own");
+        let err = worker
+            .take()
+            .expect_err("the injected resolver fails, and that must be reported");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("resolver unreachable"),
+            "the plan's error must reach the caller: {msg}"
+        );
+    }
+
+    /// A plan that succeeds is handed over intact, including the early report of
+    /// filters that will not compile.
+    #[test]
+    fn reload_worker_delivers_the_plan_and_its_problems() {
+        let worker = ReloadWorker::start_with(|| {
+            let config = Config::parse_str(
+                r#"{
+                    "tasks": [{
+                        "capturer": { "type": "libpcap", "libpcap": {
+                            "interface": "lo", "bpf": "udp and port 53"
+                        } },
+                        "outputs": []
+                    }]
+                }"#,
+            )
+            .expect("parse");
+            let problems = warm_task_names(&config);
+            Ok(ReloadPlan { config, problems })
+        });
+        while !worker.is_done() {
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+        let plan = worker.take().expect("plan");
+        assert_eq!(plan.config.tasks.len(), 1);
+        assert!(
+            plan.problems.is_empty(),
+            "a valid filter reports nothing: {:?}",
+            plan.problems
+        );
+    }
+
+    /// `prepare_reload` is the part that can block on DNS, so it must not need the
+    /// manager at all - and it must actually fill the shared compile cache.
+    #[test]
+    fn prepare_reload_resolves_into_the_shared_cache() {
+        let dir = std::env::temp_dir().join(format!("cp-prepare-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("mkdir");
+        let path = dir.join("cfg.json");
+        std::fs::write(
+            &path,
+            r#"{"tasks":[{"capturer":{"type":"libpcap","libpcap":{
+                 "interface":"lo","bpf":"udp and not host localhost"}},"outputs":[]}]}"#,
+        )
+        .expect("write config");
+        crate::bpf::clear_name_cache();
+        let plan = prepare_reload(path.to_str().expect("utf8 path")).expect("prepare");
+        assert_eq!(plan.config.tasks.len(), 1);
+        assert!(
+            crate::bpf::name_cache_len() >= 1,
+            "preparing must have resolved the filter's names into the shared cache"
+        );
+        crate::bpf::clear_name_cache();
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     /// AUDIT4 P3-2: a task whose *second* output fails to be created used to drop
     /// the first output with the `Vec`, and `Output` has no draining `Drop` - the

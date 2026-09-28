@@ -24,9 +24,7 @@ use std::io;
 use crate::error::Result;
 
 pub use parser::{parse, parse_with, Ast, Dir, DnsResolver, NetSpec, Proto, Resolver, L4};
-pub use resolvers::{
-    clear_name_cache, name_cache_len, prewarm, GuardedResolver, DEFAULT_BUDGET, DEFAULT_TTL,
-};
+pub use resolvers::{clear_name_cache, name_cache_len, prewarm, CachedResolver, DEFAULT_TTL};
 
 /// One classic-BPF instruction (matches `struct sock_filter`).
 #[repr(C)]

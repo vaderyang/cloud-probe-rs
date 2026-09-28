@@ -52,7 +52,9 @@ fn main() {
     let total_num_tasks = config.tasks.len();
     let control = config.control.clone();
 
-    let mgr = match TaskManager::new(config, config_path, working_dir) {
+    // `config_path` stays alive for the reload path below (the manager keeps its own
+    // copy).
+    let mgr = match TaskManager::new(config, config_path.clone(), working_dir) {
         Ok(m) => Arc::new(Mutex::new(m)),
         Err(e) => {
             cpworker::log_fatal!("init tasks failed: {e}");
@@ -96,6 +98,9 @@ fn main() {
     cpworker::log_info!("start poll packets");
     let stats_enabled = control.is_some();
     let mut last_reload_check = std::time::Instant::now();
+    // A SIGHUP that arrived while a reload was already being prepared re-arms the
+    // flag, so the newest file on disk always wins; at most one worker at a time.
+    let mut pending_reload: Option<cpworker::task::ReloadWorker> = None;
     // Process packets in batches so the TaskManager / output-set locks and the
     // periodic clock check are amortised across many packets instead of once
     // per packet (matching the C loop's per-packet cost).
@@ -107,13 +112,36 @@ fn main() {
             std::thread::sleep(std::time::Duration::from_micros(10));
         }
 
-        // Handle SIGHUP-driven reload at most once per second.
-        if reload.swap(false, Ordering::Relaxed) {
-            // Not `mgr.lock().reload_from_file()`: parsing and especially host-name
-            // resolution must happen outside the lock this loop holds every batch
-            // (AUDIT4 P2-10).
-            if let Err(e) = cpworker::task::reload_from_file(&mgr) {
-                cpworker::log_error!("reload failed: {e}");
+        // Handle SIGHUP-driven reload at most once per second. The preparation -
+        // reading the file, parsing it, resolving every host name in every filter -
+        // runs on a worker, because this loop *is* packet polling: doing that work
+        // here (or under `mgr.lock()`, as both used to happen) froze capture and
+        // `cpctl stats` for as long as the resolver took (AUDIT4 P2-10). Only the
+        // swap happens here, with the names already memoised.
+        if reload.load(Ordering::Relaxed) && pending_reload.is_none() {
+            reload.store(false, Ordering::Relaxed);
+            pending_reload = Some(cpworker::task::ReloadWorker::start(&config_path));
+            cpworker::log_info!("reload: preparing the new configuration");
+        }
+        if let Some(worker) = pending_reload.take() {
+            if worker.is_done() {
+                match worker.take() {
+                    Ok(plan) => {
+                        for problem in plan.problems {
+                            cpworker::log_warn!("reload: {problem}");
+                        }
+                        if let Err(e) = mgr.lock().reload(plan.config) {
+                            cpworker::log_error!("reload failed: {e}");
+                        }
+                    }
+                    Err(e) => cpworker::log_error!("reload failed: {e}"),
+                }
+            } else {
+                // Not ready: put it back and poll again next turn. Moving the handle
+                // out and in is what keeps this free of `Option::expect` - release
+                // builds use `panic = "abort"`, so a "cannot happen" here would cost
+                // the worker (`verify_hygiene.sh` P5-23 pointed at exactly this).
+                pending_reload = Some(worker);
             }
         }
 

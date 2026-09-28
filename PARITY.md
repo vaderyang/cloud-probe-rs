@@ -235,7 +235,7 @@ M4 的问题大多不是"移植错了"，而是"移植得比原实现更宽松�
 | pcap 文件 linktype 非 EN10MB（`tcpdump -i any` 的 DLT_LINUX_SLL 113 / SLL2 276、DLT_NULL、DLT_RAW、radiotap） | `pcap_open_offline` **照常打开**（实测 `datalink=113` 成功），`pcap_compile` 按该 DLT 编译，`pcap_next_ex` 正常返回记录 | **明确拒绝**：`unsupported pcap linktype 113: only Ethernet (DLT_EN10MB = 1) can be replayed; produced by tcpdump -i any; re-capture on a single interface` | **有意分歧**：本项目 BPF 后端只实现 Ethernet 布局，把 SLL 帧按 Ethernet 解析会让每一帧错位 4 字节后转发进 GRE/VXLAN/ZMQ —— 静默的数据破坏，宁缺勿错 |
 | pcap 记录 `caplen > orig_len` | libpcap **不校验**：实测返回 `caplen=20 origlen=10` 并交出 20 字节 | **报错** `caplen 20 exceeds orig_len 10 (corrupt file)`，该记录不进入输出 | **有意分歧**：真实抓包不可能出现该组合，出现即文件损坏 |
 | pcap `version_major > 2` | libpcap 拒绝：`unsupported pcap savefile version 3.4` | 同样拒绝并打印版本号 | **一致**（对齐 libpcap） |
-| BPF 编译期的主机名解析（`host <name>` / `net <name>`） | `pcap_compile()` 同步调用 `getaddrinfo()`：DNS 不可达时一次 reload 就阻塞数十秒；Rust 移植后同样同步，且发生在 `TaskManager::reload()` **持 mgr 锁**期间 → 抓包循环（同一把锁）与 `cpctl stats` 一起冻结 | 三重有界化：① 解析结果进程内缓存 `DEFAULT_TTL=60s`（`bpf::GuardedResolver`，上限 512 个名字）；② 单次冷解析预算 `DEFAULT_BUDGET=2s`，超出返回带名字的 `TimedOut` 错误（该 task 建不出来，而不是全员停摆）；③ SIGHUP 与 `reload_config` RPC 都改走 `task::reload_from_file()`：读文件 + 解析 + 名字解析全在**锁外**完成，锁内只做换装 | **有意分歧（更有界）**：代价是 collector 换 IP 后最多 60s 内自动排除过滤器可能仍用旧地址；`netns` task 不在锁外预热（命名空间内答案可能不同），仍走构建期解析、只受 2s 预算保护 |
+| BPF 编译期的主机名解析（`host <name>` / `net <name>`） | `pcap_compile()` 每次都同步调用 `getaddrinfo()`：DNS 不可达时一次 reload 就阻塞数十秒；移植后的 Rust 同样同步，**且**发生在 `TaskManager::reload()` 持 mgr 锁期间 → 抓包循环（同一把锁）与 `cpctl stats` 一起冻结，而 `drop_packets` 一直是 0 | ① 结果进程内缓存 `DEFAULT_TTL=60s`（`bpf::CachedResolver`，≤512 个名字，失败不入表）→ 配置未变的重载**一次解析都不做**；② `task::prepare_reload()` 把"读文件+解析+解析名字"与"换装 task"分开，`reload_config` RPC 只在换装时取锁；③ SIGHUP 更进一步放到 `task::ReloadWorker` 的专用线程（它的信号标志正是抓包循环自己消费的，循环只轮询 `is_done()`，永不阻塞） | **有意分歧（更有界）**：代价是 collector 换 IP 后最多 60s 内，自动排除过滤器可能仍用旧地址。`netns` task 不在锁外预热（命名空间内答案可能不同），仍走构建期解析。**刻意不做**"每次解析起一个线程 + 超时放弃"：libFuzzer 实测把它判为 CRASH（detached 线程在进程退出时仍持有 glibc 解析缓冲 → LeakSanitizer 报 leak-592aa5…，且 exec/s 归零），那等于把一次阻塞换成无界线程数 |
 | 单条记录 caplen 上限 | 受文件实际长度约束 | `MAX_CAPLEN = 262144`（libpcap 自身的最大 snaplen），超限按损坏处理；另有 `const _ = assert!` 编译期约束 | **有意收敛**：原上限 256 MiB，一条畸形记录就能让 reader 一次 `resize` 预留 256 MB 并长期持有（进程基线 RSS 仅 6.5 MB） |
 | `nic.<ifname>` 过滤器替换（`bpf_filter_replace_nic`） | C 按 `char *` 逐字节处理，UTF-8 序列**原样透传** | 曾用 `bytes[i] as char` 逐字节重编码，非 ASCII 过滤器被改成 Latin-1 乱码；现按**字节切片复制**，非 ASCII 空白（U+3000）也能正确结束接口名 | **修复回归**（现在与 C 一致） |
 | `PcapWriter::flush()` | libpcap `pcap_dump_flush()` 就是 `fflush`：到 OS，不 fsync | 行为**不变**；文档改为如实描述（flush 后字节已到 OS、可被其他读者看到；不保证掉电持久） | **文档修复**：原注释"call flush to fsync"是空头承诺，现在有 grep 门禁 |
@@ -316,9 +316,11 @@ UP"的反应**不是一回事**。独占 veth 对（`p2spin0/p2spin1`，实验�
   并用 `getsockopt` 回读实际值，被 `net.core.rmem_max` 截断时告警。
 * **启动无空窗**：socket 以协议 0 创建 → 挂 BPF → 再 `bind(ETH_P_ALL, ifindex)`，
   避免 bind/挂过滤器之前收到未过滤流量。
-* **编译期名字解析不阻塞抓包**（AUDIT4 P2-10）：`bpf::GuardedResolver` 给 `parse()` 加
-  进程内 60s 结果缓存 + 单名 2s 超时，且 reload 的解析在释放 mgr 锁之前完成（见 §2.5 表末行）；
-  与 ZMTP 侧的 `BackgroundResolver`（§4 ZMTP）配对，覆盖"DNS 挂了就把 worker 冻住"的两条路径。
+* **编译期名字解析不阻塞抓包**（AUDIT4 P2-10）：`bpf::CachedResolver` 给 `parse()` 加进程内 60s
+  结果缓存（≤512 个名字；解析失败不入表，所以一次抖动不会把某个名字"毒化"整个 TTL）；reload 的准备
+  阶段（读文件/解析/解析名字）与换装分离，`reload_config` 只在换装时取锁，SIGHUP 则整段放到
+  `task::ReloadWorker` 的专用线程上（抓包循环只轮询 `is_done()`）；与 ZMTP 侧的 `BackgroundResolver`
+  （下文 ZMTP 一节）配对，覆盖"DNS 挂了就把 worker 冻住"的两条路径。
 * **过滤器回退**：内核 `SO_ATTACH_FILTER` 有 4096 条指令上限（`BPF_MAXINSNS`），
   且受 `net.core.optmem_max` 限制（超限返回 `ENOMEM`/`EINVAL`）。挂载失败或程序过长时，
   capturer **回退到用户态过滤**（用同一编译结果在收到帧后判定，丢弃不匹配帧），与 libpcap 一致，

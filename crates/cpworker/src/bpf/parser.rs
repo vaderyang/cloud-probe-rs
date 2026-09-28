@@ -172,11 +172,12 @@ impl Resolver for DnsResolver {
 /// host names, a name with more answers than [`MAX_RESOLVED_ADDRS`], or trailing
 /// garbage.
 pub fn parse(input: &str) -> Result<Ast> {
-    // Not the raw platform resolver: a filter is compiled while building tasks,
-    // and an unreachable name server must not be able to hold the task-manager
-    // mutex - and with it packet polling and `cpctl stats` - hostage for the
-    // resolver's own timeout (AUDIT4 P2-10).
-    parse_with(input, &super::resolvers::GuardedResolver::system())
+    // Not the raw platform resolver: a filter is compiled while building tasks, and
+    // the reload path used to re-resolve every name of every task while holding the
+    // task-manager mutex. Results are memoised process-wide so a reload of an
+    // unchanged configuration resolves nothing (AUDIT4 P2-10); the blocking call
+    // itself is moved off the critical threads by `crate::task::ReloadWorker`.
+    parse_with(input, &super::resolvers::CachedResolver::system())
 }
 
 /// [`parse`] with an injected [`Resolver`].

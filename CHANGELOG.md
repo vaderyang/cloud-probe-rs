@@ -113,15 +113,23 @@ Two conventions worth knowing before reading:
 
 - Name resolution while rebuilding tasks can no longer freeze the worker (P2-10).
   Compiling a filter that contains a host name calls `getaddrinfo()`, and both reload
-  paths did that as `mgr.lock().reload_from_file()` - so with an unreachable name
-  server the capture loop (same mutex, every batch) and `cpctl stats` were frozen for
-  the resolver's own timeout while every drop counter kept reporting 0. Three bounds
-  now apply: results are cached process-wide for 60s (`bpf::GuardedResolver`, 512
-  names max), a cold lookup may block at most 2s and then fails that *task* with a
-  message naming the host, and `task::reload_from_file()` does the file read, the
-  parse and the resolution outside the manager lock. `netns` tasks are deliberately
-  not pre-warmed from outside their namespace. Divergence from `pcap_compile()` and
-  its cost (a stale answer can be up to 60s old) are in [PARITY.md §2.5](PARITY.md).
+  call sites were written `mgr.lock().reload_from_file()` - so with an unreachable name
+  server the capture loop (same mutex, taken every batch) and `cpctl stats` were frozen
+  for the resolver's own timeout while every drop counter kept reporting 0. Now: results
+  are memoised process-wide for 60s (`bpf::CachedResolver`, at most 512 names, failures
+  are *not* memoised so one bad answer cannot poison a name for the whole TTL), so a
+  reload of an unchanged configuration resolves nothing at all; `task::prepare_reload()`
+  splits "read + parse + resolve names" from "swap the tasks", and the `reload_config`
+  RPC takes the lock only for the swap; the SIGHUP path goes further and prepares on a
+  dedicated `task::ReloadWorker` thread, since its signal flag is consumed by the capture
+  loop itself, which only polls `is_done()`. `netns` tasks are deliberately not
+  pre-warmed (their filter compiles inside that namespace, where the answer may differ).
+  The divergence from `pcap_compile()` - an answer can be up to 60s stale - is recorded
+  in [PARITY.md §2.5](PARITY.md). The first draft of this fix bounded each lookup with a
+  detached thread plus a 2s budget and the `bpf` fuzz target rejected it: LeakSanitizer
+  found glibc's resolver buffer owned by a still-live detached thread at exit
+  (`fuzz/artifacts/bpf/leak-592aa5…`) with `exec/s` at 0. Resolution is therefore
+  *moved*, not raced (`bpf/resolvers.rs` module docs record why).
 - A task capturing on an interface that is down - or simply idle - no longer spins a
   core (P2-6). Measured on a dedicated veth pair with the repository default
   `timeout_ms: 0`, 6s window, `utime+stime`: 4 tasks on a down interface cost
