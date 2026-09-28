@@ -140,12 +140,46 @@ pub enum Ast {
     },
 }
 
-/// Parse a filter expression string into an [`Ast`].
+/// Turns a host name into addresses while a filter is being compiled.
+///
+/// Injectable so that the *size* bound on a resolution result (P2-9) and the
+/// "expand every address" rule (P2-8) are testable without a name server, and so
+/// that a cached/background resolver can be plugged in later without touching the
+/// grammar. Implementations must be side-effect free with respect to the parser.
+pub trait Resolver {
+    /// All addresses of `host`, in any order (they are sorted/deduped by the
+    /// parser). An empty `Ok` or an error means "unresolvable".
+    ///
+    /// # Errors
+    /// Any resolver failure (unknown name, no address, DNS outage).
+    fn lookup(&self, host: &str) -> std::io::Result<Vec<IpAddr>>;
+}
+
+/// The platform resolver: `getaddrinfo` through `ToSocketAddrs`.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct DnsResolver;
+
+impl Resolver for DnsResolver {
+    fn lookup(&self, host: &str) -> std::io::Result<Vec<IpAddr>> {
+        Ok((host, 0u16).to_socket_addrs()?.map(|sa| sa.ip()).collect())
+    }
+}
+
+/// Parse a filter expression string into an [`Ast`] using the platform resolver.
 ///
 /// # Errors
 /// Returns an error for unknown keywords, malformed addresses, unresolvable
-/// host names, or trailing garbage.
+/// host names, a name with more answers than [`MAX_RESOLVED_ADDRS`], or trailing
+/// garbage.
 pub fn parse(input: &str) -> Result<Ast> {
+    parse_with(input, &DnsResolver)
+}
+
+/// [`parse`] with an injected [`Resolver`].
+///
+/// # Errors
+/// As [`parse`], plus whatever the injected resolver reports.
+pub fn parse_with(input: &str, resolver: &dyn Resolver) -> Result<Ast> {
     if input.len() > MAX_FILTER_LEN {
         return Err(Error::new(format!(
             "filter expression too long ({} > {MAX_FILTER_LEN} bytes)",
@@ -161,6 +195,7 @@ pub fn parse(input: &str) -> Result<Ast> {
         pos: 0,
         depth: 0,
         nodes: 0,
+        resolver,
     };
     let ast = p.parse_or()?;
     if p.pos != p.toks.len() {
@@ -217,14 +252,15 @@ fn tokenize(s: &str) -> Vec<String> {
     out
 }
 
-struct Parser {
+struct Parser<'a> {
     toks: Vec<String>,
     pos: usize,
     depth: usize,
     nodes: usize,
+    resolver: &'a dyn Resolver,
 }
 
-impl Parser {
+impl<'a> Parser<'a> {
     /// Account for one more nesting level, rejecting overly deep expressions
     /// (which would otherwise overflow the stack during parse/lower/compile).
     fn enter(&mut self) -> Result<()> {
@@ -340,15 +376,7 @@ impl Parser {
                     .ok_or_else(|| Error::new("missing host address"))?;
                 self.host_expr(dir, None, &t)
             }
-            "net" => {
-                let (addr, mask) = self.parse_net()?;
-                Ok(Ast::Net {
-                    dir,
-                    proto: None,
-                    addr,
-                    mask,
-                })
-            }
+            "net" => self.net_expr(dir, None),
             "port" => Ok(Ast::Port {
                 dir,
                 l4: L4::Any,
@@ -428,13 +456,7 @@ impl Parser {
             }
             Some("net") if matches!(proto, Proto::Ip | Proto::Ip6 | Proto::Arp | Proto::Rarp) => {
                 self.pos += 1;
-                let (addr, mask) = self.parse_net()?;
-                Ok(Ast::Net {
-                    dir,
-                    proto: Some(proto),
-                    addr,
-                    mask,
-                })
+                self.net_expr(dir, Some(proto))
             }
             Some("port") if matches!(proto, Proto::Tcp | Proto::Udp) => {
                 self.pos += 1;
@@ -507,6 +529,29 @@ impl Parser {
         parse_mac(&t)
     }
 
+    /// Resolve a token to *all* of its addresses (deduplicated, deterministic
+    /// order, bounded by [`MAX_RESOLVED_ADDRS`]).
+    ///
+    /// The bound is what stops DNS *data* from deciding the size of the compiled
+    /// program: without it, one name with many A/AAAA records silently pushed the
+    /// task past the kernel's instruction limit and into per-frame userspace
+    /// filtering (AUDIT4 P2-9).
+    fn resolve(&self, token: &str) -> Result<Vec<IpAddr>> {
+        if let Ok(ip) = IpAddr::from_str(token) {
+            return Ok(vec![ip]);
+        }
+        let mut v: Vec<IpAddr> = match self.resolver.lookup(token) {
+            Ok(v) => v,
+            Err(_) => return Err(Error::new(format!("invalid host address '{token}'"))),
+        };
+        v.sort();
+        v.dedup();
+        if v.is_empty() {
+            return Err(Error::new(format!("no address for host '{token}'")));
+        }
+        bounded_addrs(token, v)
+    }
+
     /// Build `host` matching for *every* address a name resolves to.
     ///
     /// libpcap's `host <name>` expands to the logical OR over all A/AAAA
@@ -514,7 +559,7 @@ impl Parser {
     /// (and, for the auto-generated output-host exclusion, risks mirroring our
     /// own traffic back).
     fn host_expr(&mut self, dir: Dir, proto: Option<Proto>, token: &str) -> Result<Ast> {
-        let addrs = resolve_addrs(token)?;
+        let addrs = self.resolve(token)?;
         let mut expr: Option<Ast> = None;
         for addr in addrs {
             self.bump()?;
@@ -527,32 +572,60 @@ impl Parser {
         expr.ok_or_else(|| Error::new(format!("no address for host '{token}'")))
     }
 
-    fn parse_net(&mut self) -> Result<(IpAddr, IpAddr)> {
+    /// Build `net` matching for *every* address a name resolves to.
+    ///
+    /// `host <name>` was fixed to OR over all A/AAAA answers (P5-08), but
+    /// `net <name>` still went through `parse_addr()`, which takes
+    /// `to_socket_addrs().next()` - so a multi-homed name left every address but
+    /// the first unfiltered, which is exactly the loopback-amplification hazard
+    /// the exclusion of output hosts exists to prevent. Chosen behaviour: cover
+    /// all addresses, like `host`, rather than reject host names - rejecting
+    /// would break filters that work today (they would fail the task instead of
+    /// filtering correctly), and the expansion is bounded by
+    /// [`MAX_RESOLVED_ADDRS`].
+    fn net_expr(&mut self, dir: Dir, proto: Option<Proto>) -> Result<Ast> {
         let t = self
             .next()
             .ok_or_else(|| Error::new("missing net address"))?;
-        let (addr, plen) = if let Some((ip, plen)) = t.split_once('/') {
-            let addr = parse_addr(ip)?;
+        let spec = self.net_spec(&t)?;
+        // Only the address/name part is resolvable; `/len` is the specification.
+        let host = t.split_once('/').map_or(t.as_str(), |(h, _)| h);
+        let mut expr: Option<Ast> = None;
+        for (addr, mask) in net_masks(&t, &self.resolve(host)?, &spec)? {
+            self.bump()?;
+            let node = Ast::Net {
+                dir,
+                proto,
+                addr,
+                mask,
+            };
+            expr = Some(match expr {
+                None => node,
+                Some(prev) => Ast::Or(Box::new(prev), Box::new(node)),
+            });
+        }
+        expr.ok_or_else(|| Error::new(format!("no address for net '{t}'")))
+    }
+
+    /// Parse the `/prefix` or `mask <netmask>` part of a `net` token.
+    fn net_spec(&mut self, t: &str) -> Result<NetSpec> {
+        if let Some((_, plen)) = t.split_once('/') {
             let plen: u8 = plen
                 .parse()
                 .map_err(|_| Error::new(format!("invalid prefix length in '{t}'")))?;
-            (addr, plen)
-        } else {
-            let addr = parse_addr(&t)?;
-            if self.eat("mask") {
-                let mt = self.next().ok_or_else(|| Error::new("missing net mask"))?;
-                let mask = parse_addr(&mt)?;
-                if mask.is_ipv4() != addr.is_ipv4() {
-                    return Err(Error::new("net address and mask family mismatch"));
-                }
-                return Ok((mask_addr(addr, mask), mask));
-            }
-            return Err(Error::new(format!(
-                "net '{t}' needs a /prefix or an explicit 'mask'"
-            )));
-        };
-        let mask = prefix_mask(addr, plen)?;
-        Ok((mask_addr(addr, mask), mask))
+            return Ok(NetSpec::Prefix(plen));
+        }
+        if self.eat("mask") {
+            let mt = self.next().ok_or_else(|| Error::new("missing net mask"))?;
+            // A netmask is a bit pattern, never a name: resolving one would take
+            // the first answer of a host record and silently mean something else.
+            let mask =
+                IpAddr::from_str(&mt).map_err(|_| Error::new(format!("invalid netmask '{mt}'")))?;
+            return Ok(NetSpec::Mask(mask));
+        }
+        Err(Error::new(format!(
+            "net '{t}' needs a /prefix or an explicit 'mask'"
+        )))
     }
 }
 
@@ -570,38 +643,78 @@ fn proto_from_keyword(kw: &str) -> Option<Proto> {
     })
 }
 
-fn parse_addr(t: &str) -> Result<IpAddr> {
-    if let Ok(ip) = IpAddr::from_str(t) {
-        return Ok(ip);
-    }
-    // Fall back to resolving a host name, like libpcap's pcap_compile.
-    match (t, 0u16).to_socket_addrs() {
-        Ok(mut addrs) => addrs
-            .next()
-            .map(|sa| sa.ip())
-            .ok_or_else(|| Error::new(format!("no address for host '{t}'"))),
-        Err(_) => Err(Error::new(format!("invalid host address '{t}'"))),
-    }
+/// How a `net` token says which addresses belong to the network.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NetSpec {
+    /// CIDR prefix length (`10.0.0.0/8`).
+    Prefix(u8),
+    /// Explicit netmask (`net 10.0.0.0 mask 255.0.0.0`).
+    Mask(IpAddr),
 }
 
-/// Resolve `t` to *all* of its addresses (deduplicated, deterministic order).
-fn resolve_addrs(t: &str) -> Result<Vec<IpAddr>> {
-    if let Ok(ip) = IpAddr::from_str(t) {
-        return Ok(vec![ip]);
-    }
-    match (t, 0u16).to_socket_addrs() {
-        Ok(addrs) => {
-            let mut v: Vec<IpAddr> = addrs.map(|sa| sa.ip()).collect();
-            v.sort();
-            v.dedup();
-            if v.is_empty() {
-                Err(Error::new(format!("no address for host '{t}'")))
-            } else {
-                Ok(v)
+/// Turn a set of resolved addresses plus a net specification into the
+/// `(network, mask)` pairs the filter must match.
+///
+/// Split out from the parser so `net <name>` covering *every* answer (P2-8) is
+/// testable without DNS. Addresses of the wrong family are dropped when an
+/// explicit mask names one family (an IPv6 answer cannot be masked by
+/// `255.0.0.0`); a `/prefix` applies to each family with its own mask width.
+///
+/// Errors when nothing is left to match, so a filter never silently narrows to
+/// "matches nothing".
+fn net_masks(token: &str, addrs: &[IpAddr], spec: &NetSpec) -> Result<Vec<(IpAddr, IpAddr)>> {
+    let mut out: Vec<(IpAddr, IpAddr)> = Vec::new();
+    for addr in addrs {
+        let (net, mask) = match spec {
+            NetSpec::Prefix(plen) => {
+                let mask = prefix_mask(*addr, *plen)?;
+                (mask_addr(*addr, mask), mask)
             }
+            NetSpec::Mask(m) => {
+                if m.is_ipv4() != addr.is_ipv4() {
+                    continue;
+                }
+                (mask_addr(*addr, *m), *m)
+            }
+        };
+        if !out.contains(&(net, mask)) {
+            out.push((net, mask));
         }
-        Err(_) => Err(Error::new(format!("invalid host address '{t}'"))),
     }
+    if out.is_empty() {
+        return Err(Error::new(format!(
+            "net '{token}': no resolved address matches the {}",
+            match spec {
+                NetSpec::Prefix(_) => "prefix",
+                NetSpec::Mask(_) => "netmask family",
+            }
+        )));
+    }
+    Ok(out)
+}
+
+/// Largest number of addresses one hostname may contribute to a filter.
+///
+/// Each answer becomes its own leaf (~5-8 cBPF instructions), so an unbounded
+/// answer set lets DNS data decide the size of the program: past
+/// `bpf::BPF_MAXINSNS`(4096) the kernel refuses the program and the capturer
+/// degrades to interpreting thousands of instructions *per frame* in userspace -
+/// a throughput collapse with every counter still reporting 0 drops. A name with
+/// more answers than this is refused with the name in the message.
+pub const MAX_RESOLVED_ADDRS: usize = 64;
+
+/// Reject a resolution result that is too large to compile into a filter.
+///
+/// Applied by [`Parser::resolve`] to every name lookup's result.
+fn bounded_addrs(token: &str, addrs: Vec<IpAddr>) -> Result<Vec<IpAddr>> {
+    if addrs.len() > MAX_RESOLVED_ADDRS {
+        return Err(Error::new(format!(
+            "host '{token}' resolved to {} addresses, more than the {MAX_RESOLVED_ADDRS} a \
+             filter may expand; list the addresses explicitly instead of the name",
+            addrs.len()
+        )));
+    }
+    Ok(addrs)
 }
 
 fn parse_mac(t: &str) -> Result<[u8; 6]> {
@@ -813,6 +926,141 @@ mod tests {
             got, expected,
             "host <name> must cover every resolved address"
         );
+    }
+
+    /// Offline stand-in for a name server: P2-8 and P2-9 are both about the
+    /// *number* of answers a name yields, which cannot be produced on demand by
+    /// the real resolver (and an env-dependent test silently no-ops - this box
+    /// resolves `localhost` to exactly one address).
+    struct FixedResolver(Vec<IpAddr>);
+
+    impl Resolver for FixedResolver {
+        fn lookup(&self, _host: &str) -> std::io::Result<Vec<IpAddr>> {
+            Ok(self.0.clone())
+        }
+    }
+
+    fn v4(a: u8, b: u8, c: u8, d: u8) -> IpAddr {
+        IpAddr::V4(Ipv4Addr::new(a, b, c, d))
+    }
+
+    fn nets_in(ast: &Ast) -> Vec<(IpAddr, IpAddr)> {
+        match ast {
+            Ast::Or(a, b) => {
+                let mut v = nets_in(a);
+                v.extend(nets_in(b));
+                v
+            }
+            Ast::Net { addr, mask, .. } => vec![(*addr, *mask)],
+            _ => vec![],
+        }
+    }
+
+    fn hosts_in(ast: &Ast) -> Vec<IpAddr> {
+        match ast {
+            Ast::Or(a, b) => {
+                let mut v = hosts_in(a);
+                v.extend(hosts_in(b));
+                v
+            }
+            Ast::Host { addr, .. } => vec![*addr],
+            _ => vec![],
+        }
+    }
+
+    /// AUDIT4 P2-8: P5-08 ("cover every resolved address") was applied to
+    /// `host <name>` only; `net <name>` still took `to_socket_addrs().next()`, so
+    /// every answer but the first stayed unfiltered - the loopback-amplification
+    /// hazard the output-host exclusion exists to prevent.
+    #[test]
+    fn net_name_expands_to_every_resolved_address() {
+        let addrs = vec![v4(192, 0, 2, 5), v4(198, 51, 100, 9)];
+        let ast = parse_with("net multi.example/24", &FixedResolver(addrs.clone()))
+            .expect("parse net <name>");
+        let got = nets_in(&ast);
+        assert_eq!(
+            got,
+            vec![
+                (v4(192, 0, 2, 0), v4(255, 255, 255, 0)),
+                (v4(198, 51, 100, 0), v4(255, 255, 255, 0)),
+            ],
+            "`net <name>` must OR over every answer, not just the first"
+        );
+        // The `mask` form expands too, and drops answers of the other family.
+        let mixed = vec![
+            addrs[0],
+            addrs[1],
+            IpAddr::V6(Ipv6Addr::new(0xfe80, 0, 0, 0, 0, 0, 0, 1)),
+        ];
+        let ast = parse_with(
+            "ip dst net multi.example mask 255.255.255.0",
+            &FixedResolver(mixed),
+        )
+        .expect("parse net <name> mask");
+        assert_eq!(nets_in(&ast).len(), 2, "v6 answer must be dropped: {ast:?}");
+        // Two answers in the same network collapse to one term, not two leaves.
+        let ast = parse_with(
+            "net dup.example/24",
+            &FixedResolver(vec![v4(192, 0, 2, 5), v4(192, 0, 2, 9)]),
+        )
+        .expect("parse");
+        assert_eq!(nets_in(&ast).len(), 1);
+        // Literal addresses keep working, prefix and mask form alike.
+        assert_eq!(nets_in(&parse("net 10.0.0.0/8").unwrap()).len(), 1);
+        assert!(
+            parse("net 10.0.0.0 mask localhost").is_err(),
+            "a netmask is a bit pattern, never a name"
+        );
+        assert!(parse("net fe80::1/8").is_ok());
+        assert!(parse("net 10.0.0.0/33").is_err());
+    }
+
+    /// An explicit mask names one family; if no answer matches it the filter must
+    /// fail loudly instead of silently matching nothing.
+    #[test]
+    fn net_mask_without_matching_family_is_an_error() {
+        let err = parse_with(
+            "net v6only.example mask 255.255.255.0",
+            &FixedResolver(vec![IpAddr::V6(Ipv6Addr::LOCALHOST)]),
+        )
+        .expect_err("nothing to mask");
+        assert!(
+            err.to_string().contains("v6only.example"),
+            "the error must name the token: {err}"
+        );
+    }
+
+    /// AUDIT4 P2-9: the number of answers was unbounded, so DNS *data* could grow
+    /// the program past `bpf::BPF_MAXINSNS`(4096) and silently degrade the task
+    /// into interpreting thousands of cBPF instructions per frame - a throughput
+    /// collapse with `drop == 0` and every gate green.
+    #[test]
+    fn oversized_resolution_is_refused_by_name_not_silently_expanded() {
+        let many: Vec<IpAddr> = (0..=MAX_RESOLVED_ADDRS as u32)
+            .map(|i| v4(10, (i / 256) as u8, (i / 4) as u8, (i % 4) as u8))
+            .collect();
+        assert_eq!(many.len(), MAX_RESOLVED_ADDRS + 1);
+        for expr in ["host many.example", "net many.example/24"] {
+            let err = parse_with(expr, &FixedResolver(many.clone()))
+                .expect_err(&format!("{expr} must be refused"));
+            let msg = err.to_string();
+            assert!(
+                msg.contains("many.example"),
+                "{expr}: the error must name the host: {msg}"
+            );
+            assert!(
+                msg.contains(&many.len().to_string())
+                    && msg.contains(&MAX_RESOLVED_ADDRS.to_string()),
+                "{expr}: the error must give both counts: {msg}"
+            );
+        }
+        // Exactly at the limit is accepted, and expands fully.
+        let ast = parse_with(
+            "host ok.example",
+            &FixedResolver(many[..MAX_RESOLVED_ADDRS].to_vec()),
+        )
+        .expect("at the limit");
+        assert_eq!(hosts_in(&ast).len(), MAX_RESOLVED_ADDRS);
     }
 
     #[test]

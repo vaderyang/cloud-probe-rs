@@ -66,7 +66,26 @@ Two conventions worth knowing before reading:
 
 ### Fixed
 
-- The four `parity/verify_hygiene.sh` gates could all be passed by writing the
+- `net <name>` now OR-expands **every** address the name resolves to, like
+  `host <name>` already did (P2-8). P5-08 was only half applied: `parse_net()` went
+  through `parse_addr()`, i.e. `to_socket_addrs().next()`, so a multi-homed name in
+  a `net` filter left all but the first address unfiltered - the same
+  loopback/mirror amplification the output-host exclusion is there to prevent.
+  Answers inside one network collapse to a single leaf; with an explicit
+  `mask`, answers of the other family are dropped, and if nothing is left the
+  filter is refused instead of silently matching nothing. A `mask` must now be a
+  numeric address (resolving a netmask would take "the first answer" again).
+- A host name that resolves to more than 64 addresses is **refused by name**
+  instead of compiled (P2-9). Each answer costs ~5-8 cBPF instructions, so unbounded
+  DNS data decided the size of the program: past `BPF_MAXINSNS`(4096) the kernel
+  refuses the program and the task degrades to interpreting thousands of
+  instructions per frame - a throughput collapse with `drop == 0` and every gate
+  green. The userspace fallback now also logs one stable, alertable line
+  (`bpf_userspace_fallback insns=N limit=4096 kernel=BPF_MAXINSNS`) because no
+  published counter moves when it happens. Name resolution in the parser went
+  through a new `Resolver` seam (`parse_with`), which is what makes both bounds
+  testable without a name server.
+ gates could all be passed by writing the
   violation differently instead of not writing it (P2-3): test code meant
   "everything after the first `#[cfg(test)]` in the file", P5-15 matched
   `as (i32|u16|u8|i16|usize)` in one file, fuzz targets were read out of the

@@ -284,6 +284,9 @@ M4 的问题大多不是"移植错了"，而是"移植得比原实现更宽松�
   且受 `net.core.optmem_max` 限制（超限返回 `ENOMEM`/`EINVAL`）。挂载失败或程序过长时，
   capturer **回退到用户态过滤**（用同一编译结果在收到帧后判定，丢弃不匹配帧），与 libpcap 一致，
   且用户态过滤在 VLAN 标签重插**之前**执行，保持与内核过滤相同的匹配语义。
+  该回退对所有已发布计数器是**不可见的**（`drop_packets` 仍为 0，只是每帧多跑 N 条指令），
+  因此回退时打印带稳定告警字段的一行 `bpf_userspace_fallback insns=N limit=4096 kernel=BPF_MAXINSNS`
+  （AUDIT4 P2-9：需要有“每包指令数”可告警，而不是静默退化）。
 
 ### pcap 文件读取（AUDIT4 P5-20）
 
@@ -321,8 +324,14 @@ release profile 用 `panic = "abort"`：**panic 是致命事件，不是可恢�
   `ip`/`ip6`/`arp`/`rarp`/`tcp`/`udp`/`icmp`/`icmp6`；`ip proto N`/`ip6 proto N`；
   `and`/`or`/`not`/括号。
 * **语义对齐 tcpdump**：IPv6 分片头 `0x2c`、IPv4 分片偏移、bare `port` 含 SCTP、`net` 掩码；
-  `host <name>` 解析出多个 A/AAAA 时按 **OR 展开全部地址**（不以首个为准）。
+  `host <name>` **与 `net <name>`** 解析出多个 A/AAAA 时按 **OR 展开全部地址**（不以首个为准；
+  AUDIT4 P2-8 补齐 `net`，此前 P5-08 只做了 `host`，多宿主主机名仍会漏排除）。
+  选择“展开全部”而不是“拒绝主机名”的理由：`net <name>` 现在可用，拒绝会让今天能工作的过滤器
+  变成 task 创建失败；展开规模由下面的解析上限约束。同一网络内的多个答案去重为一个叶子。
 * **限制**：表达式 ≤ 8 KiB、嵌套 ≤ 256、节点 ≤ 4096；超限**明确报错**（不会栈溢出）。
+  单个主机名的**解析结果数量 ≤ 64**（`MAX_RESOLVED_ADDRS`）：超过则**报错并给出主机名与两个数量**，
+  而不是静默生成一个超出内核 4096 条指令上限、只能在用户态逐帧解释的程序（AUDIT4 P2-9）。
+* **`net ... mask` 的掩码必须是数字地址**，不做主机名解析（掩码是位模式，解析出的“第一个答案”必然语义错误）。
 * **长跳转**：条件跳转仅 255 指令距离，超出时由 `JA` 跳转中继（jump-around，32 位 k）
   自动处理，因此 `not host` 长链 / 多项 `port`/`host` 或链不再受此限制。
 * **不支持（明确报错）**：`vlan`/`mpls`/`pppoes`、`greater`/`less`/`len`、`protochain`、算术、

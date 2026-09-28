@@ -22,7 +22,7 @@ use std::io;
 
 use crate::error::Result;
 
-pub use parser::{parse, Ast, Dir, PortSpec, Proto, L4};
+pub use parser::{parse, parse_with, Ast, Dir, DnsResolver, NetSpec, Proto, Resolver, L4};
 
 /// One classic-BPF instruction (matches `struct sock_filter`).
 #[repr(C)]

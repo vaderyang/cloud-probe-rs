@@ -186,7 +186,9 @@ WP2 与 WP3 可并行；M1 必须最先（唯一可能"完全无数据"的缺陷
 
 1. **BPF 表达式现场分布**（AUDIT2 早已要求的预研）：决定 P5-01/P5-06 是"发布阻塞"还是"文档说明即可"。仓库内无该调研记录，需业务数据。
 2. **混杂模式（promisc）**：需确认原 C 是否有意设置；影响采集面等价性（三篇均未定论）。
-3. **`af_packet_live` 在 root 下是否真通过**：需在带 `CAP_NET_RAW` 环境实测并在 CI 固化。
+3. **`af_packet_live` 在 root 下是否真通过**：✅ 已闭环（M6/P2-2）。本机 root 实测 4 个 live 测试全部执行并通过；
+   测试在非特权时改为 **panic 而不是 skip**（此前 `--ignored` 在非 root 下打印 `ok. 4 passed` 而什么都没做），
+   CI `live-capture` job 断言"`--ignored --list` 声明的条数 == 实际 executed 条数"。
 4. **libpcap TPACKET ring 相对 `SO_RCVBUF` 的真实容量优势**：核心结论（256 MiB→8 MiB）已实测；"ring 可用 MB 级"需高负载实测。
 5. **VLAN/H3 的现场影响**：需在 trunk/镜像口实测确认严重度。
 6. **实时抓取面的“同流不同包数”（A1，结论已修正并修复，P1）**：
@@ -446,3 +448,25 @@ WP2 与 WP3 可并行；M1 必须最先（唯一可能"完全无数据"的缺陷
 - ✅ **M3 引入的回归（DNS 阻塞抓包线程）**：`zmtp` 重连时的 DNS 重解析改为后台线程
   （`BackgroundResolver`），`resolve()` 立即返回缓存并异步刷新；首次解析在任务装配阶段完成。
   新增回归测试"worker 阻塞时 `resolve()` 不阻塞调用方"。
+
+
+## 8. M6 — 两篇独立审查（GLM-5.3 / qwen3.8）P2 批次整改
+
+审查基线 `b60c8a6`（其后的 `3755f95`/`628b5bc` 已处理 P1 loopback 重复采集）。本节按优先级逐条登记，
+每条都有"修复前会失败"的回归测试与红→绿实测输出。
+
+| # | 缺陷（审查编号） | 修复 | 红→绿证据 |
+|---|---|---|---|
+| P2-7 | VLAN 重插突破 snaplen：`caplen` 可达 `snaplen+4`，违反"每包 ≤ snaplen"契约（同条件 tcpdump 给 `caplen==snaplen`） | `insert_vlan()` 改为 `Some((caplen+4).min(snaplen))`（tag 计入 snaplen，被推过上限的尾部字节不报告），返回 `Option` 让调用方知道"是否真的重插"，`orig_len` 仍 +4 | 单测 `insert_vlan_truncated_frame_stays_within_snaplen`：`caplen 20 broke the 'never more than snaplen (16)' contract` → ok；live `live_capture_reinserts_vlan_on_veth` 增加 `snaplen:16` 阶段：`frame 0: caplen 20 exceeds the configured snaplen 16 (P2-7)` → ok（真 veth 实测） |
+| P2-3 | `verify_hygiene.sh` 四条门禁全部可被**等价改写**绕过（注入后 4 条仍 ✅、EXIT=0） | ① 逐块判定测试代码 + 新增"测试块之后不得再有生产条目"门禁（`verify_liveness.sh` 同步）；② 覆盖 `as libc::c_int`/`as u32`/`as _` 全部写法并把范围扩到所有反序列化文件 + 新增"读 serde_json 数字的文件不得用 `as` 窄化"整文件规则；③ `[[bin]]` 改用 `cargo metadata --no-deps` 且双向校验；④ P5-22 改成"正向断言"（文档声称 fsync ⇒ flush() 必须真的 `sync_all`） | 新增 `parity/verify_hygiene_reverse.sh`（7 个等价改写注入，全部要求变红）。同一份注入树对照：旧门禁 4 ✅/EXIT=0，新门禁 6 ❌/EXIT=1。副产物：抓到并修复 `cripid` 的 `pid as i32`（4294967296→PID 0） |
+| P2-2 | `af_packet_live` 非 root 时打印 `ok. 4 passed`（CI 特权 job 可全绿零执行） | `!privileged()` → `assert_privileged()` **panic**；CI 断言 `--ignored --list` 条数（≥4）== `test result: ok. N passed; 0 failed` | uid=1000：修复前 `ok. 4 passed`（exit 0）→ 修复后 `FAILED. 0 passed; 4 failed`（exit 101）；root：`ok. 4 passed`（exit 0） |
+| P2-8 | `net <name>` 仍只取首个解析地址（P5-08 只做了一半） | 选定"**全部地址 OR 展开**"（非拒绝主机名）：`net_expr()` + 纯函数 `net_masks()`（同网络去重；`mask` 形式只保留同族地址，全被滤掉则报错）；`mask` 不再做主机名解析。理由：拒绝会把现在能工作的过滤器变成 task 失败，而展开规模被 P2-9 的上限约束 | `net_name_expands_to_every_resolved_address`：`left: [(192.0.2.0, 255.255.255.0)] right: [192.0.2.0/24, 198.51.100.0/24]` → ok；`net_mask_without_matching_family_is_an_error` |
+| P2-9 | 解析结果数量无上限 → DNS 数据可把程序推过 4096 指令而**静默退化**为用户态逐帧解释 | 新增 `MAX_RESOLVED_ADDRS=64`（越界报错含主机名 + 两个数量）；用户态回退打印可告警的 `bpf_userspace_fallback insns=N limit=4096 kernel=BPF_MAXINSNS`；解析改走可注入的 `Resolver` seam（`parse_with`），使上限与 OR 展开可离线测试 | `oversized_resolution_is_refused_by_name_not_silently_expand`（去掉上限即失败）；`userspace_fallback_warning_carries_the_instruction_count` |
+### 低优先项（同批完成）
+
+- P3 `config.rs`：`zmq.hwm` 的重复校验死码 → 删除（保留 `i32_in` 单一入口）。
+- P3 `af_packet.rs`：`parse_control()` 手写 cmsg 遍历补上 `CMSG_OK` 等价的**数据上界**校验（越界读防护）。
+- P3 `.github/workflows/ci.yml`：MSRV job 改为 `cargo build --workspace --all-targets --locked`（覆盖 dev-deps 与测试代码）。
+- P3 `fuzz.sh`/`parity/difffuzz.sh`：入口加 `cargo metadata --locked` 断言两份 lockfile 不漂移；`cargo install cargo-fuzz --version` 固定版本。
+- P2-4/P2-5 `bench/live_bench.py`：统计不可用输出 `"unavailable"` 并保持非零退出；`cap==0 && sent>0` 显式 `!! captured NOTHING` + exit 2；灼流目标可参数化（`FLOOD_DST`/veth 用 AF_PACKET 注帧），使"保真度对拍请用 veth"在脚本里真的做得到。
+

@@ -259,6 +259,22 @@ fn configure_socket(fd: RawFd, buffer_size: i32, interface: &str) -> bool {
     false
 }
 
+/// The line logged when a filter program has to run here instead of in the kernel.
+///
+/// One stable, greppable token with the instruction count, because this fallback
+/// is invisible to every counter the worker publishes: `drop_packets` stays 0 and
+/// the task keeps capturing while the interpreter walks `insns` instructions per
+/// frame (AUDIT4 P2-9 - a DNS name with many A/AAAA answers, a long config-supplied
+/// filter or a CPM task update can all get here). Operators need something to alert
+/// on, so the count is in the message twice: once as a field, once as prose.
+fn userspace_fallback_warning(insns: usize) -> String {
+    format!(
+        "bpf_userspace_fallback insns={insns} limit={} kernel=BPF_MAXINSNS: filtering in \
+         userspace, {insns} cBPF instructions are interpreted for every frame",
+        bpf::BPF_MAXINSNS
+    )
+}
+
 /// Bind the socket to `interface` with `ETH_P_ALL`.
 fn bind_socket(fd: RawFd, interface: &str) -> Result<()> {
     let ifindex = i32::try_from(interface_index(interface)?).unwrap_or(i32::MAX);
@@ -472,19 +488,15 @@ impl AfPacketCapturer {
                     Ok(()) => None,
                     Err(e) => {
                         crate::log_warn!(
-                            "attach bpf filter failed ({e}); filtering {} instructions in userspace",
-                            p.insns.len()
+                            "attach bpf filter failed ({e}); {}",
+                            userspace_fallback_warning(p.insns.len())
                         );
                         Some(p)
                     }
                 }
             }
             Some(p) => {
-                crate::log_warn!(
-                    "bpf program has {} instructions (kernel limit {}); filtering in userspace",
-                    p.insns.len(),
-                    bpf::BPF_MAXINSNS
-                );
+                crate::log_warn!("{}", userspace_fallback_warning(p.insns.len()));
                 Some(p)
             }
         };
@@ -708,6 +720,24 @@ mod tests {
         assert_eq!(c.update(1002, Some(5)), 5);
         assert_eq!(c.update(1004, Some(0)), 0);
         assert_eq!(c.update(1006, Some(9)), 9);
+    }
+
+    /// AUDIT4 P2-9: the userspace filter fallback is invisible to every published
+    /// counter (`drop_packets` stays 0 while the task slows down), so the only
+    /// thing an operator can alert on is this line - it must carry the token and
+    /// the per-frame instruction count.
+    #[test]
+    fn userspace_fallback_warning_carries_the_instruction_count() {
+        let w = userspace_fallback_warning(4531);
+        assert!(
+            w.contains("bpf_userspace_fallback"),
+            "must keep the stable alert token: {w}"
+        );
+        assert!(w.contains("insns=4531"), "must report the count: {w}");
+        assert!(
+            w.contains(&format!("limit={}", bpf::BPF_MAXINSNS)),
+            "must report the kernel limit: {w}"
+        );
     }
 
     #[test]
