@@ -10,10 +10,46 @@
 #
 # Cheap, deterministic guard: one line per interface that must keep a *production*
 # call site (test-only callers do not count).
+#
+# AUDIT4 P2-3 applies here too: "test code" used to mean "everything after the
+# first `#[cfg(test)]` the file contains", so a single empty `#[cfg(test)] mod x {}`
+# parked at the top of a file turned its whole production body into test code and
+# the check went green with zero real callers. Test code is delimited per block now.
 set -uo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
 fail=0
+
+# --- test-code delimiting ----------------------------------------------------
+# A *top-level* (column 0) `#[cfg(...test...)]` attribute or `mod *test*`
+# declaration opens a test block; the first column-0 `}` closes it. rustfmt keeps
+# items at column 0, so that brace is unambiguous, and a mis-parse (a raw string
+# containing a column-0 `}`) ends the block *early*, which makes this check look
+# at more code, never less.
+declare -A TBLOCKS
+
+in_test_block() {
+    local file="$1" lineno="$2" s e blocks
+    if [ -z "${TBLOCKS["$file"]+set}" ]; then
+        TBLOCKS["$file"]=$(awk '
+            !inblk && /^#\[cfg\(.*test.*\)\][[:space:]]*$/ { start = NR; inblk = 1; next }
+            !inblk && /^(pub[[:space:]]+)?mod[[:space:]]+[A-Za-z0-9_]*test[A-Za-z0-9_]*[[:space:]]*\{/ {
+                start = NR; inblk = 1; next
+            }
+            inblk && /^\}[[:space:]]*$/ { print start, NR; inblk = 0 }
+            END { if (inblk) print start, NR }
+        ' "$file")
+    fi
+    blocks=${TBLOCKS["$file"]}
+    [ -n "$blocks" ] || return 1
+    while read -r s e; do
+        [ -n "${s:-}" ] || continue
+        if [ "$lineno" -ge "$s" ] && [ "$lineno" -le "$e" ]; then
+            return 0
+        fi
+    done <<<"$blocks"
+    return 1
+}
 
 # check <label> <file-or-directory> <call-site regex>
 #
@@ -22,18 +58,13 @@ fail=0
 check() {
     local label="$1" scope="$2" pattern="$3" hits n
     hits=$(grep -rnH --include='*.rs' -E "$pattern" "$scope" \
-        | grep -Ev '/tests/\.rs|tests/[a-z_]+\.rs|^\S+:[0-9]+: *#\[cfg\(test\)\]' || true)
-    # Drop matches that live after a `mod tests` declaration in the same file.
+        | grep -Ev '(^|/)tests/[a-z_0-9]+\.rs' || true)
     local filtered=""
     while IFS= read -r line; do
         [ -n "$line" ] || continue
         local file="${line%%:*}"
         local lineno="${line#*:}"; lineno="${lineno%%:*}"
-        local firsttest
-        firsttest=$(grep -n '^\s*\(pub \)\?mod tests\b\|^\s*#\[cfg(test)\]' "$file" | head -1 | cut -d: -f1 || true)
-        if [ -n "${firsttest:-}" ] && [ "$lineno" -ge "$firsttest" ]; then
-            continue
-        fi
+        in_test_block "$file" "$lineno" && continue
         filtered+="$line"$'\n'
     done <<< "$hits"
     n=$(printf '%s' "$filtered" | grep -c . || true)

@@ -150,8 +150,10 @@ parity/run.sh 5000 42     # packet_split: C vs Rust
 | **协议：GRE/VXLAN/ZMQ batch 线格式** | C 真实输出代码（`--wrap=sendto/zmq_send` 拦截）vs Rust | 8 种子 × 150 用例（每用例最多 400 包，含分片/翻页/flush 边界/VLAN/MPLS） | ✅ 逐字节一致 |
 | **协议：Unix JSON-RPC** | 真实 C `unix-manager.c` 服务器 vs Rust 服务器，真实 socket | 17 个用例（握手/命令/错误/超时） | ✅ 一致（JSON 归一化后） |
 
-复现：`parity/all.sh`（9 项，含 `verify_liveness.sh`（§3.1）与 `verify_hygiene.sh`（§3/§3.2/§3.4）两个防复发
-门禁；也可单独跑 `run.sh`、`verify_config.sh`、`verify_req.sh`、`fuzz_proto.sh`、`fuzz_rpc.sh`）。
+复现：`parity/all.sh`（10 项，含 `verify_liveness.sh`（§3.1）、`verify_hygiene.sh`（§3/§3.2/§3.4）与
+`verify_hygiene_reverse.sh`（P2-3：把四条防复发门禁的**等价改写违例**重新注入一份临时副本，要求它们
+仍然变红）三个防复发门禁；也可单独跑 `run.sh`、`verify_config.sh`、`verify_req.sh`、`fuzz_proto.sh`、
+`fuzz_rpc.sh`）。
 
 ### 2.1 协议 fuzz 方法
 

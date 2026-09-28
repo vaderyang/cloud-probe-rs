@@ -30,7 +30,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 cargo deny check
 cargo deny --manifest-path crates/cpworker/fuzz/Cargo.toml check   # second lockfile
-./parity/all.sh          # 9 differential + anti-regression harnesses
+./parity/all.sh          # 10 differential + anti-regression harnesses
 ./fuzz.sh --check        # 5s smoke over every fuzz target (needs nightly)
 ```
 
@@ -92,10 +92,16 @@ rather than only fixing the instance:
 | Gate | Class it catches | Born from |
 |---|---|---|
 | `parity/verify_liveness.sh` | implemented but never *called* (test-only callers do not count) | P5-04, `Output::destroy()` |
-| `parity/verify_hygiene.sh` | truncating casts in config, panic constructors on library paths, docs overstating behaviour, fuzz targets that are declared but never run | P5-15/20/22/23 |
+| `parity/verify_hygiene.sh` | truncating casts in the deserialising layer (every spelling), panic constructors on library paths, docs overstating behaviour, fuzz targets that are declared but never run | P5-15/20/22/23 |
+| `parity/verify_hygiene_reverse.sh` | a gate that can be passed by *rewriting* the violation (AUDIT4 P2-3: all four hygiene gates were ✅ against an injected copy) | P2-3 |
 
 Add a line to one of those two scripts (and keep its reverse check honest: re-insert
-the violation, confirm the line goes ❌ and the script exits 1).
+the violation, confirm the line goes ❌ and the script exits 1). `verify_hygiene`'s
+reverse checks live in `parity/verify_hygiene_reverse.sh`, and they inject the
+violation *in a different spelling from the one the gate was written against* - the
+original four reverse checks re-ran the literal defect and still passed when it was
+written as `as libc::c_int`, as a `[[bin]]` with `path` before `name`, or as a doc
+line quoting the exemption keywords (P2-3).
 
 ## 5. Differential parity (`parity/`)
 

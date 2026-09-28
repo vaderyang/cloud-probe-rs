@@ -34,11 +34,19 @@ const DEFAULT_RUNTIME_ENDPOINTS: &[&str] = &[
 fn parse_pid_from_info(info: &HashMap<String, String>) -> Result<i32> {
     for v in info.values() {
         if let Ok(ci) = serde_json::from_str::<serde_json::Value>(v) {
-            if let Some(pid) = ci.get("pid").and_then(|p| p.as_i64()) {
-                if pid > 0 {
-                    return Ok(pid as i32);
-                }
-            }
+            // `i32::try_from`, never `as i32` (AUDIT4 P5-15/P2-3 ②): `pid` arrives
+            // as a JSON `i64`, and `4294967296 as i32 == 0`, `2147483653 as i32 ==
+            // -2147483643` - a truncated cast hands the caller a *plausible*
+            // nonsense PID (0 or negative), which is worse than no answer. A value
+            // that cannot be an `i32` PID is simply not a PID we found.
+            let pid = ci
+                .get("pid")
+                .and_then(|p| p.as_i64())
+                .and_then(|p| i32::try_from(p).ok());
+            let Some(pid) = pid.filter(|p| *p > 0) else {
+                continue;
+            };
+            return Ok(pid);
         }
     }
     bail!("no pid found in container info")
@@ -144,5 +152,44 @@ async fn main() {
             eprintln!("Failed to get container info: {e:#}");
             std::process::exit(1);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn info_with(pid: &str) -> HashMap<String, String> {
+        let mut m = HashMap::new();
+        m.insert(
+            "info".to_string(),
+            format!(r#"{{"pid":{pid},"runtimeSpec":{{}}}}"#),
+        );
+        m
+    }
+
+    #[test]
+    fn pid_is_taken_from_the_json_number_when_it_fits() {
+        assert_eq!(parse_pid_from_info(&info_with("4242")).unwrap(), 4242);
+    }
+
+    /// Regression for the `pid as i32` narrowing: a JSON number that does not fit
+    /// an `i32` used to come back as a *different, plausible-looking* PID
+    /// (`4294967296 as i32 == 0`, `2147483653 as i32 == -2147483643`), and the
+    /// caller would then signal/read `/proc/<pid>` for a process that is not the
+    /// container's.
+    #[test]
+    fn out_of_range_pid_is_an_error_not_a_truncated_pid() {
+        for pid in ["4294967296", "2147483653", "9223372036854775807"] {
+            let got = parse_pid_from_info(&info_with(pid));
+            assert!(
+                got.is_err(),
+                "pid {pid} must not be reported as {:?} (truncating cast)",
+                got.ok()
+            );
+        }
+        // A zero / negative "pid" is not a pid either (as it was before).
+        assert!(parse_pid_from_info(&info_with("0")).is_err());
+        assert!(parse_pid_from_info(&info_with("-1")).is_err());
     }
 }

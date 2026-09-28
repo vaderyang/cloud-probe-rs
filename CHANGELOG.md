@@ -66,8 +66,26 @@ Two conventions worth knowing before reading:
 
 ### Fixed
 
-### Fixed
-
+- The four `parity/verify_hygiene.sh` gates could all be passed by writing the
+  violation differently instead of not writing it (P2-3): test code meant
+  "everything after the first `#[cfg(test)]` in the file", P5-15 matched
+  `as (i32|u16|u8|i16|usize)` in one file, fuzz targets were read out of the
+  manifest with `grep -A1 '^\[\[bin\]\]'`, and the P5-22 doc check exempted lines
+  containing keywords a violator can type. Test code is now delimited per block,
+  the cast list covers every integer/float/`libc::c_*`/`as _` spelling across all
+  deserialising files (plus a second rule for JSON numbers narrowed anywhere in
+  the workspace), the target list comes from `cargo metadata` and is checked in
+  both directions, and P5-22 became an implication against the implementation
+  (claim an fsync → `flush()` must call `sync_all`).
+  `parity/verify_hygiene_reverse.sh` is the new gate on the gates: it re-injects
+  each violation in its rewritten form (7 cases) into a temporary copy and fails
+  unless the corresponding check goes ❌. `verify_liveness.sh` shares the per-block
+  test-code logic.
+- `cripid` cast a CRI `"pid"` with `pid as i32`: `4294967296` became PID `0` and
+  `2147483653` became `-2147483643`, a plausible-looking PID for some other (or
+  no) process. It now uses `i32::try_from` and reports "no pid found" - found by
+  the broadened P5-15 rule, pinned by
+  `out_of_range_pid_is_an_error_not_a_truncated_pid`.
 - A reinserted 802.1Q tag now counts **inside** `snaplen`, so a truncated VLAN frame
   keeps reporting `caplen == snaplen` instead of `snaplen + 4` (P2-7). The old
   behaviour broke the per-packet contract the configuration makes (`slice`, ZMQ batch

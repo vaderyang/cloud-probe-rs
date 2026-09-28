@@ -50,6 +50,10 @@ jobs:
       # on library paths (release uses panic="abort"), docs that overstate what
       # they do, fuzz targets that exist but are never run.
       - run: bash parity/verify_hygiene.sh
+      # AUDIT4 P2-3: re-inject each of those four violations in a *rewritten* form
+      # (as libc::c_int, a [[bin]] with path before name, a doc line quoting the
+      # old exemption keywords) and require the gates above to go red.
+      - run: bash parity/verify_hygiene_reverse.sh
 
   msrv:
     name: MSRV 1.88 build
