@@ -233,3 +233,87 @@ fn regression_corrupt_dup_decode_accounting() {
     let r = run(cfg);
     r.check();
 }
+
+/// DST for the pcap file reader: a clean large file whose record headers
+/// straddle the reader's 8 KiB `BufReader` boundary must read back exactly —
+/// no position drift. This is the regression test for the `read()` vs
+/// `read_exact()` bug found by the P3 audit (AUDIT4).
+#[test]
+fn dst_pcap_reader_clean_file() {
+    for seed in seed_filter(1, 30) {
+        let mut rng = cpsim::Rng::new(seed);
+        let gen = cpsim::pcap_source::generate(&mut rng, 1000);
+        let out = cpsim::pcap_source::read_all(&gen).expect("clean file must read fully");
+        assert_eq!(out.records, gen.sizes.len(), "seed {seed}: incomplete read");
+    }
+}
+
+/// Truncated files must stop cleanly: at most the records that fit, no panic,
+/// and no drift into garbage records.
+#[test]
+fn dst_pcap_reader_truncated() {
+    for seed in seed_filter(1, 30) {
+        let mut rng = cpsim::Rng::new(seed);
+        let mut gen = cpsim::pcap_source::generate(&mut rng, 1000);
+        // Keep the global header plus a seeded prefix of the record area.
+        let keep = 24 + rng.below((gen.bytes.len() - 24) as u64) as usize;
+        gen.bytes.truncate(keep);
+        let out = cpsim::pcap_source::read_all(&gen).expect("truncated file must stop cleanly");
+        assert!(
+            out.records <= gen.sizes.len(),
+            "seed {seed}: emitted more records than the schedule"
+        );
+    }
+}
+
+/// A record header corrupted to an oversized `incl_len` must make the reader
+/// stop cleanly exactly at that record — no drift, no garbage records.
+#[test]
+fn dst_pcap_reader_corrupted_header() {
+    for seed in seed_filter(1, 30) {
+        let mut rng = cpsim::Rng::new(seed);
+        let mut gen = cpsim::pcap_source::generate(&mut rng, 1000);
+        let k = rng.below(gen.sizes.len() as u64) as usize;
+        gen.corrupt_oversized(k);
+        let out = cpsim::pcap_source::read_all(&gen).expect("clean prefix must read fully");
+        assert_eq!(
+            out.records, k,
+            "seed {seed}: reader must stop exactly at the corrupted record"
+        );
+    }
+}
+
+/// The pcap reader and the ZMTP client state machine must be deterministic:
+/// the same seed produces the same trace digest.
+#[test]
+fn dst_pcap_and_zmtp_deterministic() {
+    for seed in seed_filter(1, 30) {
+        let mut rng = cpsim::Rng::new(seed);
+        let gen = cpsim::pcap_source::generate(&mut rng, 500);
+        let a = cpsim::pcap_source::read_all(&gen).expect("clean file must read fully");
+        let b = cpsim::pcap_source::read_all(&gen).expect("clean file must read fully");
+        assert_eq!(
+            a.digest, b.digest,
+            "seed {seed}: pcap read not deterministic"
+        );
+
+        let za = cpsim::zmtp_driver::run(seed);
+        let zb = cpsim::zmtp_driver::run(seed);
+        assert_eq!(
+            za.digest(),
+            zb.digest(),
+            "seed {seed}: zmtp not deterministic"
+        );
+        assert!(za.events > 0);
+    }
+}
+
+/// DST for the ZMTP 3.x PUSH client state machine: scripted faults (write
+/// failures, EOF, corrupt greeting, write budget) must never panic, never
+/// exceed the high-water mark and never corrupt the wire stream.
+#[test]
+fn dst_zmtp_client_state_machine() {
+    for seed in seed_filter(1, 40) {
+        cpsim::zmtp_driver::run(seed);
+    }
+}

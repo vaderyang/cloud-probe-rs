@@ -18,7 +18,9 @@
 pub mod chaos;
 pub mod collector;
 pub mod packet_gen;
+pub mod pcap_source;
 pub mod probe;
+pub mod zmtp_driver;
 
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;

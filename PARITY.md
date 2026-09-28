@@ -65,6 +65,14 @@
 可注入故障（丢包/重复/乱序/位翻转/延迟），复用 cpworker 真实封装、限速、分片代码，
 collector 解码并对账。同一 seed 跨进程 trace 摘要一致，可精确复现失败。
 
+P3 之后新增两个 DST 驱动（回应 AUDIT4 指出的覆盖缺口）：
+
+* `pcap_source`：以可变大小的确定性 record 序列驱动真实 `PcapReader`（8 KiB `BufReader`
+  边界跨界），逐条验证 ts/caplen/payload；并覆盖截断与 oversized-incl 的干净停止。
+  回归：`read()` vs `read_exact()` 位置漂移 bug 即由此路径暴露。
+* `zmtp_driver`：以种子化的脚本 peer（短写/EAGAIN/EOF/畸形 greeting/写预算）驱动真实
+  `ZmtpPush` 状态机，不变量：队列不超 HWM、wire 必须为 greeting + 整帧（单 FIFO）。
+
 * 测试：`cargo test -p cpsim --test dst`；复现某个 seed：`DST_SEED=7 cargo test -p cpsim --test dst`
 * trace：`cargo run -p cpsim --example trace -- 7 zmq harsh`
 * 详解见 `crates/sim/README.md`
