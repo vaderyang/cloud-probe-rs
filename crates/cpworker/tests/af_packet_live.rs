@@ -293,3 +293,73 @@ fn live_capture_falls_back_to_userspace_filtering() {
         assert_eq!(u16::from_be_bytes([pkt[36], pkt[37]]), PORT);
     }
 }
+
+/// On loopback the kernel taps every datagram twice (transmitted +
+/// received); libpcap/tcpdump deliver only the received copy. The capturer must
+/// match that, i.e. ~1 frame per datagram, not ~2.
+#[test]
+#[ignore = "requires CAP_NET_RAW (run with sudo) on lo"]
+fn live_capture_loopback_does_not_duplicate_frames() {
+    if !privileged() {
+        eprintln!("skipping: not root / no CAP_NET_RAW");
+        return;
+    }
+    const PORT: u16 = 41241;
+    const N: usize = 10_000;
+
+    let json = format!(
+        r#"{{
+            "log_level": "INFO",
+            "execution_model": "rtc",
+            "tasks": [{{
+                "capturer": {{ "type": "libpcap", "libpcap": {{
+                    "interface": "lo",
+                    "bpf": "udp and dst port {PORT}",
+                    "timeout_ms": 0
+                }} }},
+                "outputs": []
+            }}]
+        }}"#
+    );
+    let cfg = Config::parse_str(&json).expect("parse config");
+    let tasks = cfg.tasks.clone();
+    let stats = Arc::new(CaptureStats::default());
+    let mut cap = new_capturer(&tasks, &tasks[0], stats.clone()).expect("capturer");
+
+    // Bind a receiver so the datagrams are consumed (no ICMP noise) and send N.
+    let sock = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
+    let dst = format!("127.0.0.1:{PORT}");
+    let rx = std::net::UdpSocket::bind(("127.0.0.1", PORT)).unwrap();
+    rx.set_read_timeout(Some(std::time::Duration::from_millis(50)))
+        .unwrap();
+    let drainer = std::thread::spawn(move || {
+        let mut buf = [0u8; 2048];
+        while rx.recv_from(&mut buf).is_ok() {}
+    });
+
+    let sender = {
+        let sock = sock.try_clone().unwrap();
+        std::thread::spawn(move || {
+            for _ in 0..N {
+                let _ = sock.send_to(b"x", &dst);
+            }
+        })
+    };
+
+    let mut sink = Collect::default();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(6);
+    while std::time::Instant::now() < deadline {
+        cap.capture_once(&mut sink);
+    }
+    sender.join().unwrap();
+    drop(sock);
+    let _ = drainer.join();
+
+    let got = sink.pkts.len();
+    // The duplicate bug would deliver ~2N; allow generous loss but reject it.
+    assert!(
+        got <= N + N / 4,
+        "loopback outgoing frames not suppressed: captured {got} for {N} datagrams (~2x expected without the fix)"
+    );
+    assert!(got >= N / 4, "captured too few frames: {got} for {N}");
+}

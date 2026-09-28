@@ -25,6 +25,11 @@ use crate::stats::CaptureStats;
 
 const DROP_STAT_DUR_SEC: i64 = 2;
 const ETH_P_ALL: u16 = 0x0003;
+/// `SOL_PACKET` option (Linux >= 4.17) that makes the kernel drop outgoing
+/// (`PACKET_OUTGOING`) copies.
+const PACKET_IGNORE_OUTGOING: i32 = 23;
+/// `sll_pkttype` value of a locally transmitted copy.
+const PACKET_OUTGOING: u8 = 4;
 const DEFAULT_VLAN_TPID: u16 = 0x8100;
 /// Ethernet header (`dst` + `src` + ethertype) length; VLAN is inserted after
 /// the 12 address bytes.
@@ -49,6 +54,12 @@ struct TpacketAuxdata {
     tp_vlan_tpid: u16,
 }
 
+/// Control-message buffer aligned for `struct cmsghdr`: the kernel fills it with
+/// `cmsghdr`s whose length/level/type fields are read through a reference, which
+/// must be aligned (a plain `[u8; N]` on the stack is only 1-byte aligned).
+#[repr(C, align(8))]
+struct CmsgBuf([u8; 256]);
+
 #[derive(Clone, Copy)]
 struct VlanTag {
     tci: u16,
@@ -62,6 +73,8 @@ struct RecvMeta {
     len: u32,
     /// A stripped 802.1Q tag to reinsert after filtering.
     vlan: Option<VlanTag>,
+    /// `sockaddr_ll.sll_pkttype` (`PACKET_OUTGOING` for a transmitted copy).
+    pkt_type: u8,
 }
 
 /// Accumulates `PACKET_STATISTICS` drops on the 2-second cadence.
@@ -190,10 +203,26 @@ fn create_socket() -> Result<OwnedFd> {
     Ok(unsafe { OwnedFd::from_raw_fd(raw) })
 }
 
-/// Configure the socket receive buffer, timestamps and VLAN auxdata. The BPF
-/// filter and the bind happen separately so the filter is installed before the
-/// bind (no unfiltered startup window).
-fn configure_socket(fd: RawFd, buffer_size: i32) {
+/// Whether `name` is a loopback interface (`IFF_LOOPBACK`).
+fn interface_is_loopback(name: &str) -> bool {
+    use nix::net::if_::InterfaceFlags;
+    if let Ok(addrs) = nix::ifaddrs::getifaddrs() {
+        for ifa in addrs {
+            if ifa.interface_name == name {
+                return ifa.flags.contains(InterfaceFlags::IFF_LOOPBACK);
+            }
+        }
+    }
+    false
+}
+
+/// Configure the socket receive buffer, timestamps, VLAN auxdata and the
+/// loopback outgoing-frame policy. The BPF filter and the bind happen separately
+/// so the filter is installed before the bind (no unfiltered startup window).
+///
+/// Returns `true` when outgoing (`PACKET_OUTGOING`) frames must still be dropped
+/// in userspace (loopback with no `PACKET_IGNORE_OUTGOING` support).
+fn configure_socket(fd: RawFd, buffer_size: i32, interface: &str) -> bool {
     set_rcvbuf(fd, buffer_size);
     if let Err(e) = setsockopt_i32(fd, libc::SOL_SOCKET, libc::SO_TIMESTAMPNS, 1) {
         crate::log_warn!(
@@ -203,6 +232,31 @@ fn configure_socket(fd: RawFd, buffer_size: i32) {
     if let Err(e) = setsockopt_i32(fd, libc::SOL_PACKET, libc::PACKET_AUXDATA, 1) {
         crate::log_warn!("enable PACKET_AUXDATA failed: {e}; VLAN tags may be missing");
     }
+
+    // On loopback the kernel delivers each frame twice: once as the transmitted
+    // copy (`PACKET_OUTGOING`) and once as the received copy (`PACKET_HOST`).
+    // libpcap/tcpdump deliver only the received copy there (measured: 1x), while
+    // a plain `recvmsg` socket sees 2x, so request the kernel to drop outgoing
+    // copies. On any other interface the outgoing copy is *not* a duplicate (it
+    // is the only copy on the sending side and libpcap delivers it too), so it is
+    // left intact.
+    if interface_is_loopback(interface) {
+        match setsockopt_i32(fd, libc::SOL_PACKET, PACKET_IGNORE_OUTGOING, 1) {
+            Ok(()) => {
+                crate::log_info!(
+                    "loopback interface: dropping duplicate outgoing frames (PACKET_IGNORE_OUTGOING)"
+                );
+                return false;
+            }
+            Err(e) => {
+                crate::log_warn!(
+                    "PACKET_IGNORE_OUTGOING unavailable ({e}); dropping outgoing frames in userspace"
+                );
+                return true;
+            }
+        }
+    }
+    false
 }
 
 /// Bind the socket to `interface` with `ETH_P_ALL`.
@@ -312,6 +366,9 @@ pub struct AfPacketCapturer {
     /// too long, or `SO_ATTACH_FILTER` failed); the frames are then filtered
     /// here instead. This mirrors libpcap's fallback to userspace filtering.
     userspace_filter: Option<Program>,
+    /// Drop `PACKET_OUTGOING` frames in userspace (loopback without kernel
+    /// `PACKET_IGNORE_OUTGOING` support).
+    drop_outgoing: bool,
 
     drops: DropCounter,
     next_error: Option<String>,
@@ -390,7 +447,7 @@ impl AfPacketCapturer {
         };
 
         let fd = create_socket()?;
-        configure_socket(fd.as_raw_fd(), buffer_size);
+        let drop_outgoing = configure_socket(fd.as_raw_fd(), buffer_size, &cfg.interface);
 
         // Install the filter in the kernel when possible (before the bind, so no
         // unfiltered packet slips in). A program over the kernel's instruction
@@ -433,6 +490,7 @@ impl AfPacketCapturer {
             timeout_ms: cfg.timeout_ms,
             buf: vec![0u8; snaplen + VLAN_HDR_LEN],
             userspace_filter,
+            drop_outgoing,
             drops: DropCounter::default(),
             next_error: None,
             last_error_log: 0,
@@ -447,13 +505,16 @@ impl AfPacketCapturer {
             // `buf` are reserved for VLAN reinsertion.
             iov_len: self.snaplen,
         };
-        let mut cmsg = [0u8; 256];
-        // SAFETY: zeroed msghdr is a valid starting state.
+        let mut cmsg = CmsgBuf([0u8; 256]);
+        // SAFETY: zeroed msghdr/sockaddr_ll are valid starting states.
+        let mut sll: libc::sockaddr_ll = unsafe { std::mem::zeroed() };
         let mut msg: libc::msghdr = unsafe { std::mem::zeroed() };
+        msg.msg_name = std::ptr::addr_of_mut!(sll).cast::<libc::c_void>();
+        msg.msg_namelen = std::mem::size_of::<libc::sockaddr_ll>() as libc::socklen_t;
         msg.msg_iov = &mut iov;
         msg.msg_iovlen = 1;
-        msg.msg_control = cmsg.as_mut_ptr().cast::<libc::c_void>();
-        msg.msg_controllen = cmsg.len();
+        msg.msg_control = cmsg.0.as_mut_ptr().cast::<libc::c_void>();
+        msg.msg_controllen = cmsg.0.len();
         // SAFETY: `msg` points at `iov`/`cmsg`, both alive for the call.
         let n = unsafe { libc::recvmsg(self.fd.as_raw_fd(), &mut msg, libc::MSG_TRUNC) };
         if n < 0 {
@@ -468,6 +529,11 @@ impl AfPacketCapturer {
 
         // SAFETY: `msg` was filled by recvmsg above.
         let (ts, vlan) = unsafe { parse_control(&msg) };
+        let pkt_type = if msg.msg_namelen as usize >= std::mem::size_of::<libc::sockaddr_ll>() {
+            sll.sll_pkttype
+        } else {
+            0
+        };
         let (ts_sec, ts_usec) = ts.unwrap_or_else(|| (now_sec(), 0));
         Ok(Some(RecvMeta {
             ts_sec,
@@ -475,6 +541,7 @@ impl AfPacketCapturer {
             caplen,
             len,
             vlan,
+            pkt_type,
         }))
     }
 
@@ -485,6 +552,11 @@ impl AfPacketCapturer {
             let Some(mut meta) = self.recv_into_buf()? else {
                 return Ok(None);
             };
+            // Userspace fallback for the loopback outgoing copy (when the kernel
+            // has no PACKET_IGNORE_OUTGOING).
+            if self.drop_outgoing && meta.pkt_type == PACKET_OUTGOING {
+                continue;
+            }
             // Userspace fallback: apply the compiled program to the frame the
             // way the kernel would have, i.e. *before* the VLAN tag is put back.
             let matched = self
@@ -621,6 +693,12 @@ mod tests {
         assert_eq!(c.update(1002, Some(5)), 5);
         assert_eq!(c.update(1004, Some(0)), 0);
         assert_eq!(c.update(1006, Some(9)), 9);
+    }
+
+    #[test]
+    fn loopback_interface_detection() {
+        assert!(interface_is_loopback("lo"));
+        assert!(!interface_is_loopback("definitely-not-a-real-iface0"));
     }
 
     #[test]
