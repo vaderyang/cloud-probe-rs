@@ -129,6 +129,8 @@ jobs:
           N=$("$BIN" --ignored --list | sed -n '/: test$/p' | wc -l)
           echo "binary advertises $N ignored live-capture test(s)"
           [ "$N" -ge 5 ] || { echo "::error::expected at least 5 ignored live tests, found $N"; exit 1; }
+          # shellcheck disable=SC2024 — the redirect is intentional: the log is
+          # written as the runner user so the greps below can read it.
           sudo -E "$BIN" --ignored --nocapture > live-capture.log 2>&1 || true
           cat live-capture.log
           grep -q "test result: ok. $N passed; 0 failed" live-capture.log \
