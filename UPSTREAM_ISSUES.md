@@ -24,6 +24,8 @@
 
 （已报过的：[#231](https://github.com/Netis/cloud-probe/issues/231) ZMQ VLAN 越界。）
 
+> 这 9 条在上游已改为**英文标题 + 英文正文（主）+ 中文原文（折叠在 `<details>` 内）**；本文件下方的中文草稿仍作存档。
+
 ---
 
 ## S1. CPM HTTP 客户端无条件 `InsecureSkipVerify: true`（TLS 校验被关闭）
