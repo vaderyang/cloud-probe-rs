@@ -15,7 +15,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use parking_lot::Mutex;
 
 use crate::capturer::{new_capturer, Capturer, PacketSink};
-use crate::config::{Config, ExecutionModel, TaskConfig};
+use crate::config::{CapturerKind, Config, ExecutionModel, TaskConfig};
 use crate::error::Result;
 use crate::output::{new_output, Output, PacketHeader};
 use crate::ring_buffer::{RingMsg, SimpleAllocator, SpscRing};
@@ -423,6 +423,10 @@ impl TaskManager {
 
     /// Rebuild all tasks from a freshly parsed config. In-place reload.
     ///
+    /// Callers that hold the manager mutex should prefer the free [`reload_from_file`],
+    /// which parses and resolves host names *before* taking the lock: a BPF expression
+    /// containing a name blocks there for as long as the resolver takes.
+    ///
     /// # Errors
     /// Returns an error if the rebuilt task set cannot be constructed.
     pub fn reload(&mut self, new_config: Config) -> Result<()> {
@@ -458,18 +462,6 @@ impl TaskManager {
         result?;
         crate::log_info!("reload complete: {} tasks", self.inited_count);
         Ok(())
-    }
-
-    /// Reload from the path recorded at startup.
-    ///
-    /// # Errors
-    /// Returns an error if the config file cannot be read or the tasks cannot
-    /// be rebuilt.
-    pub fn reload_from_file(&mut self) -> Result<()> {
-        let cfg = Config::parse_file(&self.config_path)?;
-        // Preserve control config from the original (C moves control out before
-        // handing config to the task manager).
-        self.reload(cfg)
     }
 
     /// Build the `collect_stats_summary` RPC payload. Mirrors
@@ -602,11 +594,142 @@ fn output_stats_json(s: &OutputStats) -> serde_json::Value {
     })
 }
 
+/// Resolve every host name that the live-capture filters of `config` need, and
+/// validate those filters, while **no lock is held**.
+///
+/// Returns one message per filter that will not compile - the same error the task
+/// build reports later, surfaced earlier and once per distinct expression. Tasks
+/// with a `netns` are skipped on purpose: their filter is compiled inside that
+/// namespace, where the answer may differ, and handing them the outer namespace's
+/// addresses would silently change the filter's meaning (they are still covered by
+/// the resolution budget).
+#[must_use]
+pub fn warm_task_names(config: &Config) -> Vec<String> {
+    let mut problems = Vec::new();
+    let mut seen: Vec<String> = Vec::new();
+    for (i, task) in config.tasks.iter().enumerate() {
+        let CapturerKind::Libpcap(l) = &task.capturer.kind else {
+            continue;
+        };
+        if !l.netns.is_empty() {
+            continue;
+        }
+        let expr = match l.effective_bpf(&config.tasks) {
+            Ok(e) => e,
+            Err(e) => {
+                problems.push(format!("task {i}: {e}"));
+                continue;
+            }
+        };
+        if expr.is_empty() || seen.contains(&expr) {
+            continue;
+        }
+        if let Err(e) = crate::bpf::prewarm(&expr) {
+            problems.push(format!("task {i}: compile bpf filter error: {e}"));
+        }
+        seen.push(expr);
+    }
+    problems
+}
+
+/// Reload the configuration from the path recorded at startup, without holding the
+/// task-manager lock while host names are resolved (AUDIT4 P2-10).
+///
+/// `TaskManager::reload()` rebuilds every task, which compiles each BPF expression,
+/// which may resolve a name - and `getaddrinfo()` is a blocking call with a timeout
+/// the process does not control. Both callers used to write `mgr.lock()
+/// .reload_from_file()`: the SIGHUP path (whose thread *is* the capture loop) and
+/// the `reload_config` RPC (whose thread is not). Either way, packet polling and
+/// `cpctl stats` were frozen for as long as DNS took while every drop counter kept
+/// reporting 0. Parsing and name resolution now happen unlocked, and only the swap
+/// takes the mutex.
+///
+/// # Errors
+/// Returns an error if the config file cannot be read or parsed, or if the rebuilt
+/// task set cannot be constructed.
+pub fn reload_from_file(mgr: &Arc<Mutex<TaskManager>>) -> Result<()> {
+    let path = mgr.lock().config_path().to_string();
+    let cfg = Config::parse_file(&path)?;
+    for problem in warm_task_names(&cfg) {
+        crate::log_warn!("reload: {problem}");
+    }
+    // Preserve control config from the original (C moves control out before
+    // handing config to the task manager).
+    mgr.lock().reload(cfg)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::output::pcap_writer::PcapWriter;
     use std::sync::atomic::{AtomicUsize, Ordering};
+
+    /// AUDIT4 P2-10: rebuilding tasks compiles every BPF expression, and compiling
+    /// one may resolve a host name. That work has to be doable *before* the manager
+    /// lock is taken, otherwise a slow resolver freezes packet polling and `cpctl
+    /// stats` along with it.
+    #[test]
+    fn warm_task_names_resolves_names_and_reports_bad_filters() {
+        let cfg = Config::parse_str(
+            r#"{
+                "tasks": [{
+                    "capturer": { "type": "libpcap", "libpcap": {
+                        "interface": "lo", "bpf": "udp and not host localhost"
+                    } },
+                    "outputs": []
+                }]
+            }"#,
+        )
+        .expect("parse good config");
+        assert_eq!(
+            warm_task_names(&cfg),
+            Vec::<String>::new(),
+            "a compilable filter must produce nothing to report"
+        );
+
+        // Same expression in two tasks: reported once, not twice.
+        let bad = Config::parse_str(
+            r#"{
+                "tasks": [
+                    { "capturer": { "type": "libpcap", "libpcap": {
+                        "interface": "lo", "bpf": "vlan 5" } }, "outputs": [] },
+                    { "capturer": { "type": "libpcap", "libpcap": {
+                        "interface": "lo", "bpf": "vlan 5" } }, "outputs": [] }
+                ]
+            }"#,
+        )
+        .expect("parse bad config");
+        let problems = warm_task_names(&bad);
+        assert_eq!(
+            problems.len(),
+            1,
+            "duplicate expressions must collapse, got {problems:?}"
+        );
+        let first = problems[0].clone();
+        assert!(
+            first.contains("vlan"),
+            "the message must carry the reason: {first}"
+        );
+
+        // A netns task is left to its own build: warming it from outside could hand
+        // it another namespace's addresses.
+        let ns = Config::parse_str(
+            r#"{
+                "tasks": [{
+                    "capturer": { "type": "libpcap", "libpcap": {
+                        "interface": "lo", "netns": "/var/run/netns/nope", "bpf": "vlan 5"
+                    } },
+                    "outputs": []
+                }]
+            }"#,
+        )
+        .expect("parse netns config");
+        assert_eq!(
+            warm_task_names(&ns),
+            Vec::<String>::new(),
+            "netns tasks must not be warmed from the outer namespace"
+        );
+    }
 
     /// Output that records how many times `destroy()` was called on it.
     struct SpyOutput {

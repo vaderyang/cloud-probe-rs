@@ -15,10 +15,9 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use super::{Capturer, PacketHeader, PacketSink};
 use crate::bpf::{self, Program};
-use crate::config::{bpf_filter_exclude_task_output_hosts, LibpcapConfig, TaskConfig};
+use crate::config::{LibpcapConfig, TaskConfig};
 use crate::error::{Error, Result};
 use crate::netns;
-use crate::netutil::bpf_filter_replace_nic;
 use crate::packet::PKT_DIR_NONCHECK;
 use crate::req_pattern::ReqPattern;
 use crate::stats::CaptureStats;
@@ -501,17 +500,7 @@ impl AfPacketCapturer {
         let req_pattern = ReqPattern::new_from_cfg(&task.req_pattern, &cfg.interface)
             .map_err(|e| Error::new(format!("create req_pattern_t error: {e}")))?;
 
-        let bpf_expr = if !cfg.not_filter_output_hosts {
-            crate::log_info!("exclude task output hosts");
-            bpf_filter_exclude_task_output_hosts(&cfg.bpf, tasks)
-        } else {
-            cfg.bpf.clone()
-        };
-        let bpf_expr = if bpf_expr.is_empty() {
-            String::new()
-        } else {
-            bpf_filter_replace_nic(&bpf_expr)?
-        };
+        let bpf_expr = cfg.effective_bpf(tasks)?;
         let program: Option<Program> =
             if bpf_expr.is_empty() {
                 None
@@ -833,9 +822,10 @@ mod tests {
             IDLE_POLL_MS,
             "nonsense falls back to idle"
         );
+        let idle = readability_wait_ms(0);
         assert!(
-            IDLE_POLL_MS <= 5,
-            "the idle wait must stay well below packet-scale latency"
+            idle <= 5,
+            "the idle wait ({idle}ms) must stay well below packet-scale latency"
         );
     }
 

@@ -6,6 +6,7 @@ use serde::Deserialize;
 use std::path::Path;
 
 use crate::error::{Error, Result};
+use crate::netutil::bpf_filter_replace_nic;
 
 /// Capturer type string: DPDK pdump (not yet ported).
 pub const CAPTURER_TYPE_DPDK_PDUMP: &str = "dpdk_pdump";
@@ -282,6 +283,36 @@ pub struct LibpcapConfig {
     pub timeout_ms: i32,
     /// Exclude task output hosts from the BPF filter.
     pub not_filter_output_hosts: bool,
+}
+
+impl LibpcapConfig {
+    /// The filter expression this task will actually compile.
+    ///
+    /// Port of the two steps `libpcap_capturer_new()` performs before
+    /// `pcap_compile()`: drop the task's own output hosts (unless disabled), then
+    /// expand `nic.<ifname>` tokens. Exposed so a name can be resolved *ahead* of
+    /// building the task (see `crate::task::reload_from_file`) without any second
+    /// copy of this logic to drift out of sync with.
+    ///
+    /// # Errors
+    /// Returns an error if a `nic.<ifname>` token names an interface without an
+    /// address.
+    pub fn effective_bpf(&self, tasks: &[TaskConfig]) -> Result<String> {
+        let bpf = if self.not_filter_output_hosts {
+            self.bpf.clone()
+        } else {
+            crate::log_info!("exclude task output hosts");
+            bpf_filter_exclude_task_output_hosts(&self.bpf, tasks)
+        };
+        // The emptiness test is on the *result*: a task with no filter of its own
+        // still has to exclude its output hosts (that is the whole point of the
+        // feature - mirroring our own forwarded traffic back is the failure).
+        if bpf.is_empty() {
+            Ok(String::new())
+        } else {
+            bpf_filter_replace_nic(&bpf)
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -1144,6 +1175,48 @@ mod tests {
             }
             _ => panic!("expected vxlan"),
         }
+    }
+
+    /// `libpcap.effective_bpf()` is what the capturer compiles, and it is now also
+    /// what the reload path resolves ahead of the task-manager lock. It must keep
+    /// the (inverted-looking) meaning of `not_filter_output_hosts` and the
+    /// `nic.<ifname>` expansion in one place.
+    #[test]
+    fn effective_bpf_follows_the_exclusion_flag() {
+        let cfg = Config::parse_str(SAMPLE).expect("parse sample");
+        let mut l = match cfg.tasks[0].capturer.kind.clone() {
+            CapturerKind::Libpcap(l) => l,
+            other => panic!("expected libpcap, got {other:?}"),
+        };
+        l.bpf = "udp and port 53".to_string();
+
+        l.not_filter_output_hosts = true;
+        assert_eq!(
+            l.effective_bpf(&cfg.tasks).expect("effective bpf"),
+            "udp and port 53",
+            "flag set means keep the expression exactly as written"
+        );
+
+        l.not_filter_output_hosts = false;
+        let excluded = l.effective_bpf(&cfg.tasks).expect("effective bpf");
+        assert!(
+            excluded.starts_with("(udp and port 53) and not host "),
+            "flag clear must append the output-host exclusion, got {excluded}"
+        );
+
+        // No filter of its own, flag clear: the exclusion alone is still a filter.
+        l.bpf = String::new();
+        assert_eq!(
+            l.effective_bpf(&cfg.tasks).expect("exclusion only"),
+            "not host 10.0.0.9",
+            "a task without a bpf must still exclude its own output host"
+        );
+        l.not_filter_output_hosts = true;
+        assert_eq!(
+            l.effective_bpf(&cfg.tasks).expect("nothing"),
+            "",
+            "no filter and no exclusion means no filter program at all"
+        );
     }
 
     #[test]

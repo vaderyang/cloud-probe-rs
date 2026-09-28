@@ -172,7 +172,11 @@ impl Resolver for DnsResolver {
 /// host names, a name with more answers than [`MAX_RESOLVED_ADDRS`], or trailing
 /// garbage.
 pub fn parse(input: &str) -> Result<Ast> {
-    parse_with(input, &DnsResolver)
+    // Not the raw platform resolver: a filter is compiled while building tasks,
+    // and an unreachable name server must not be able to hold the task-manager
+    // mutex - and with it packet polling and `cpctl stats` - hostage for the
+    // resolver's own timeout (AUDIT4 P2-10).
+    parse_with(input, &super::resolvers::GuardedResolver::system())
 }
 
 /// [`parse`] with an injected [`Resolver`].

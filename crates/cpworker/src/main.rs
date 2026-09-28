@@ -109,8 +109,10 @@ fn main() {
 
         // Handle SIGHUP-driven reload at most once per second.
         if reload.swap(false, Ordering::Relaxed) {
-            let mut g = mgr.lock();
-            if let Err(e) = g.reload_from_file() {
+            // Not `mgr.lock().reload_from_file()`: parsing and especially host-name
+            // resolution must happen outside the lock this loop holds every batch
+            // (AUDIT4 P2-10).
+            if let Err(e) = cpworker::task::reload_from_file(&mgr) {
                 cpworker::log_error!("reload failed: {e}");
             }
         }

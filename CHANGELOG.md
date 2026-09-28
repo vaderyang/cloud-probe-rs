@@ -66,6 +66,17 @@ Two conventions worth knowing before reading:
 
 ### Fixed
 
+- Name resolution while rebuilding tasks can no longer freeze the worker (P2-10).
+  Compiling a filter that contains a host name calls `getaddrinfo()`, and both reload
+  paths did that as `mgr.lock().reload_from_file()` - so with an unreachable name
+  server the capture loop (same mutex, every batch) and `cpctl stats` were frozen for
+  the resolver's own timeout while every drop counter kept reporting 0. Three bounds
+  now apply: results are cached process-wide for 60s (`bpf::GuardedResolver`, 512
+  names max), a cold lookup may block at most 2s and then fails that *task* with a
+  message naming the host, and `task::reload_from_file()` does the file read, the
+  parse and the resolution outside the manager lock. `netns` tasks are deliberately
+  not pre-warmed from outside their namespace. Divergence from `pcap_compile()` and
+  its cost (a stale answer can be up to 60s old) are in [PARITY.md §2.5](PARITY.md).
 - A task capturing on an interface that is down - or simply idle - no longer spins a
   core (P2-6). Measured on a dedicated veth pair with the repository default
   `timeout_ms: 0`, 6s window, `utime+stime`: 4 tasks on a down interface cost

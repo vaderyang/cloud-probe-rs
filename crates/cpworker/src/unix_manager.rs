@@ -209,8 +209,10 @@ fn dispatch(req: &Value, mgr: &Arc<Mutex<TaskManager>>) -> Value {
             v
         }
         "reload_config" => {
-            let mut g = mgr.lock();
-            match g.reload_from_file() {
+            // Resolution happens before the lock is taken (AUDIT4 P2-10): this
+            // handler runs on the control thread, and holding `mgr` through
+            // getaddrinfo() would stall the capture loop and `collect_stats_summary`.
+            match crate::task::reload_from_file(mgr) {
                 Ok(()) => json!({"status": "OK"}),
                 Err(e) => json!({"status": "ERROR", "message": e.to_string()}),
             }
