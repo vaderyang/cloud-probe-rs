@@ -185,34 +185,29 @@
 
 WP2 与 WP3 可并行；M1 必须最先（唯一可能"完全无数据"的缺陷）。
 
-## 5. 暂不处理 / 需业务确认
+## 5. 暂不处理 / 需业务或环境确认
 
-1. **BPF 表达式现场分布**（AUDIT2 早已要求的预研）：决定 P5-01/P5-06 是"发布阻塞"还是"文档说明即可"。仓库内无该调研记录，需业务数据。
-2. **混杂模式（promisc）**：需确认原 C 是否有意设置；影响采集面等价性（三篇均未定论）。
-3. **`af_packet_live` 在 root 下是否真通过**：✅ 已闭环（M6/P2-2）。本机 root 实测 4 个 live 测试全部执行并通过；
-   测试在非特权时改为 **panic 而不是 skip**（此前 `--ignored` 在非 root 下打印 `ok. 4 passed` 而什么都没做），
-   CI `live-capture` job 断言"`--ignored --list` 声明的条数 == 实际 executed 条数"。
-4. **libpcap TPACKET ring 相对 `SO_RCVBUF` 的真实容量优势**：核心结论（256 MiB→8 MiB）已实测；"ring 可用 MB 级"需高负载实测。
-5. **VLAN/H3 的现场影响**：需在 trunk/镜像口实测确认严重度。
-6. **实时抓取面的“同流不同包数”（A1，结论已修正并修复，P1）**：
-   - **初版结论（本计划 b60c8a6）是错的**：它把 loopback 上 Rust 交付 2× 当成“全抓的正确行为”。经
-     GLM-5.3 与 Qwen3.8 两份独立审查证伪：C/libpcap 在 lo 上只交付 **1×**（用能从源码构建的 Go `cpctl`
-     + 延迟读、以及 tcpdump 都复现），Rust 交付 **2×** ——这是**真实的 R/C 采集语义分歧**，
-     会导致下游 GRE/VXLAN/ZMQ 收到双份、`cap_bytes` 翻倍（实测 71,957,732 vs 35,978,866）。
-   - **已修**：对**loopback 接口**设 `PACKET_IGNORE_OUTGOING`（内核 <4.17 时用户态按
-     `sll_pkttype==PACKET_OUTGOING` 丢弃）；非 loopback 保留出站（libpcap 在 veth 发送侧也能看到出站，
-     实测 tcpdump 抓到 5000）。回归测试 `live_capture_loopback_does_not_duplicate_frames`（红→绿：
-     无修复时 1 万报文交付 20000，修复后 ~10000）。`PARITY.md §4` 已登记。
-   - `lo` 上每个报文被 tap **两次**（出站 `dev_queue_xmit_nit` + 入站 `__netif_receive_skb`）；
-     libpcap 的 `ps_recv ≈ 2 × pcap_next_ex 交付`（计数口径）解释了为何容易误判。
-   - “C ×0.79”另有时序竞态因素：`bench/live_bench.py` 用 **Rust `cpctl`** 读 C worker 统计时，
-     Rust 客户端把 payload 与 `\n` 分两次 write、C 服务端握手单次 recv，可能漏掉 `\n`（残留空行被当命令）
-     → `Connection reset by peer`；**并非协议不兼容**（Go `cpctl` 与重试的 Rust `cpctl` 都能成功）。
-   - `drop_packets == 0` 不能作为“无丢失”的证据（只有 socket 队列溢出才计入 `tp_drops`）。
-   - **顺带修了一个 UB**：`parse_control` 的 cmsg 缓冲区 `[u8; 256]` 未按 `cmsghdr` 对齐，
-     `&*cmsg` 会 misaligned deref（调试构建下 abort）；改用 `#[repr(align(8))] CmsgBuf`。
-7. **实时抓包吞吐门禁**：`live_bench.py` 是手工工具（需 root、需真实接口、发送端通常是瓶颈），不进 CI。
-   若要固化成回归网，需要 veth + 可控注入速率与丢包断言，属独立工程项。
+### 5.1 仍需外部输入（本环境无法完成）
+
+1. **BPF 表达式现场分布**（AUDIT2 早已要求的预研）：决定 P5-01/P5-06 是“发布阻塞”还是“文档说明即可”。仓库内无该调研记录，需业务数据。
+2. **混杂模式（promisc）**：需确认原 C 是否有意设置；影响采集面等价性（三篇审计均未定论）。
+3. **libpcap TPACKET ring 相对 `SO_RCVBUF` 的真实容量优势**：核心结论（256 MiB→8 MiB）已实测；“ring 可用 MB 级”需高负载实测。
+4. **VLAN/H3 的现场影响**：需在 trunk/镜像口实测确认严重度。
+5. **`vxlan-split` 服务器硬件复测**（= `IMPROVEMENT_PLAN.md` P4.1）：需固定 CPU、关闭频率调节的机器。
+
+### 5.2 已闭环（归档，保留结论以备复核）
+
+- **`af_packet_live` 特权执行**（原条目 3，P2-2 已闭环）：测试在非特权时改为 **panic 而不是 skip**（此前 `--ignored` 在非 root 下打印 `ok. N passed` 而什么都没做），CI `live-capture` job 断言“声明的条数 == 实际 executed 条数”，并单独断言 veth 保真度测试确实执行且通过；root 下现为 **5 passed**。
+- **A1 loopback 重复帧**（原条目 6，P1 已修）：初版“测量伪影、无缺陷”的结论被 GLM-5.3/Qwen3.8 两份审查证伪——C/libpcap 在 lo 上交付 **1×**、Rust 交付 **2×**（真实 R/C 分歧）。现已对 **loopback 接口**设 `PACKET_IGNORE_OUTGOING`（内核 <4.17 时用户态按 `sll_pkttype==PACKET_OUTGOING` 丢弃），非 loopback 保留出站；回归测试 `live_capture_loopback_does_not_duplicate_frames`、`PARITY.md §4` 登记，机制由 `crates/cpworker/src/bin/tpacket_ring_probe.rs` 确认（内核把两份都放进 ring，libpcap 在 `linux_check_direction()` 丢弃出站）。
+- **实时抓包吞吐/保真度门禁**（原条目 7）：`live_capture_veth_delivers_exactly_n_frames`（发 N 帧 ⇒ 交付恰 N、drop 0）已进入 CI `live-capture` job；“用 veth 而非 lo”的工具支持已在 `bench/live_bench.py`（可在 veth 上参数化注入）。
+- **顺带修的 UB**：`parse_control` 的 cmsg 缓冲区已改为 `#[repr(align(8))] CmsgBuf`（此前 `[u8; 256]` 未按 `cmsghdr` 对齐，`&*cmsg` 会 misaligned deref）。
+- **A1 的“C ×0.79”附带因素**：`bench/live_bench.py` 用 **Rust `cpctl`** 读 C worker 统计存在时序竞态（Rust 客户端把 payload 与 `\n` 分两次 write、C 服务端握手单次 recv）→ `Connection reset by peer`；**并非协议不兼容**。
+
+### 5.3 可选加固（需选值/决策，非缺陷）
+
+- **coverage 阈值**：现仅 advisory artifact（`continue-on-error`），加阈值需选值与失败面。
+- **`FUZZ_TIMEOUT` 默认值**（现 10s）：极慢机器上对“合法但重”的输入可能偏紧。
+- **P5-29 目录整理**：7 个 parity/oracle bin 仍在 `src/bin`；方案已给（独立 `cpworker-parity` crate + hygiene 门禁），未实现。
 
 ## 6. 执行进度
 
@@ -231,9 +226,7 @@ WP2 与 WP3 可并行；M1 必须最先（唯一可能"完全无数据"的缺陷
 - 验证：`cargo test --workspace` **112 passed**；clippy `-D warnings` 0；`cargo deny check` 四项 ok；
   `parity/all.sh` **7/7 绿**；`bpf` fuzz 30s 覆盖 840（无崩溃）。
 
-### 下一步
-
-- **M2**：采集面语义等价（P5-02 `PACKET_STATISTICS`、P5-03 VLAN、P5-05 `SO_RCVBUF`、P5-09 启动空窗 + P5-16 live CI）。
+### 下一步（M2，已完成）
 
 ### M2 已完成
 
@@ -429,14 +422,12 @@ WP2 与 WP3 可并行；M1 必须最先（唯一可能"完全无数据"的缺陷
   **165 passed / 0 failed（3 个 live 测试 `#[ignore]`）**；`cargo deny check`（根 + fuzz workspace）四项 ok；
   `./parity/all.sh` **9/9 绿**；`./fuzz.sh --check` 9 个 target 无崩溃；actionlint 零告警。
 
-### 下一步
+### 后续
 
-- ✅ **§5-6 已定根因**（A1）：veth 上 Rust `frames/datagram == 1.0000`，无缺陷；
-  diff 来自 loopback 双 tap + `ps_recv` 计数口径 + bench 的 C 侧控制协议不兼容。
-  可选的后续：把“veth + 可控注入 + 帧数断言”做成采集保真度门禁（见下）。
-- **P4.1**（IMPROVEMENT_PLAN）：`vxlan-split` 在服务器硬件上复测（需固定 CPU、关频率调节）。
-- 可选加固：把 `actionlint` 固化成 CI job；给 coverage 设阈值（目前仅 advisory artifact）；
-  新增基于 veth 的采集保真度门禁（每帧断言 `frames/datagram == 1.0`，需 privileged job）。
+- ✅ **A1 已闭环**（P1）：loopback 重复帧已修（见 §5.2），机制由 `tpacket_ring_probe` 确认。
+- ✅ 采集保真度门禁（veth 硬断言）与 `actionlint` CI job 已完成（fin 批次，见 §5.2）。
+- **剩余待办与需外部输入项见 §5**：BPF 现场分布、promisc、ring 容量、VLAN 现场影响、P4.1；
+  以及可选加固（coverage 阈值 / `FUZZ_TIMEOUT` / P5-29）。
 
 
 ## 7. 补充修复（三篇 AUDIT4 + 用户复核）
