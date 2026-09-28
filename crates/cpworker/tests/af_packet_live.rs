@@ -21,12 +21,15 @@ use cpworker::stats::CaptureStats;
 #[derive(Default)]
 struct Collect {
     pkts: Vec<Vec<u8>>,
+    /// (caplen, orig_len) as reported for each delivered frame.
+    hdrs: Vec<(u32, u32)>,
     heartbeats: u64,
 }
 
 impl PacketSink for Collect {
-    fn on_packet(&mut self, _hdr: &PacketHeader, pkt: &[u8], _d: i32) {
+    fn on_packet(&mut self, hdr: &PacketHeader, pkt: &[u8], _d: i32) {
         self.pkts.push(pkt.to_vec());
+        self.hdrs.push((hdr.caplen, hdr.len));
     }
     fn on_heartbeat(&mut self) {
         self.heartbeats += 1;
@@ -39,10 +42,10 @@ fn privileged() -> bool {
 }
 
 /// These tests are `#[ignore]`d so that they only ever run in the privileged
-/// job - which means a non-privileged run has to be a **failure**, never a silent
-/// pass. Returning early used to report `test result: ok. 4 passed` while nothing
-/// was opened, read or asserted, and `parity/all.sh`/CI stayed green on top of it
-/// (AUDIT4 P2-2: "the live-capture job can be fully green while executing
+/// job - which means a non-privileged run must be a **failure**, never a silent
+/// pass. Returning early here used to report `test result: ok. 4 passed` while
+/// nothing was opened, read or asserted, and `parity/all.sh`/CI stayed green on
+/// it (AUDIT4 P2-2: "the live-capture job can be fully green while executing
 /// nothing").
 fn assert_privileged(what: &str) {
     if !privileged() {
@@ -234,6 +237,69 @@ fn live_capture_reinserts_vlan_on_veth() {
         .expect("no VLAN-tagged frame captured (AUXDATA not applied?)");
     // Payload that followed the original ethertype must still be intact.
     assert_eq!(frame[18], 0x12, "payload after reinserted VLAN tag shifted");
+
+    // --- snaplen contract with a stripped tag (AUDIT4 P2-7) ---------------------
+    // Reinserting 4 bytes into a frame that was truncated to `snaplen` used to
+    // report `caplen == snaplen + 4`, breaking the per-packet contract the
+    // configuration makes (`tcpdump -s 16` on the same frames reports 16). The
+    // tag counts *inside* snaplen, like libpcap.
+    let json16 = r#"{
+        "log_level": "INFO",
+        "execution_model": "rtc",
+        "tasks": [{
+            "capturer": { "type": "libpcap", "libpcap": {
+                "interface": "veth0", "snaplen": 16, "timeout_ms": 200
+            } },
+            "outputs": []
+        }]
+    }"#;
+    let cfg16 = Config::parse_str(json16).expect("parse snaplen config");
+    let tasks16 = cfg16.tasks.clone();
+    let mut cap16 = new_capturer(&tasks16, &tasks16[0], Arc::new(CaptureStats::default()))
+        .expect("snaplen capturer");
+
+    let mut sink16 = Collect::default();
+    for _ in 0..10 {
+        send_tagged_frame("veth1", TCI);
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        for _ in 0..10 {
+            cap16.capture_once(&mut sink16);
+        }
+        if !sink16.pkts.is_empty() {
+            break;
+        }
+    }
+    assert!(
+        !sink16.pkts.is_empty(),
+        "snaplen=16 capture delivered nothing on veth0"
+    );
+    for (i, (cap_len, orig_len)) in sink16.hdrs.iter().enumerate() {
+        assert!(
+            *cap_len <= 16,
+            "frame {i}: caplen {cap_len} exceeds the configured snaplen 16 (P2-7)"
+        );
+        assert_eq!(
+            *cap_len, 16,
+            "frame {i}: a 60-byte frame must be filled to exactly snaplen"
+        );
+        assert_eq!(
+            *orig_len, 60,
+            "frame {i}: orig_len must stay the on-wire length (tag included)"
+        );
+        assert_eq!(
+            sink16.pkts[i].len(),
+            *cap_len as usize,
+            "frame {i}: delivered the buffer up to snaplen, not caplen"
+        );
+    }
+    // What is reported is the first `snaplen` bytes of the *reinserted* frame.
+    let p = &sink16.pkts[0];
+    assert_eq!(
+        p[12..14],
+        [0x81, 0x00],
+        "the tag must still be visible inside snaplen bytes"
+    );
+    assert_eq!(p[14..16], TCI.to_be_bytes(), "reinserted TCI mismatch");
 }
 
 /// A filter too large for the kernel (or whose attach fails) must still capture,

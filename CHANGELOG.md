@@ -68,6 +68,15 @@ Two conventions worth knowing before reading:
 
 ### Fixed
 
+- A reinserted 802.1Q tag now counts **inside** `snaplen`, so a truncated VLAN frame
+  keeps reporting `caplen == snaplen` instead of `snaplen + 4` (P2-7). The old
+  behaviour broke the per-packet contract the configuration makes (`slice`, ZMQ batch
+  sizing and VXLAN fragmentation all consume `caplen`) and made capture files
+  byte-incomparable with `tcpdump -s <snaplen>`, which reports `snaplen` on the same
+  802.1Q frames. `orig_len` still reports the on-wire length, tag included.
+  Regression: `insert_vlan_truncated_frame_stays_within_snaplen` plus the `snaplen: 16`
+  phase of `live_capture_reinserts_vlan_on_veth` (measured on a real veth pair: caplen
+  20 before the fix, 16 after).
 - `crates/cpworker/tests/af_packet_live.rs` no longer reports success when it could
   not capture (P2-2). Each test returned early without root, so an unprivileged
   `--ignored` run printed `test result: ok. 4 passed` while opening no socket at all,

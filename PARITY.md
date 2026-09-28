@@ -267,7 +267,11 @@ M4 的问题大多不是"移植错了"，而是"移植得比原实现更宽松�
 * **丢包统计**：`getsockopt(PACKET_STATISTICS)` 是**读后清零**，每个样本是"自上次读取以来的增量"，
   直接累加；首次读取作基线。`ps_ifdrop` 在 Linux 恒为 0（与 libpcap 一致）。
 * **VLAN**：启用 `PACKET_AUXDATA`，内核剥离标签后由 `TP_STATUS_VLAN_VALID`/`tp_vlan_tci`
-  在 MAC 后重插 4 字节 802.1Q 头（TPID 取 `tp_vlan_tpid`，缺省 0x8100）。
+  在 MAC 后重插 4 字节 802.1Q 头（TPID 取 `tp_vlan_tpid`，缺省 0x8100）。重插的 4 字节
+  **计入 `snaplen`**（与 libpcap 一致）：被截断到 `snaplen` 的帧重插后仍报告 `caplen == snaplen`，
+  被 tag 推过上限的尾部字节不报告；`orig_len` 仍是线上长度（含 tag，+4）。
+  （AUDIT4 P2-7 回归：修复前 `snaplen:16` + 802.1Q 会报告 `caplen == 20`，而 `tcpdump -s 16`
+  在同一批帧上报告 16，违反「每包 ≤ snaplen」的配置契约，并使抓包文件与 C 版不可比。）
 * **loopback 重复帧**：仅对 loopback 接口设 `PACKET_IGNORE_OUTGOING`（否则用户态按
   `PACKET_OUTGOING` 丢弃），与 libpcap 一致；非 loopback 不丢出站。
 * **接收缓冲**：优先 `SO_RCVBUFFORCE`（需 `CAP_NET_ADMIN`），失败回退 `SO_RCVBUF`，

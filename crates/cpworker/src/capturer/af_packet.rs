@@ -284,16 +284,28 @@ fn bind_socket(fd: RawFd, interface: &str) -> Result<()> {
     Ok(())
 }
 
-/// Reinsert a stripped 802.1Q header after the 12 MAC bytes. Returns the new
-/// captured length (unchanged if the frame is too short or `buf` has no room).
-fn insert_vlan(buf: &mut [u8], caplen: usize, tag: VlanTag) -> usize {
+/// Reinsert a stripped 802.1Q header after the 12 MAC bytes.
+///
+/// `snaplen` is the contract the configuration makes to the user ("never more
+/// than `snaplen` bytes per packet") and, like libpcap, the reinserted tag
+/// **counts towards** it: a frame that was truncated to `snaplen` on the wire
+/// stays `snaplen` bytes long after the tag goes back, i.e. the last four bytes
+/// that the tag pushes past the limit are not reported. (`tcpdump -s 16` on an
+/// 802.1Q frame gives `caplen == 16`, not 20.)
+///
+/// Returns `Some(new_caplen)` (`<= snaplen`) when the tag was reinserted, or
+/// `None` when it was not - because the captured prefix is too short to carry an
+/// Ethernet header, or `buf` has no room. Callers must only grow `orig_len` for
+/// the four tag bytes when this returns `Some`, since the wire frame did carry
+/// the tag either way.
+fn insert_vlan(buf: &mut [u8], caplen: usize, tag: VlanTag, snaplen: usize) -> Option<usize> {
     if caplen < ETH_HDR_MIN || buf.len() < caplen + VLAN_HDR_LEN {
-        return caplen;
+        return None;
     }
     buf.copy_within(12..caplen, 12 + VLAN_HDR_LEN);
     buf[12..14].copy_from_slice(&tag.tpid.to_be_bytes());
     buf[14..16].copy_from_slice(&tag.tci.to_be_bytes());
-    caplen + VLAN_HDR_LEN
+    Some((caplen + VLAN_HDR_LEN).min(snaplen))
 }
 
 /// Walk the control messages of a filled `msghdr`, returning the
@@ -567,9 +579,12 @@ impl AfPacketCapturer {
                 continue;
             }
             if let Some(v) = meta.vlan {
-                let new_caplen = insert_vlan(&mut self.buf, meta.caplen as usize, v);
-                if new_caplen != meta.caplen as usize {
+                if let Some(new_caplen) =
+                    insert_vlan(&mut self.buf, meta.caplen as usize, v, self.snaplen)
+                {
                     meta.caplen = new_caplen as u32;
+                    // The on-wire frame carried the tag, so the original length
+                    // grows by it even when `caplen` was clamped to `snaplen`.
                     meta.len += VLAN_HDR_LEN as u32;
                 }
             }
@@ -723,12 +738,66 @@ mod tests {
                 tci: 0x0164,
                 tpid: 0x8100,
             },
+            65535,
         );
-        assert_eq!(n, 22);
+        assert_eq!(n, Some(22));
         assert_eq!(&buf[12..14], &[0x81, 0x00]);
         assert_eq!(&buf[14..16], &[0x01, 0x64]);
         assert_eq!(&buf[16..18], &[0x08, 0x00]);
         assert_eq!(&buf[18..22], &[1, 2, 3, 4]);
+    }
+
+    /// Regression for AUDIT4 P2-7 (independent review): with `snaplen: 16` and a
+    /// 60-byte 802.1Q frame the capturer used to report `caplen = snaplen + 4`,
+    /// breaking the per-packet contract the configuration makes (and making the
+    /// capture file byte-incomparable with `tcpdump -s 16`, which reports 16).
+    #[test]
+    fn insert_vlan_truncated_frame_stays_within_snaplen() {
+        let snaplen = 16usize;
+        // `buf` is exactly what the capturer allocates: snaplen + 4 spare.
+        let mut buf = vec![0u8; snaplen + VLAN_HDR_LEN];
+        buf[12..14].copy_from_slice(&[0x08, 0x00]); // ethertype, as read off the wire
+        buf[14..snaplen].copy_from_slice(&[1, 2]);
+        let n = insert_vlan(
+            &mut buf,
+            snaplen,
+            VlanTag {
+                tci: 0x0164,
+                tpid: 0x8100,
+            },
+            snaplen,
+        )
+        .expect("a snaplen-long prefix has room for the tag");
+        assert!(
+            n <= snaplen,
+            "caplen {n} broke the 'never more than snaplen ({snaplen})' contract"
+        );
+        assert_eq!(n, snaplen, "must report exactly snaplen bytes");
+        // What is reported is the *first `snaplen` bytes of the reinserted frame*.
+        assert_eq!(&buf[12..14], &[0x81, 0x00]);
+        assert_eq!(&buf[14..16], &[0x01, 0x64]);
+        // The ethertype the wire put at offset 12 was pushed to 16, i.e. past the
+        // reported prefix - that is the byte count libpcap drops, not reports.
+        assert_eq!(&buf[16..18], &[0x08, 0x00]);
+    }
+
+    /// A prefix too short to hold an Ethernet header gets no tag, so the caller
+    /// must not grow `orig_len` either.
+    #[test]
+    fn insert_vlan_refuses_prefix_without_ethernet_header() {
+        let mut buf = vec![0u8; 8 + VLAN_HDR_LEN];
+        assert_eq!(
+            insert_vlan(
+                &mut buf,
+                8,
+                VlanTag {
+                    tci: 1,
+                    tpid: 0x8100,
+                },
+                65535,
+            ),
+            None
+        );
     }
 
     #[test]
