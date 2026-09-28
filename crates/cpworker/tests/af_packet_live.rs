@@ -273,7 +273,19 @@ fn live_capture_reinserts_vlan_on_veth() {
         !sink16.pkts.is_empty(),
         "snaplen=16 capture delivered nothing on veth0"
     );
-    for (i, (cap_len, orig_len)) in sink16.hdrs.iter().enumerate() {
+    // Only assert on the *tagged* frames we injected: the kernel's own IPv6/ND
+    // traffic on the newly created veth (86-byte frames) is also visible to
+    // AF_PACKET and would otherwise pollute the snaplen/orig_len invariants.
+    let mut tagged = 0usize;
+    for (i, ((cap_len, orig_len), pkt)) in sink16.hdrs.iter().zip(&sink16.pkts).enumerate() {
+        let is_tagged = pkt.len() >= 14
+            && pkt[..6] == [0xff; 6]
+            && pkt[6..12] == [0x11; 6]
+            && pkt[12..14] == [0x81, 0x00];
+        if !is_tagged {
+            continue;
+        }
+        tagged += 1;
         assert!(
             *cap_len <= 16,
             "frame {i}: caplen {cap_len} exceeds the configured snaplen 16 (P2-7)"
@@ -287,11 +299,15 @@ fn live_capture_reinserts_vlan_on_veth() {
             "frame {i}: orig_len must stay the on-wire length (tag included)"
         );
         assert_eq!(
-            sink16.pkts[i].len(),
+            pkt.len(),
             *cap_len as usize,
             "frame {i}: delivered the buffer up to snaplen, not caplen"
         );
     }
+    assert_eq!(
+        tagged, 1,
+        "expected exactly the one tagged frame to be captured, got {tagged}"
+    );
     // What is reported is the first `snaplen` bytes of the *reinserted* frame.
     let p = &sink16.pkts[0];
     assert_eq!(
