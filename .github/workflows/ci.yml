@@ -37,9 +37,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: taiki-e/install-action@v2
-        with:
-          tool: actionlint
+      - name: Install actionlint (pinned; GitHub release, not crates.io)
+        run: |
+          curl -sSL https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz | tar xz -C /usr/local/bin actionlint
+          actionlint -version
       - run: actionlint -color
 
   test:
@@ -128,7 +129,7 @@ jobs:
           N=$("$BIN" --ignored --list | sed -n '/: test$/p' | wc -l)
           echo "binary advertises $N ignored live-capture test(s)"
           [ "$N" -ge 5 ] || { echo "::error::expected at least 5 ignored live tests, found $N"; exit 1; }
-          sudo -E "$BIN" --ignored --nocapture > live-capture.log 2>&1
+          sudo -E "$BIN" --ignored --nocapture > live-capture.log 2>&1 || true
           cat live-capture.log
           grep -q "test result: ok. $N passed; 0 failed" live-capture.log \
             || { echo "::error::live capture did not execute all $N tests"; exit 1; }
@@ -200,9 +201,10 @@ jobs:
     # downgrade would go red for a reason unrelated to the workflows.
     steps:
       - uses: actions/checkout@v7
-      - uses: taiki-e/install-action@v2
-        with:
-          tool: actionlint@1.7.12
+      - name: Install actionlint (pinned; GitHub release, not crates.io)
+        run: |
+          curl -sSL https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz | tar xz -C /usr/local/bin actionlint
+          actionlint -version
       - name: actionlint
         run: actionlint
 
