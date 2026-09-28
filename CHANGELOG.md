@@ -41,6 +41,11 @@ Two conventions worth knowing before reading:
   tautological), daemon-id path assertions, in-loop `304` coverage, and a test
   pinning that `sync_metrics` ignores the body `code` envelope exactly like the
   Go client. Findings and triage: [REVIEW_CPDAEMON_TESTS.md](REVIEW_CPDAEMON_TESTS.md).
+- The last gap from that review is now closed: `worker_manager_spawns_the_real_cpworker`
+  (privileged `#[ignore]`) drives the full strategy → `WorkerManager` → real
+  `cpworker` spawn bridge - config serialization, process spawn, unix control and
+  captured loopback packets - and the `live-capture` CI job builds `cpworker` and
+  asserts the test executed rather than silently skipping.
 - A minimal CPM mock (axum, ephemeral port, request recording) lives in
   `crates/cpdaemon/tests/common/mod.rs` for reuse by future daemon tests.
 

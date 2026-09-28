@@ -13,12 +13,18 @@ mod common;
 use std::sync::Arc;
 use std::time::Duration;
 
+use cpdaemon::cpm::models::SyncStrategyResponse;
+use cpdaemon::cpm::worker_mgr::WorkerConfig as DaemonWorkerConfig;
+use cpdaemon::cpm::worker_mgr::{MemoryConfig, PipelineConfig, WorkerManager};
+use cpdaemon::reslimit::CgroupCfg;
+use cpdaemon::tool::Tool;
 use cpdaemon::worker::{ExecConfig, Worker};
 use cpdaemon::worker_config::{Config, ControlConfig, ControlUnixConfig};
 use cpgolib::cpworker::{Client, UnixClient};
 use nix::errno::Errno;
 use nix::sys::signal::kill;
 use nix::unistd::Pid;
+use serde_json::json;
 
 use common::{cpworker_binary, wait_until};
 
@@ -152,4 +158,117 @@ fn daemon_supervises_the_real_cpworker() {
         "the worker process {pid} must actually be terminated by stop()"
     );
     assert!(!pid_path.exists(), "pid file must be removed on stop");
+}
+
+fn daemon_worker_config(
+    executable: &str,
+    config_file: &str,
+    pid_file: &str,
+    socket_path: &str,
+) -> DaemonWorkerConfig {
+    DaemonWorkerConfig {
+        pid_file: pid_file.into(),
+        config_file: config_file.into(),
+        executable: executable.into(),
+        env: Default::default(),
+        work_dir: None,
+        cgroup_cfg: CgroupCfg::default(),
+        cpu_affinity: String::new(),
+        log_level: "INFO".into(),
+        control: ControlConfig {
+            ty: "unix".into(),
+            unix: Some(ControlUnixConfig {
+                path: socket_path.into(),
+            }),
+        },
+        execution_model: "rtc".into(),
+        pipeline: PipelineConfig::default(),
+        update_policy: "restart".into(),
+        memory: MemoryConfig::default(),
+    }
+}
+
+/// The full bridge the daemon actually uses: a CPM strategy → `build_tasks`
+/// serialises a worker config → the real `cpworker` is spawned → the manager
+/// talks to it over the unix socket → `stop()`.
+///
+/// The task captures on `lo` (the strategy always builds a libpcap capturer),
+/// which needs `CAP_NET_RAW`, so this is `#[ignore]` and runs in the privileged
+/// `live-capture` CI job via `--ignored`. It panics (does not skip) when it
+/// cannot capture, so a lost privilege is a red test, not a green no-op.
+#[test]
+#[ignore = "requires root/CAP_NET_RAW: captures on lo"]
+fn worker_manager_spawns_the_real_cpworker() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let sock = dir.path().join("control.sock");
+    let cfg_path = dir.path().join("worker.json");
+    let pid_path = dir.path().join("worker.pid");
+    let dump_dir = dir.path().join("dump");
+    std::fs::create_dir_all(&dump_dir).expect("create dump dir");
+
+    let mgr = WorkerManager::new(
+        daemon_worker_config(
+            &cpworker_binary().to_string_lossy(),
+            &cfg_path.to_string_lossy(),
+            &pid_path.to_string_lossy(),
+            &sock.to_string_lossy(),
+        ),
+        Tool::default(),
+    );
+
+    let res: SyncStrategyResponse = serde_json::from_value(json!({
+        "id": 1,
+        "daemonId": 1,
+        "version": 1,
+        "syncInterval": 15,
+        "strategy": [{
+            "interfaceNames": ["lo"],
+            "packetChannelType": "FILE",
+            "dumpDir": dump_dir.to_string_lossy(),
+            "dumpInterval": 60,
+        }],
+    }))
+    .expect("strategy");
+
+    let created = mgr
+        .create_if_dead(&res, "daemon-uuid", &[])
+        .expect("spawn worker");
+    assert!(
+        created.warnings.is_empty(),
+        "unexpected task warnings: {:?}",
+        created.warnings
+    );
+    let pid = mgr.pid();
+    assert!(pid > 0, "the manager must record the spawned worker pid");
+    assert!(wait_until(Duration::from_secs(5), || mgr.is_alive()));
+
+    // Control plane through the manager (this is the client the syncer uses for
+    // metrics).
+    assert!(
+        wait_until(Duration::from_secs(10), || mgr
+            .collect_stats_summary(Duration::from_secs(1))
+            .is_ok()),
+        "the manager could not talk to the spawned worker"
+    );
+
+    // Generate loopback traffic and require the capture path to see it.
+    let probe = std::net::UdpSocket::bind("127.0.0.1:0").expect("udp socket");
+    let addr = probe.local_addr().expect("local addr");
+    for _ in 0..32 {
+        let _ = probe.send_to(b"cloud-probe-e2e", addr);
+    }
+    let mut seen = 0u64;
+    let captured = wait_until(Duration::from_secs(10), || {
+        if let Ok(stats) = mgr.collect_stats_summary(Duration::from_secs(1)) {
+            seen = stats.capture.cap_packets.packets;
+        }
+        seen > 0
+    });
+    assert!(captured, "expected captured loopback packets, saw {seen}");
+
+    mgr.stop().expect("stop worker");
+    assert!(
+        wait_until(Duration::from_secs(5), || !os_process_exists(pid)),
+        "the spawned worker {pid} must be terminated by stop()"
+    );
 }

@@ -142,6 +142,34 @@ jobs:
           grep -qx "test live_capture_veth_delivers_exactly_n_frames ... ok" live-capture.log \
             || { echo "::error::the veth capture-fidelity gate did not execute and pass"; exit 1; }
 
+      - name: Build the daemon-to-worker spawn test and its cpworker
+        run: |
+          cargo build -p cpworker --locked
+          cargo test -p cpdaemon --test worker_supervision --no-run --locked
+
+      - name: Run the daemon-to-worker spawn test as root
+        # DS-3 (review of the cpdaemon e2e tests): the
+        # strategy -> WorkerManager -> real cpworker spawn bridge had no
+        # end-to-end coverage. The unprivileged suites stop at the config layer,
+        # because the bridge always builds a libpcap capturer and that needs
+        # CAP_NET_RAW. The test is #[ignore]d and panics (never skips) without
+        # privileges, and this step asserts it actually executed.
+        run: |
+          BIN=$(find target/debug/deps -maxdepth 1 -type f -name 'worker_supervision-*' ! -name '*.d' | head -n1)
+          test -n "$BIN" || { echo "::error::no worker_supervision test binary was built"; exit 1; }
+          N=$("$BIN" --ignored --list | sed -n '/: test$/p' | wc -l)
+          echo "binary advertises $N ignored spawn test(s)"
+          [ "$N" -ge 1 ] || { echo "::error::expected at least 1 ignored spawn test, found $N"; exit 1; }
+          # shellcheck disable=SC2024
+          # The redirect is intentional: the log is written as the runner user
+          # so the greps below can read it.
+          sudo -E "$BIN" --ignored --nocapture > spawn.log 2>&1 || true
+          cat spawn.log
+          grep -q "test result: ok. $N passed; 0 failed" spawn.log \
+            || { echo "::error::the spawn test did not execute/pass"; exit 1; }
+          grep -qx "test worker_manager_spawns_the_real_cpworker ... ok" spawn.log \
+            || { echo "::error::the daemon-to-worker spawn gate did not execute and pass"; exit 1; }
+
   clippy:
     name: clippy
     runs-on: ubuntu-latest
