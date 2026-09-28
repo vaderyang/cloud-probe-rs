@@ -38,6 +38,21 @@ fn privileged() -> bool {
     unsafe { libc::geteuid() == 0 }
 }
 
+/// These tests are `#[ignore]`d so that they only ever run in the privileged
+/// job - which means a non-privileged run has to be a **failure**, never a silent
+/// pass. Returning early used to report `test result: ok. 4 passed` while nothing
+/// was opened, read or asserted, and `parity/all.sh`/CI stayed green on top of it
+/// (AUDIT4 P2-2: "the live-capture job can be fully green while executing
+/// nothing").
+fn assert_privileged(what: &str) {
+    if !privileged() {
+        panic!(
+            "{what} must run as root / with CAP_NET_RAW (it is #[ignore]d for exactly \
+             that reason); run: sudo -E <af_packet_live binary> --ignored --nocapture"
+        );
+    }
+}
+
 fn run_ok(cmd: &str, args: &[&str]) {
     let status = std::process::Command::new(cmd)
         .args(args)
@@ -92,10 +107,7 @@ fn send_tagged_frame(ifname: &str, tci: u16) {
 #[test]
 #[ignore = "requires CAP_NET_RAW (run with sudo) on lo"]
 fn live_capture_on_loopback_with_filter() {
-    if !privileged() {
-        eprintln!("skipping: not root / no CAP_NET_RAW");
-        return;
-    }
+    assert_privileged("live_capture_on_loopback_with_filter");
     const PORT: u16 = 41234;
     let json = format!(
         r#"{{
@@ -154,10 +166,7 @@ fn live_capture_on_loopback_with_filter() {
 #[test]
 #[ignore = "requires CAP_NET_RAW (run with sudo); creates a veth pair"]
 fn live_capture_reinserts_vlan_on_veth() {
-    if !privileged() {
-        eprintln!("skipping: not root / no CAP_NET_RAW");
-        return;
-    }
+    assert_privileged("live_capture_reinserts_vlan_on_veth");
     const TCI: u16 = 100;
 
     // Best-effort cleanup of any stale pair, then create a fresh one.
@@ -232,10 +241,7 @@ fn live_capture_reinserts_vlan_on_veth() {
 #[test]
 #[ignore = "requires CAP_NET_RAW (run with sudo) on lo"]
 fn live_capture_falls_back_to_userspace_filtering() {
-    if !privileged() {
-        eprintln!("skipping: not root / no CAP_NET_RAW");
-        return;
-    }
+    assert_privileged("live_capture_falls_back_to_userspace_filtering");
     const PORT: u16 = 41239;
 
     // >4096 instructions: SO_ATTACH_FILTER is refused (EINVAL), so the capturer
@@ -300,10 +306,7 @@ fn live_capture_falls_back_to_userspace_filtering() {
 #[test]
 #[ignore = "requires CAP_NET_RAW (run with sudo) on lo"]
 fn live_capture_loopback_does_not_duplicate_frames() {
-    if !privileged() {
-        eprintln!("skipping: not root / no CAP_NET_RAW");
-        return;
-    }
+    assert_privileged("live_capture_loopback_does_not_duplicate_frames");
     const PORT: u16 = 41241;
     const N: usize = 10_000;
 

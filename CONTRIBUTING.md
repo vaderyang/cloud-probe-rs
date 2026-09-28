@@ -139,7 +139,11 @@ sudo -E "$(find target/debug/deps -type f -name 'af_packet_live-*' ! -name '*.d'
      --ignored --nocapture
 ```
 
-CI's `live-capture` job does exactly this in a privileged runner. Changes to
+CI's `live-capture` job does exactly this in a privileged runner, and it fails unless
+every ignored test in that binary actually executed (`--ignored --list` count ==
+`N passed`). A live test must therefore never `return` early when the environment is
+not good enough - it `panic!`s. Silently skipping is what made that job report
+`4 passed` while opening no socket (P2-2). Changes to
 `capturer/af_packet.rs` (stats, auxdata/VLAN, buffer sizes, socket setup ordering,
 filter attach/fallback) are only considered tested if this suite ran.
 

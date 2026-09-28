@@ -86,11 +86,27 @@ jobs:
         run: cargo test -p cpworker --test af_packet_live --no-run --locked
       - name: Run AF_PACKET capture test on lo as root
         # Covers the real AF_PACKET path (socket/bind ordering, SO_ATTACH_FILTER,
-        # SO_RCVBUFFORCE with CAP_NET_ADMIN, timestamps) that the other jobs skip.
+        # SO_RCVBUFFORCE with CAP_NET_ADMIN, timestamps, VLAN reinsertion) that
+        # the other jobs skip.
+        #
+        # AUDIT4 P2-2: this job used to be able to go green while executing
+        # nothing. Two independent ways to do that existed: the tests returned
+        # early when unprivileged (reported `ok. 4 passed`), and `--ignored` also
+        # exits 0 when it matches zero tests (stale binary picked up by `find`, a
+        # test renamed, or a lost `#[ignore]`). The tests now panic instead of
+        # skipping, and the job asserts that the number of ignored tests the
+        # binary *advertises* is the number that actually *executed*.
         run: |
           BIN=$(find target/debug/deps -maxdepth 1 -type f -name 'af_packet_live-*' ! -name '*.d' | head -n1)
+          test -n "$BIN" || { echo "::error::no af_packet_live test binary was built"; exit 1; }
           echo "running $BIN"
-          sudo -E "$BIN" --ignored --nocapture
+          N=$("$BIN" --ignored --list | sed -n '/: test$/p' | wc -l)
+          echo "binary advertises $N ignored live-capture test(s)"
+          [ "$N" -ge 4 ] || { echo "::error::expected at least 4 ignored live tests, found $N"; exit 1; }
+          sudo -E "$BIN" --ignored --nocapture > live-capture.log 2>&1
+          cat live-capture.log
+          grep -q "test result: ok. $N passed; 0 failed" live-capture.log \
+            || { echo "::error::live capture did not execute all $N tests"; exit 1; }
 
   clippy:
     name: clippy

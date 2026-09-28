@@ -66,6 +66,15 @@ Two conventions worth knowing before reading:
 
 ### Fixed
 
+### Fixed
+
+- `crates/cpworker/tests/af_packet_live.rs` no longer reports success when it could
+  not capture (P2-2). Each test returned early without root, so an unprivileged
+  `--ignored` run printed `test result: ok. 4 passed` while opening no socket at all,
+  and the CI `live-capture` job could be green while executing nothing. The tests now
+  panic when unprivileged (they are `#[ignore]`d exactly so that they only run in that
+  job), and the job asserts that the number of ignored tests the binary advertises via
+  `--ignored --list` is the number that actually executed.
 - `SimpleAllocator::release` no longer calls `AtomicU64::fetch_update`, which
   current nightly deprecated (renamed `try_update`, not in the MSRV). It is the
   same CAS loop `reserve` uses, and the saturating behaviour it relies on - a
