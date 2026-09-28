@@ -40,10 +40,21 @@ if ! rustup toolchain list | grep -q '^nightly'; then
     echo "==> installing nightly toolchain (libFuzzer needs it)"
     rustup toolchain install nightly --profile minimal
 fi
+# Same pinning and lockfile discipline as ../fuzz.sh (AUDIT4 P3-2 / P3-5): a pinned
+# driver, and both workspaces asserted to resolve to their committed lockfiles -
+# `cargo fuzz` has no --locked of its own to forward, so the assertion is the fix.
+CARGO_FUZZ_VERSION="0.13.2"
 if ! command -v cargo-fuzz >/dev/null 2>&1; then
-    echo "==> installing cargo-fuzz"
-    cargo install cargo-fuzz
+    echo "==> installing cargo-fuzz $CARGO_FUZZ_VERSION"
+    cargo install cargo-fuzz --version "$CARGO_FUZZ_VERSION"
 fi
+for manifest in "$RUST_DIR/Cargo.toml" "$RUST_DIR/crates/cpworker/fuzz/Cargo.toml"; do
+    if ! cargo metadata --locked --format-version 1 --manifest-path "$manifest" >/dev/null; then
+        echo "::error::$manifest does not resolve with --locked; refresh its Cargo.lock"
+        exit 1
+    fi
+done
+echo "==> both workspaces resolve exactly to their committed lockfiles (--locked)"
 HOST_TRIPLE="$(rustc -vV | sed -n 's/^host: //p')"
 [ -n "$HOST_TRIPLE" ] || HOST_TRIPLE="x86_64-unknown-linux-gnu"
 

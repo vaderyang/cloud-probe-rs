@@ -34,6 +34,14 @@ Two conventions worth knowing before reading:
 
 ### Changed
 
+- CI `msrv` job runs `cargo build --workspace --all-targets --locked`: plain `cargo
+  build` never compiles dev-dependencies or `tests/`, so "MSRV 1.88 is verified"
+  covered less than the README claimed (GLM P3-1). Verified locally on 1.88.0.
+- `fuzz.sh` and `parity/difffuzz.sh` install a **pinned** `cargo-fuzz` (0.13.2) and
+  assert with `cargo metadata --locked` that both workspace lockfiles still match
+  their manifests before building - `cargo fuzz` has no `--locked` of its own to
+  forward, so the fuzz jobs were the last place where a run could silently use a
+  different dependency graph than the one `deny` audited (GLM P3-2/P3-5).
 - `--locked` on every dependency-resolving cargo command in CI, in the release
   build, and in the six `parity/` harness builds, so a build cannot silently
   resolve something other than the committed lockfiles (P5-27).
@@ -65,6 +73,43 @@ Two conventions worth knowing before reading:
   (P5-25).
 
 ### Fixed
+
+- **P3 batch from the same two reviews.** Each item keeps its own regression test:
+  * `zmq.hwm` was range-checked twice, and the second check was unreachable (the
+    first `i32_in` had already enforced the same range), so its user-facing
+    message - with a run of spaces in it - could never be shown. One gate now
+    (`zmq_hwm_is_range_checked_by_a_single_wellformed_gate`).
+  * `parse_control()` walked cmsgs with a hand-written iterator that bounded the
+    *header* but not the *data*: a header claiming more than `msg_controllen`
+    holds was read 16/20 bytes past the buffer (unreachable with the kernel
+    filling it, but exactly the arithmetic M4 set out to remove). It now applies
+    the `CMSG_OK` data bound (`parse_control_ignores_a_cmsg_that_overruns_the_buffer`,
+    which before the fix reported a VLAN tag the kernel never sent).
+  * A task whose second output fails to be created dropped the first output
+    without ever calling `destroy()` - `Output` has no draining `Drop`, and the
+    single call point is `TaskManager::stop()`, which a partially built task never
+    reaches. Outputs are now parked behind `PendingOutputs`, whose `Drop` destroys
+    them (`pending_outputs_destroys_everything_it_throws_away`, plus a
+    `verify_liveness.sh` line, because no file output can reveal this end-to-end:
+    `PcapWriter`'s `BufWriter` flushes on its own `Drop`).
+  * A rejected BPF expression used to be quoted *in full* into `task.error`, which
+    `print_errors()` re-logs every 60s per task (20KB lines were reproducible with
+    an 8KiB filter). Errors now carry a bounded, UTF-8-safe prefix plus the length
+    (`a_rejected_filter_is_quoted_with_a_bound_not_in_full`).
+  * The 2-second `PACKET_STATISTICS` cadence compared packet timestamps with wall
+    clock, so a fallback to second-resolution or zero timestamps could stall drop
+    sampling; the cadence now uses one clock (`PARITY.md §4`).
+- `bench/live_bench.py` can no longer report a broken task as "not measured", and it
+  can actually do the thing its own documentation recommends (P2-4/P2-5). Unreadable
+  counters are reported as `"cap_packets": "unavailable"` with exit code 3;
+  `cap_packets == 0` with datagrams sent prints `!! <name> captured NOTHING` and
+  exits 2 (verified live: flooding 127.0.0.1 while capturing on a veth now exits 2
+  instead of printing `null`s). The flood target is parameterised: `FLOOD_DST`
+  overrides, a non-loopback interface is fed with raw frames injected from its veth
+  peer, and `bench/live_bench.py --selftest` covers the classification without a
+  network. Measured with the veth path: 103 879 datagrams sent → 103 879 captured,
+  ratio 1.0000, exit 0. `worker_cpu()` reads `/proc` directly instead of
+  `pgrep -f` + `cat`, which raced and mis-matched other command lines.
 
 - Name resolution while rebuilding tasks can no longer freeze the worker (P2-10).
   Compiling a filter that contains a host name calls `getaddrinfo()`, and both reload

@@ -19,7 +19,8 @@ a separate checkout; set `CLOUD_PROBE_SRC` when running the differential/fuzz ha
 ## Build
 
 Requires Rust **1.88+** (`rust-version` in `Cargo.toml`). That floor is verified, not
-aspirational: CI has an `msrv` job that builds the whole workspace on 1.88.0.
+aspirational: the CI `msrv` job builds the whole workspace on 1.88.0 - library,
+binaries, tests and dev-dependencies (`--all-targets`).
 
 ```bash
 # from this directory

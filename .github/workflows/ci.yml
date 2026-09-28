@@ -63,6 +63,11 @@ jobs:
     # code path, or a dependency bump raises its own MSRV, it fails here instead
     # of on a downstream user's machine. --locked is what makes the dependency
     # half of that statement reproducible.
+    #
+    # --all-targets (AUDIT4 GLM P3-1): plain `cargo build` skips dev-dependencies
+    # and `tests/`, so a dev-dep MSRV bump - or a test using a feature newer than
+    # 1.88 - stayed green here and only failed for whoever next ran `cargo test`.
+    # The job now covers the whole build graph, which is what the README claims.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -77,7 +82,7 @@ jobs:
           # Do not share a cache with the stable jobs: artifacts built by 1.88
           # and by stable are not interchangeable.
           key: msrv-1.88
-      - run: cargo build --workspace --locked
+      - run: cargo build --workspace --all-targets --locked
 
   live-capture:
     name: live capture (privileged)

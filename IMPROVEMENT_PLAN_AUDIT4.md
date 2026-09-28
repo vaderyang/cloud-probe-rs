@@ -469,9 +469,36 @@ WP2 与 WP3 可并行；M1 必须最先（唯一可能"完全无数据"的缺陷
 | P2-9 | 解析结果数量无上限 → DNS 数据可把程序推过 4096 指令而**静默退化**为用户态逐帧解释 | 新增 `MAX_RESOLVED_ADDRS=64`（越界报错含主机名 + 两个数量）；用户态回退打印可告警的 `bpf_userspace_fallback insns=N limit=4096 kernel=BPF_MAXINSNS`；解析改走可注入的 `Resolver` seam（`parse_with`），使上限与 OR 展开可离线测试 | `oversized_resolution_is_refused_by_name_not_silently_expand`（去掉上限即失败）；`userspace_fallback_warning_carries_the_instruction_count` |
 ### 低优先项（同批完成）
 
-- P3 `config.rs`：`zmq.hwm` 的重复校验死码 → 删除（保留 `i32_in` 单一入口）。
-- P3 `af_packet.rs`：`parse_control()` 手写 cmsg 遍历补上 `CMSG_OK` 等价的**数据上界**校验（越界读防护）。
-- P3 `.github/workflows/ci.yml`：MSRV job 改为 `cargo build --workspace --all-targets --locked`（覆盖 dev-deps 与测试代码）。
-- P3 `fuzz.sh`/`parity/difffuzz.sh`：入口加 `cargo metadata --locked` 断言两份 lockfile 不漂移；`cargo install cargo-fuzz --version` 固定版本。
-- P2-4/P2-5 `bench/live_bench.py`：统计不可用输出 `"unavailable"` 并保持非零退出；`cap==0 && sent>0` 显式 `!! captured NOTHING` + exit 2；灼流目标可参数化（`FLOOD_DST`/veth 用 AF_PACKET 注帧），使"保真度对拍请用 veth"在脚本里真的做得到。
+- ✅ **P2-4/P2-5 `bench/live_bench.py`**：统计读取失败输出 `"cap_packets": "unavailable"` + `stats_available:false`
+  并以退出码 3 结束；`cap==0 && sent>0` 打印 `!! <name> captured NOTHING` 并退出 2（真实验证：在 veth 上抓包、
+  却向 127.0.0.1 注流 → 退出码 2，而修复前只会输出 `null`）；灼流目标参数化：`FLOOD_DST` 优先，非 lo 接口改为
+  **从其 veth peer 注入原始帧**（本机同侧 UDP 会被内核走 lo，这正是"请用 veth"做不到的根因）；
+  `bench/live_bench.py --selftest` 覆盖分类逻辑（旧逻辑下 4 项 FAIL）；`worker_cpu()` 改为直读 `/proc`，
+  不再 `pgrep -f` + `cat`（GLM 观察项：会误匹配、且 pid 竞态会往 stdout 吐错误）。
+  veth 实测：103 879 报文 → cap_packets 103 879，ratio 1.0000，EXIT=0。
+- ✅ **P3（qwen P3-1）`zmq.hwm` 重复校验死码**：删除恒假的第二道检查，只留 `i32_in`；回归断言"用户可见消息里不得有连续空格"。
+- ✅ **P3（qwen P3-3）`parse_control()` cmsg 数据上界**：补 `CMSG_OK` 等价检查；回归构造"头部谎报长度 + 越界区放一条合法 AUXDATA"，
+  修复前会读出内核从未发出的 VLAN tag（`Some(VlanTag { tci: 356, tpid: 33024 })`）。
+- ✅ **P3（qwen P3-2）`build_task()` 部分失败绕过 `destroy()`**：新增 `PendingOutputs`（其 `Drop` 逐个 `destroy()`，
+  成功路径 `finish()` 移交后为空操作）；单元测试钉住"三个 output 全部被 destroy"与"finish() 后 Drop 不动作"，
+  并在 `verify_liveness.sh` 加一条门禁（文件型 output 端到端看不出来：`BufWriter` 自身 `Drop` 会 flush）。
+- ✅ **P3（qwen P3-8）BPF 编译失败时整条表达式落盘**：`expr_preview()` 限长 120B（按 UTF-8 边界回退）并标注原长度。
+- ✅ **P3（qwen P3-4）`PACKET_STATISTICS` 节拍混用包时间戳与墙钟**：收包分支改用 `now_sec()`，节拍只有一个时钟源。
+- ✅ **P3（GLM P3-1）MSRV job 覆盖 dev-deps/测试**：`cargo build --workspace --all-targets --locked`（本机 1.88.0 实测通过），
+  README/CONTRIBUTING 措辞同步。
+- ✅ **P3（GLM P3-2/P3-5）fuzz 入口的 lockfile 与工具版本**：`fuzz.sh`/`parity/difffuzz.sh` 固定 `cargo-fuzz 0.13.2`，
+  并在入口对**两份** lockfile 跑 `cargo metadata --locked`（cargo-fuzz 0.13.2 无 `--locked` 可转发，已核实其 `--help`）。
+
+### 明确未完成 / 待决
+
+- **qwen P3-6（基准精度夸大）**：本轮未改 README/`bench/RESULTS.md` 的数字呈现（补 `REPEAT/N/min-max`、改为追加而非覆盖）。
+  属文档/流程项，与本轮缺陷无因果关系，建议单独一批。
+- **qwen P3-7 的 fuzz 超时**：`fuzz.sh` smoke 仍只有 `-rss_limit_mb`，未加 `-timeout=`，所以"构造输入导致的近挂死"
+  （例如超大用户态过滤）仍不会被 smoke 发现。加 `-timeout=10` 是一行改动，但它会让既有 corpus 中的慢用例变成红灯，
+  需要一次实际的 corpus 评估，未纳入本轮。
+- **qwen §4-5 / §4-7（门禁盲区：整文件输出对拍、veth 保真度硬门禁）**：`live_bench.py` 现在真的能在 veth 上跑出
+  ratio 1.0000，但把它固化成 privileged job 的硬断言（发 N 帧 ⇒ `cap_packets == N`）仍未做——需要 CI 里的 veth/注流权限与速率上限，
+  属独立工程项（`§5-7` 原判断不变）。
+- **qwen §5-1（libpcap 为何只交付 lo 的一半副本）**：仍未做源码级确认；本轮只对齐了**可观测行为**（`PACKET_IGNORE_OUTGOING`）。
+- **GLM P3-3（cargo-audit 只审计根 lockfile）**：未加 `--file crates/cpworker/fuzz/Cargo.lock`；fuzz 侧 advisories 目前由 cargo-deny 覆盖。
 

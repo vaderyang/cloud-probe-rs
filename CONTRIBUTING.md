@@ -11,7 +11,7 @@ findings are recorded.
 
 | What | Version | Why |
 |---|---|---|
-| Rust | **1.88** (declared `rust-version`, verified by the CI `msrv` job) | Do not use a feature newer than 1.88 in a code path; if a dependency bump raises its own MSRV, that job fails. |
+| Rust | **1.88** (declared `rust-version`, verified by the CI `msrv` job with `--all-targets`) | Do not use a feature newer than 1.88 in a code path; if a dependency bump raises its own MSRV, that job fails - including for dev-dependencies and `tests/`, which plain `cargo build` never compiles. |
 | Rust nightly | latest | Only for `cargo fuzz` (`./fuzz.sh`). |
 | `protoc` | any recent | Only to build `cripid` (`build.rs` codegen from the vendored `proto/api.proto`). It is a build tool: nothing links a C library. |
 | `libpcap` / `libzmq` | system | **Only** to compile the C oracles in `parity/`. `cargo build`/`cargo test` do not need them. |
