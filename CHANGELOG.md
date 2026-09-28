@@ -16,6 +16,27 @@ Two conventions worth knowing before reading:
 
 ### Added
 
+- `cpdaemon` now exposes a **library target** (`src/lib.rs`) and has end-to-end
+  tests under `crates/cpdaemon/tests/`. This closes the largest remaining test
+  gap in the port: `cpdaemon` previously had 14 unit tests and **no integration
+  coverage**, so the whole "CPM pushes a strategy → daemon reconciles → worker
+  runs" path had no executable evidence. The new suites are:
+  - `cpm_client_contract.rs` - the CPM HTTP wire contract against an axum mock
+    (register request/response, strategy pull, `304`, the `200 OK` +
+    `{"code": >= 400}` envelope error, and an HTTP-level error), 6 tests.
+  - `syncer_end_to_end.rs` - the real `Syncer::run` loop (register → versioned
+    strategy pull → metrics push) against the mock CPM, asserting on the
+    register identity, the `-1 → 1` strategy version round-trip and the metrics
+    body.
+  - `worker_supervision.rs` - the daemon's `Worker` supervisor driving the
+    **real `cpworker` binary**: the written config is accepted by cpworker, the
+    pid file / liveness / unix control socket work (`info`/`ping`/
+    `collect_stats_summary`), a reload preserves the process, and `stop()`
+    removes the pid file. Runs unprivileged (empty task list), so it is a normal
+    gate rather than another `#[ignore]` live test.
+- A minimal CPM mock (axum, ephemeral port, request recording) lives in
+  `crates/cpdaemon/tests/common/mod.rs` for reuse by future daemon tests.
+
 - Repository convention files: [CONTRIBUTING.md](CONTRIBUTING.md) (gates, the
   red→green rule, no-C-dependency policy, how to add a fuzz target or a parity
   case), [SECURITY.md](SECURITY.md) (threat model, capability guidance, the CPM
@@ -34,6 +55,9 @@ Two conventions worth knowing before reading:
 
 ### Changed
 
+- `cpworker`'s unimplemented `dpdk_pdump` capturer now reports "not implemented in
+  this port (PARITY.md §5.1)" instead of "rebuild with the DPDK feature" - there
+  is no such feature, so the old message pointed operators at a dead end.
 - CI `msrv` job runs `cargo build --workspace --all-targets --locked`: plain `cargo
   build` never compiles dev-dependencies or `tests/`, so "MSRV 1.88 is verified"
   covered less than the README claimed (GLM P3-1). Verified locally on 1.88.0.

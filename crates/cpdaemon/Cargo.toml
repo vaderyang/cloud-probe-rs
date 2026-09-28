@@ -17,7 +17,7 @@ anyhow.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 clap.workspace = true
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal", "sync"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal", "sync", "time"] }
 axum.workspace = true
 reqwest.workspace = true
 chrono.workspace = true
@@ -26,3 +26,7 @@ parking_lot.workspace = true
 nix.workspace = true
 log.workspace = true
 cpgolib = { path = "../cpgolib" }
+
+[dev-dependencies]
+# Drives the real `cpworker` binary from the end-to-end tests under `tests/`.
+tempfile = "3"

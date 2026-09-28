@@ -54,7 +54,7 @@ pub fn new_capturer(
             pcap_file::PcapFileCapturer::new(tasks, task, c, stats).map(|c| Box::new(c) as _)
         }
         CapturerKind::DpdkPdump(_) => Err(Error::new(
-            "dpdk_pdump capturer not supported: rebuild with the DPDK feature",
+            "dpdk_pdump capturer is not implemented in this port (PARITY.md §5.1); use the libpcap capturer",
         )),
     }
 }

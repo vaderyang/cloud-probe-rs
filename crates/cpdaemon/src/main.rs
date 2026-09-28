@@ -6,18 +6,6 @@
 // with a pointer to `PARITY.md` §5; do not add new unused code without a plan to
 // wire it up or remove it.
 
-mod common;
-mod config;
-mod cpm;
-mod error;
-mod httpmix;
-mod macros;
-mod reslimit;
-mod tool;
-mod worker;
-mod worker_config;
-mod worker_log;
-
 use std::collections::HashMap;
 use std::path::Path;
 use std::time::Duration;
@@ -25,13 +13,14 @@ use std::time::Duration;
 use clap::{Parser, Subcommand};
 use tokio::sync::watch;
 
-use config::{DaemonConfig, DEFAULT_HTTP_PORT};
-use cpm::client::{ClientConfig, HttpClient};
-use cpm::syncer::{generate_uuid, RegConfig, Syncer, SyncerConfig};
-use cpm::worker_mgr::{MemoryConfig, PipelineConfig, WorkerConfig, WorkerManager};
-use reslimit::CgroupCfg;
-use tool::Tool;
-use worker_config::{ControlConfig, ControlUnixConfig};
+use cpdaemon::config::{DaemonConfig, DEFAULT_HTTP_PORT};
+use cpdaemon::cpm;
+use cpdaemon::cpm::client::{ClientConfig, HttpClient};
+use cpdaemon::cpm::syncer::{generate_uuid, RegConfig, Syncer, SyncerConfig};
+use cpdaemon::cpm::worker_mgr::{MemoryConfig, PipelineConfig, WorkerConfig, WorkerManager};
+use cpdaemon::reslimit::CgroupCfg;
+use cpdaemon::tool::Tool;
+use cpdaemon::worker_config::{ControlConfig, ControlUnixConfig};
 
 #[derive(Parser, Debug)]
 #[command(name = "cpdaemon", version, about = "Cloud Probe management daemon")]
@@ -279,7 +268,7 @@ mod tests {
         // empty / absent keeps viper's default (the field default is "9022")
         assert_eq!(
             parse_http_port("").unwrap(),
-            crate::config::DEFAULT_HTTP_PORT
+            cpdaemon::config::DEFAULT_HTTP_PORT
         );
     }
 
