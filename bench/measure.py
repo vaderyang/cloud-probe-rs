@@ -5,8 +5,25 @@ Usage: measure.py <binary> <config.json>
 
 Watches stderr for the capturer's `end of file` marker (both the C and Rust
 implementations log it after the last packet), records wall time until then and
-the process peak RSS (VmHWM), then sends SIGTERM. Prints a JSON line:
-  {"elapsed": <s>, "rss_kb": <kb>, "ok": <bool>}
+the process peak RSS (VmHWM), then sends SIGTERM.
+
+The reported `elapsed` is a *span between two observable events*, and both of its
+ends are wider than "packet processing", which is why the numbers it feeds are
+ratios rather than absolute throughput (qwen P3-6):
+
+* it starts at `Popen`, so process start-up, config parsing and capturer set-up
+  are inside it - quantified here as `startup_s`;
+* it stops at the `end of file` line, which the capturer logs after the last
+  packet but *before* its outputs are destroyed, i.e. before the pcap writer's
+  final flush - quantified here as `flush_after_s` (marker to process exit).
+
+Both add the same kind of overhead to both binaries, so the direction of a C/Rust
+comparison is unaffected; the absolute values are not comparable to another
+machine, kernel, or to `tcpdump`.
+
+Prints one JSON line:
+  {"elapsed": <s>, "rss_kb": <kb>, "ok": <bool>,
+   "startup_s": <s>, "flush_after_s": <s>, "marker": "<line>", "binary": "<path>"}
 """
 import json
 import os
@@ -42,11 +59,16 @@ def main():
     t0 = time.perf_counter()
     ok = False
     t_end = None
+    t_first = None
+    marker = ""
     deadline = t0 + TIMEOUT
     try:
         for line in p.stderr:
+            if t_first is None:
+                t_first = time.perf_counter()
             if MARKER in line:
                 t_end = time.perf_counter()
+                marker = line.strip()[:200]
                 ok = True
                 break
             if time.perf_counter() > deadline:
@@ -65,7 +87,22 @@ def main():
             p.wait(timeout=5)
         except Exception:
             pass
-    print(json.dumps({"elapsed": t_end - t0, "rss_kb": rss, "ok": ok}))
+    t_exit = time.perf_counter()
+    print(
+        json.dumps(
+            {
+                "elapsed": t_end - t0,
+                "rss_kb": rss,
+                "ok": ok,
+                # spawn -> first stderr line: start-up, config parse, set-up.
+                "startup_s": (t_first - t0) if t_first else None,
+                # `end of file` -> process exit: everything the marker misses.
+                "flush_after_s": t_exit - t_end,
+                "marker": marker,
+                "binary": binary,
+            }
+        )
+    )
 
 
 if __name__ == "__main__":
