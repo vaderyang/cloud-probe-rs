@@ -39,7 +39,7 @@ jobs:
       - uses: actions/checkout@v7
       - name: Install actionlint (pinned; GitHub release, not crates.io)
         run: |
-          curl -sSL https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz | sudo tar xz -C /usr/local/bin --strip-components=1
+          curl -sSL https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz | sudo tar xz -C /usr/local/bin actionlint
           actionlint -version
       - run: actionlint -color
 
@@ -203,7 +203,7 @@ jobs:
       - uses: actions/checkout@v7
       - name: Install actionlint (pinned; GitHub release, not crates.io)
         run: |
-          curl -sSL https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz | sudo tar xz -C /usr/local/bin --strip-components=1
+          curl -sSL https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz | sudo tar xz -C /usr/local/bin actionlint
           actionlint -version
       - name: actionlint
         run: actionlint
