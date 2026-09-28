@@ -19,12 +19,25 @@ interface (the flood binds a receiver, so nothing is ICMP-refused):
     cpu_s            worker utime+stime burned during the window
     cpu_s_per_mpps   cpu_s / cap_packets * 1e6  <- the comparable number
 
-Read `cap_packets` before trusting anything: on loopback a frame is delivered
-twice (outbound + inbound), so "2 x sent" means "captured everything" and a
-smaller number means the capturer missed frames. Both implementations report
-`drop_packets == 0` in that situation, which is exactly why this prints counts
-next to CPU instead of a single throughput figure (AUDIT4 P5-02: a zero drop
-counter is not evidence of a lossless path).
+Read `cap_packets` before trusting anything: on loopback a datagram is tapped
+**twice** (the transmit `dev_queue_xmit_nit` copy and the receive
+`__netif_receive_skb` copy), so `frames/datagram ~ 2` means "captured
+everything", and only on a *non-loopback* interface (e.g. a veth pair) does a
+ratio near `1` mean that. A smaller number means the capturer missed frames, but
+note that **neither implementation reports those losses as drops**: `tp_drops`
+only counts socket-queue overflows, and `ps_recv` on loopback counts about twice
+what `pcap_next_ex` actually delivers. A zero drop counter is therefore not
+evidence of a lossless path (AUDIT4 P5-02).
+
+A1 note (AUDIT4 §5-6): this A/B was originally read as "Rust x2.00 vs C x0.79".
+That is a measurement artifact, not a capture defect: 1) loopback duplicates
+every datagram, so `~2x` is the expected/correct Rust ratio; 2) libpcap's
+`ps_recv` double-counts on loopback; 3) the C worker's stats were read through
+the *Rust* `cpctl`, whose control protocol is not compatible with the C worker
+(the call now fails with `Connection reset by peer`), and the C project ships no
+`cpctl` in its build tree. On a deterministic veth interface the Rust capturer
+records `frames/datagram == 1.0000` in every run. Use a veth pair, not `lo`, for
+any capture-fidelity comparison.
 """
 import json
 import os
@@ -127,6 +140,13 @@ def measure(name, binary):
     if not os.path.exists(binary):
         print(f"!! missing binary for {name}: {binary}", file=sys.stderr)
         return None
+    if IFACE == "lo":
+        print(
+            "!! capturing on 'lo': every datagram is tapped twice, so ~2 frames "
+            "per datagram is 'captured everything'. Use a veth pair for a "
+            "meaningful frames/datagram ratio.",
+            file=sys.stderr,
+        )
     tag = f"live_bench-{name}.json"
     cfg_path = f"/tmp/{tag}"
     sock = f"/tmp/live_bench-{name}.sock"
@@ -145,22 +165,30 @@ def measure(name, binary):
     sent, drained = flood(t0 + SECS)
     dt = time.time() - t0
     cpu = worker_cpu(tag) - cpu0
-    c = stats(sock)
+    try:
+        c = stats(sock)
+    except subprocess.CalledProcessError as e:
+        # The C worker speaks the C control protocol; the Rust `cpctl` used here
+        # is not wire-compatible with it (observed: `Connection reset by peer`),
+        # and the C tree ships no `cpctl`. Report the missing sample instead of
+        # aborting the whole A/B.
+        print(f"!! {name}: stats unavailable on {sock}: {e}", file=sys.stderr)
+        c = None
     subprocess.Popen(SUDO + ["kill", "-TERM", str(proc.pid)]).wait()
     proc.wait(timeout=10)
 
-    cap = c["cap_packets"]["packets"]
+    cap = c["cap_packets"]["packets"] if c else 0
     return {
         "sent": sent,
         "drained": drained,
         "wall_s": round(dt, 2),
         "cap_packets": cap,
-        "fwd_packets": c["fwd_packets"]["packets"],
-        "drop_packets": c["drop_packets"]["packets"],
-        "ifdrop_packets": c["ifdrop_packets"]["packets"],
+        "fwd_packets": c["fwd_packets"]["packets"] if c else None,
+        "drop_packets": c["drop_packets"]["packets"] if c else None,
+        "ifdrop_packets": c["ifdrop_packets"]["packets"] if c else None,
         "cpu_s": round(cpu, 2),
         "cpu_s_per_mpps": round(cpu / cap * 1e6, 3) if cap else None,
-        "frames_captured_per_datagram_sent": round(cap / sent, 2) if sent else None,
+        "frames_captured_per_datagram_sent": round(cap / sent, 2) if sent and cap else None,
     }
 
 
