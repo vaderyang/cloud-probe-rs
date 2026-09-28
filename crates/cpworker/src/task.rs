@@ -125,6 +125,46 @@ struct PipelineShared {
 /// A task's capturer plus its configured outputs.
 type BuiltTask = (Box<dyn Capturer>, Vec<Box<dyn Output>>);
 
+/// Holds outputs that have been created but not yet handed to a task, and runs
+/// `destroy()` on whatever it still holds when they are being thrown away.
+///
+/// `Output` deliberately has no `Drop` that drains (see `output::mod`), so the
+/// single `destroy()` call point in `TaskManager::stop()` is the only place that
+/// drains on the success path. A *partially built* task never reaches `stop()`:
+/// the second output's creation failed, the first was dropped with the `Vec`, and
+/// up to a BufWriter's worth of already-captured packets (and the ZMQ linger) went
+/// with it (AUDIT4 P3-2).
+struct PendingOutputs {
+    outputs: Vec<Box<dyn Output>>,
+}
+
+impl PendingOutputs {
+    fn new(capacity: usize) -> Self {
+        PendingOutputs {
+            outputs: Vec::with_capacity(capacity),
+        }
+    }
+
+    fn push(&mut self, out: Box<dyn Output>) {
+        self.outputs.push(out);
+    }
+
+    /// Hand the outputs over to the task; the guard is left holding nothing, so
+    /// its `Drop` is a no-op on the success path.
+    fn finish(mut self) -> Vec<Box<dyn Output>> {
+        std::mem::take(&mut self.outputs)
+    }
+}
+
+impl Drop for PendingOutputs {
+    fn drop(&mut self) {
+        for o in self.outputs.iter_mut() {
+            o.destroy();
+        }
+        self.outputs.clear();
+    }
+}
+
 /// Build one task's capturer + outputs. Mirrors `capture_task_new`.
 fn build_task(
     tasks_cfg: &[TaskConfig],
@@ -133,12 +173,12 @@ fn build_task(
     output: Arc<OutputStats>,
 ) -> Result<BuiltTask> {
     let capturer = new_capturer(tasks_cfg, task_cfg, capture)?;
-    let mut outputs: Vec<Box<dyn Output>> = Vec::with_capacity(task_cfg.outputs.len());
+    let mut pending = PendingOutputs::new(task_cfg.outputs.len());
     for output_cfg in &task_cfg.outputs {
         let out = new_output(task_cfg, output_cfg, output.clone())?;
-        outputs.push(out);
+        pending.push(out);
     }
-    Ok((capturer, outputs))
+    Ok((capturer, pending.finish()))
 }
 
 /// Owns all tasks, their capturers and outputs, and the execution threads.
@@ -663,6 +703,93 @@ mod tests {
     use super::*;
     use crate::output::pcap_writer::PcapWriter;
     use std::sync::atomic::{AtomicUsize, Ordering};
+
+    /// AUDIT4 P3-2: a task whose *second* output fails to be created used to drop
+    /// the first output with the `Vec`, and `Output` has no draining `Drop` - the
+    /// single `destroy()` call point is `TaskManager::stop()`, which a partially
+    /// built task never reaches. `PendingOutputs` is what closes that bypass.
+    ///
+    /// (This is asserted on the guard itself with spies rather than end-to-end
+    /// through `build_task`, because no output's `destroy()` is observable through
+    /// a file: `PcapWriter` wraps a `BufWriter`, whose own `Drop` flushes, so the
+    /// capture file looks identical either way. That "green by luck" is precisely
+    /// what `parity/verify_liveness.sh` exists for - the gate there requires
+    /// `build_task` to keep parking its outputs behind this guard.)
+    #[test]
+    fn pending_outputs_destroys_everything_it_throws_away() {
+        let destroyed = Arc::new(AtomicUsize::new(0));
+        let mut pending = PendingOutputs::new(2);
+        for _ in 0..3 {
+            pending.push(Box::new(SpyOutput {
+                destroyed: destroyed.clone(),
+            }));
+        }
+        assert_eq!(destroyed.load(Ordering::Relaxed), 0, "not yet");
+        drop(pending); // the failure path: outputs are being discarded
+        assert_eq!(
+            destroyed.load(Ordering::Relaxed),
+            3,
+            "every output that was created must be destroyed, not just the first"
+        );
+
+        // The success path must *not* destroy: the task owns them now.
+        let mut pending = PendingOutputs::new(1);
+        pending.push(Box::new(SpyOutput {
+            destroyed: destroyed.clone(),
+        }));
+        let handed_over = pending.finish();
+        assert_eq!(handed_over.len(), 1);
+        drop(handed_over);
+        assert_eq!(
+            destroyed.load(Ordering::Relaxed),
+            3,
+            "finish() must leave the guard empty so Drop is a no-op"
+        );
+    }
+
+    /// `build_task` must keep its outputs behind that guard (see the gate in
+    /// `parity/verify_liveness.sh`); this pins the observable part: a task whose
+    /// second output cannot be created fails, and the error says why.
+    #[test]
+    fn build_task_fails_when_an_output_cannot_be_created() {
+        let dir = std::env::temp_dir().join(format!("cp-partial-build-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("mkdir");
+        let input = dir.join("input.pcap");
+        let mut hdr = [0u8; 24];
+        hdr[0..4].copy_from_slice(&0xa1b2_c3d4u32.to_le_bytes());
+        hdr[6..8].copy_from_slice(&4u16.to_le_bytes());
+        hdr[20..24].copy_from_slice(&1u32.to_le_bytes()); // DLT_EN10MB
+        std::fs::write(&input, hdr).expect("write input pcap");
+        let bad = dir.join("no-such-dir").join("bad.pcap");
+
+        let cfg = Config::parse_str(&format!(
+            r#"{{
+                "tasks": [{{
+                    "capturer": {{ "type": "pcap_file", "pcap_file": {{ "file_name": "{}" }} }},
+                    "outputs": [
+                        {{ "type": "file", "file": {{ "name": "{}" }} }},
+                        {{ "type": "file", "file": {{ "name": "{}" }} }}
+                    ]
+                }}]
+            }}"#,
+            input.display(),
+            dir.join("good.pcap").display(),
+            bad.display()
+        ))
+        .expect("parse config");
+        let err = match build_task(
+            &cfg.tasks,
+            &cfg.tasks[0],
+            Arc::new(CaptureStats::default()),
+            Arc::new(OutputStats::default()),
+        ) {
+            Ok(_) => panic!("an uncreatable output path must fail the build"),
+            Err(e) => e,
+        };
+        let msg = err.to_string();
+        assert!(msg.contains("bad.pcap"), "unexpected error: {msg}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     /// AUDIT4 P2-10: rebuilding tasks compiles every BPF expression, and compiling
     /// one may resolve a host name. That work has to be doable *before* the manager

@@ -82,6 +82,12 @@ check() {
 check "Output::destroy()" crates/cpworker/src/task.rs '\.destroy\(\)'
 # P5-11: the ZMTP backlog gauges must be published in collect_stats_summary.
 check "zmtp_queued_* metrics" crates/cpworker/src/task.rs 'zmtp_queued_'
+# P3-2 (AUDIT4 re-review): outputs of a *partially built* task are discarded without
+# ever reaching stop(), so they must be parked behind PendingOutputs - whose Drop is
+# the only thing that runs destroy() on them. Grepping the type's use in build_task
+# is the honest form of this check: no file output can reveal it end-to-end, because
+# PcapWriter's BufWriter flushes on its own Drop.
+check "partially-built task drains its outputs" crates/cpworker/src/task.rs 'PendingOutputs::new\('
 # P5-10: the handshake deadline must be enforced from the polling loop.
 check "ZMTP handshake deadline" crates/cpworker/src/zmtp/client.rs 'conn_pending_or_stalled\(\)'
 

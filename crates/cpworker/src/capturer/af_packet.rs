@@ -61,7 +61,7 @@ struct TpacketAuxdata {
 #[repr(C, align(8))]
 struct CmsgBuf([u8; 256]);
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct VlanTag {
     tci: u16,
     tpid: u16,
@@ -314,6 +314,25 @@ fn readability_wait_ms(timeout_ms: i32) -> i32 {
     }
 }
 
+/// Longest filter expression quoted into an error message, in bytes.
+const EXPR_PREVIEW_BYTES: usize = 120;
+
+/// Quote a filter expression, bounded and without splitting a UTF-8 sequence.
+///
+/// A BPF expression is user input (config file, CPM task update, SIGHUP reload) and
+/// is allowed to be 8 KiB long; error strings built from it are stored per task and
+/// re-logged once a minute, so an unbounded quote is unbounded log volume.
+fn expr_preview(expr: &str) -> String {
+    if expr.len() <= EXPR_PREVIEW_BYTES {
+        return expr.to_string();
+    }
+    let mut end = EXPR_PREVIEW_BYTES;
+    while end > 0 && !expr.is_char_boundary(end) {
+        end -= 1;
+    }
+    format!("{}... ({} bytes total)", &expr[..end], expr.len())
+}
+
 /// The line logged when a filter program has to run here instead of in the kernel.
 ///
 /// One stable, greppable token with the instruction count, because this fallback
@@ -401,6 +420,14 @@ unsafe fn parse_control(msg: &libc::msghdr) -> (Option<(i64, i64)>, Option<VlanT
         }
         let data = libc::CMSG_DATA(cmsg);
         let dlen = clen - header;
+        // The `CMSG_OK` bound. Without it a header that claims more data than the
+        // buffer actually holds is read past `end` (AUDIT4 P3-3: the kernel always
+        // fills this well, so it is unreachable today - but this is exactly the
+        // hand-written cmsg arithmetic M4 set out to eliminate, and the reads below
+        // are 16 and 20 bytes wide).
+        if (data as *const u8).add(dlen) > end {
+            break;
+        }
         if c.cmsg_level == libc::SOL_SOCKET && c.cmsg_type == libc::SO_TIMESTAMPNS && dlen >= 16 {
             let t = std::ptr::read_unaligned(data as *const libc::timespec);
             ts = Some((t.tv_sec as i64, (t.tv_nsec / 1000) as i64));
@@ -501,14 +528,19 @@ impl AfPacketCapturer {
             .map_err(|e| Error::new(format!("create req_pattern_t error: {e}")))?;
 
         let bpf_expr = cfg.effective_bpf(tasks)?;
-        let program: Option<Program> =
-            if bpf_expr.is_empty() {
-                None
-            } else {
-                Some(bpf::compile(&bpf_expr).map_err(|e| {
-                    Error::new(format!("compile bpf filter '{bpf_expr}' error: {e}"))
-                })?)
-            };
+        let program: Option<Program> = if bpf_expr.is_empty() {
+            None
+        } else {
+            Some(bpf::compile(&bpf_expr).map_err(|e| {
+                // `task.print_errors()` re-logs this every 60s per task, and a
+                // filter may be 8 KiB of text (or contain host names); quote a
+                // bounded prefix instead of the whole expression (AUDIT4 P3-8).
+                Error::new(format!(
+                    "compile bpf filter '{}' error: {e}",
+                    expr_preview(&bpf_expr)
+                ))
+            })?)
+        };
 
         let buffer_size = {
             let mb = cfg.buffer_size_mb as i64;
@@ -722,7 +754,11 @@ impl Capturer for AfPacketCapturer {
                 self.stats.cap_packets.add(1);
                 sink.on_packet(&hdr, &self.buf[..caplen], direction);
                 num_pkts = 1;
-                now = meta.ts_sec;
+                // The 2-second cadence below is compared against this value, so it
+                // must be the same clock in every branch: packet timestamps can be
+                // seconds (or nanoseconds, or 0) depending on `SO_TIMESTAMPNS`, and
+                // mixing them with wall clock made drop sampling stall (AUDIT4 P3-4).
+                now = now_sec();
             }
             Ok(None) => {
                 // The socket works, it just has nothing: leave backoff (the
@@ -782,6 +818,31 @@ mod tests {
     /// counter (`drop_packets` stays 0 while the task slows down), so the only
     /// thing an operator can alert on is this line - it must carry the token and
     /// the per-frame instruction count.
+    /// AUDIT4 P3-8: the whole expression used to be quoted into `task.error`, which
+    /// `print_errors()` re-logs every 60 s per task.
+    #[test]
+    fn a_rejected_filter_is_quoted_with_a_bound_not_in_full() {
+        let short = "udp and port 53";
+        assert_eq!(expr_preview(short), short, "normal filters read in full");
+
+        let long = "not ".repeat(5000);
+        assert!(long.len() >= 20_000);
+        let p = expr_preview(&long);
+        assert!(
+            p.len() < EXPR_PREVIEW_BYTES + 40,
+            "quoted {} bytes of a {} byte expression",
+            p.len(),
+            long.len()
+        );
+        assert!(p.contains("bytes total"), "must say what it cut: {p}");
+
+        // Truncation must never panic on a multi-byte boundary.
+        let wide = "\u{3000}".repeat(500);
+        let w = expr_preview(&wide);
+        assert!(w.len() <= EXPR_PREVIEW_BYTES + 40, "{w}");
+        assert!(w.ends_with("bytes total)"));
+    }
+
     #[test]
     fn userspace_fallback_warning_carries_the_instruction_count() {
         let w = userspace_fallback_warning(4531);
@@ -927,6 +988,45 @@ mod tests {
                 65535,
             ),
             None
+        );
+    }
+
+    /// AUDIT4 P3-3: a cmsg header whose `cmsg_len` claims more data than the control
+    /// buffer holds used to be followed anyway - the walk is hand-written, so the
+    /// `CMSG_OK` data bound is on us. The bytes past the end here are *not* garbage:
+    /// they are a well-formed auxdata record, so the pre-fix code reports a VLAN tag
+    /// that the kernel never sent.
+    #[test]
+    fn parse_control_ignores_a_cmsg_that_overruns_the_buffer() {
+        let align = std::mem::align_of::<libc::cmsghdr>();
+        let header = (std::mem::size_of::<libc::cmsghdr>() + align - 1) & !(align - 1);
+        let aux_len = std::mem::size_of::<TpacketAuxdata>();
+        // Only a header plus 8 bytes were really made available to the kernel.
+        let declared = header + 8;
+        // ... and the extra region below stands in for whatever follows in memory.
+        let mut cbuf = vec![0u8; header + aux_len + 64];
+        // A header that *lies* about its length.
+        cbuf[0..8].copy_from_slice(&((header + aux_len) as u64).to_ne_bytes());
+        cbuf[8..12].copy_from_slice(&libc::SOL_PACKET.to_ne_bytes());
+        cbuf[12..16].copy_from_slice(&libc::PACKET_AUXDATA.to_ne_bytes());
+        // A convincing auxdata record, starting at CMSG_DATA - i.e. entirely past
+        // the end of what `msg_controllen` says is there.
+        let d = header;
+        let status = libc::TP_STATUS_VLAN_VALID | libc::TP_STATUS_VLAN_TPID_VALID;
+        cbuf[d..d + 4].copy_from_slice(&status.to_ne_bytes());
+        cbuf[d + 16..d + 18].copy_from_slice(&0x0164u16.to_ne_bytes());
+        cbuf[d + 18..d + 20].copy_from_slice(&0x8100u16.to_ne_bytes());
+        let msg = unsafe {
+            let mut m: libc::msghdr = std::mem::zeroed();
+            m.msg_control = cbuf.as_mut_ptr().cast::<libc::c_void>();
+            m.msg_controllen = declared; // what actually fits
+            m
+        };
+        // SAFETY: msg points at cbuf, which is valid for `declared` bytes.
+        let (_ts, vlan) = unsafe { parse_control(&msg) };
+        assert!(
+            vlan.is_none(),
+            "a cmsg that overruns msg_controllen must be dropped, not read: {vlan:?}"
         );
     }
 

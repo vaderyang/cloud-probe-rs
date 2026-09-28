@@ -876,6 +876,13 @@ impl RawOutput {
                 let z = self.zmq.ok_or_else(|| Error::new("missing zmq config"))?;
                 let heartbeat_ms =
                     i32_in("zmq.heartbeat_ms", z.heartbeat_ms.unwrap_or(0), 0, 60_000)?;
+                // The pending queue is bounded by `hwm` messages of at most
+                // ZMQ_MAX_BATCH_BUF_SIZE each, so an unbounded hwm is an unbounded
+                // memory promise: reject it here instead of letting the worker get
+                // OOM-killed later. This `i32_in` is the *only* gate - the second
+                // check that used to sit here re-tested the range `i32_in` had just
+                // enforced, so it was unreachable, and the message inside it (with
+                // its run of spaces) could never be shown.
                 let hwm = i32_in(
                     "zmq.hwm",
                     z.hwm.unwrap_or(i64::from(DEFAULT_ZMQ_HWM)),
@@ -887,15 +894,6 @@ impl RawOutput {
                         "{e} (each queued batch is up to 1 MiB, so hwm bounds the output's memory)"
                     ))
                 })?;
-                // The pending queue is bounded by `hwm` messages of at most
-                // ZMQ_MAX_BATCH_BUF_SIZE each, so an unbounded hwm is an
-                // unbounded memory promise. Reject it here instead of letting
-                // the worker get OOM-killed later.
-                if !(ZMQ_HWM_MIN..=ZMQ_HWM_MAX).contains(&hwm) {
-                    return Err(Error::new(format!(
-                        "invalid zmq.hwm {hwm}: must be between {ZMQ_HWM_MIN} and                          {ZMQ_HWM_MAX} (each queued batch is up to 1 MiB)"
-                    )));
-                }
                 OutputKind::Zmq(ZmqConfig {
                     host: z.host,
                     port: z.port,
@@ -1431,8 +1429,31 @@ mod tests {
         assert!(vxlan(&split(65535)).is_ok(), "65535 is in range");
     }
 
-    /// AUDIT4 P5-11: `hwm` bounds the pending queue (hwm batches x <=1 MiB), so an
-    /// unbounded value is an unbounded memory promise and must be rejected.
+    /// AUDIT4 P5-11/P3: `hwm` bounds the pending queue (hwm batches x <=1 MiB), so an
+    /// unbounded value is an unbounded memory promise and must be rejected - by
+    /// exactly one gate, whose message the user actually sees.
+    #[test]
+    fn zmq_hwm_is_range_checked_by_a_single_wellformed_gate() {
+        for hwm in [0i64, 4097, -1] {
+            let err = Config::parse_str(&format!(
+                r#"{{"tasks":[{{
+                    "capturer": {{"type":"libpcap","libpcap":{{"interface":"eth0"}}}},
+                    "outputs": [{{"type":"zmq","zmq":{{
+                        "host":"10.0.0.1","port":5555,"hwm":{hwm},
+                        "uuid":"550e8400-e29b-41d4-a716-446655440000"
+                    }}}}]
+                }}]}}"#
+            ))
+            .expect_err("out of range hwm must be rejected");
+            let msg = err.to_string();
+            assert!(msg.contains("zmq.hwm"), "must name the field: {msg}");
+            assert!(
+                !msg.contains("  "),
+                "the message the user sees must not contain a run of spaces                  (the unreachable duplicate check carried one): {msg}"
+            );
+        }
+    }
+
     #[test]
     fn zmq_hwm_is_range_checked() {
         let with_hwm = |hwm: i64| {
