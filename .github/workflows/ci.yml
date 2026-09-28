@@ -29,6 +29,19 @@ jobs:
           components: rustfmt
       - run: cargo fmt --all --check
 
+  actionlint:
+    name: actionlint (workflows)
+    # Lint the workflow YAML itself (qwen P3 optional hardening; verified locally
+    # with actionlint 1.7.12, which is clean on these files). We install a pinned
+    # tool version via the same action the coverage job uses.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: actionlint
+      - run: actionlint -color
+
   test:
     name: build & test
     runs-on: ubuntu-latest
@@ -93,10 +106,13 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Build the live-capture test
         run: cargo test -p cpworker --test af_packet_live --no-run --locked
-      - name: Run AF_PACKET capture test on lo as root
+      - name: Run AF_PACKET capture test on lo and on a veth as root
         # Covers the real AF_PACKET path (socket/bind ordering, SO_ATTACH_FILTER,
-        # SO_RCVBUFFORCE with CAP_NET_ADMIN, timestamps, VLAN reinsertion) that
-        # the other jobs skip.
+        # SO_RCVBUFFORCE with CAP_NET_ADMIN, timestamps, VLAN reinsertion) and the
+        # veth capture-fidelity contract (inject exactly N raw frames => the capturer
+        # delivers exactly those N, in order, drop == 0) that the other jobs skip.
+        # qwen §4-5/§4-7: that contract used to live only in the manual
+        # `bench/live_bench.py` ratio, which no gate ran.
         #
         # AUDIT4 P2-2: this job used to be able to go green while executing
         # nothing. Two independent ways to do that existed: the tests returned
@@ -111,11 +127,16 @@ jobs:
           echo "running $BIN"
           N=$("$BIN" --ignored --list | sed -n '/: test$/p' | wc -l)
           echo "binary advertises $N ignored live-capture test(s)"
-          [ "$N" -ge 4 ] || { echo "::error::expected at least 4 ignored live tests, found $N"; exit 1; }
+          [ "$N" -ge 5 ] || { echo "::error::expected at least 5 ignored live tests, found $N"; exit 1; }
           sudo -E "$BIN" --ignored --nocapture > live-capture.log 2>&1
           cat live-capture.log
           grep -q "test result: ok. $N passed; 0 failed" live-capture.log \
             || { echo "::error::live capture did not execute all $N tests"; exit 1; }
+          # The count above proves the suite executed; this proves the fidelity gate
+          # itself is still one of them (a renamed or de-`#[ignore]`d test would keep
+          # the count honest but silently drop the contract it guards).
+          grep -qx "test live_capture_veth_delivers_exactly_n_frames ... ok" live-capture.log \
+            || { echo "::error::the veth capture-fidelity gate did not execute and pass"; exit 1; }
 
   clippy:
     name: clippy
@@ -164,6 +185,27 @@ jobs:
           path: lcov.info
           if-no-files-found: warn
 
+  lint-workflows:
+    name: workflow lint (actionlint)
+    runs-on: ubuntu-latest
+    # §6 of the P2 summary: "actionlint clean" was quoted as evidence in the audits
+    # while nothing in CI (and, at that point, nothing on the auditing machine either)
+    # ever ran it. The workflow files are code that a shell job executes, and a typo in
+    # a `run:` block or a bad expression is only discovered by a failing job.
+    #
+    # Version pinned (same discipline as fuzz.sh's cargo-fuzz pin, AUDIT4 P3-5): a
+    # moving "latest" would let the gate's verdict change under a commit that did not
+    # touch the workflows. 1.7.12 is the version verified locally; note that the older
+    # 1.7.7 rejects `macos-15-intel` in release.yml as an unknown runner label, so a
+    # downgrade would go red for a reason unrelated to the workflows.
+    steps:
+      - uses: actions/checkout@v7
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: actionlint@1.7.12
+      - name: actionlint
+        run: actionlint
+
   deny:
     name: licenses & advisories (cargo-deny)
     runs-on: ubuntu-latest
@@ -206,8 +248,16 @@ jobs:
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-audit
+      # GLM P3-3: this job audited the root Cargo.lock only, while the repo has a
+      # second dependency graph (crates/cpworker/fuzz, its own committed lockfile).
+      # `cargo audit --file <lockfile>` is supported (verified with
+      # `cargo audit --help` on cargo-audit 0.22.2: "-f, --file <FILE>  Cargo lockfile
+      # to inspect"), and the advisory DB is fetched once and cached in ~/.cargo, so
+      # the second invocation costs a re-read, not another clone.
       - name: Audit dependencies against the RustSec advisory DB
-        run: cargo audit
+        run: cargo audit --file Cargo.lock
+      - name: Audit the fuzz workspace lockfile too
+        run: cargo audit --file crates/cpworker/fuzz/Cargo.lock
 
   dependency-review:
     name: dependency review

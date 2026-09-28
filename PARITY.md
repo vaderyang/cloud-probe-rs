@@ -407,11 +407,17 @@ release profile 用 `panic = "abort"`：**panic 是致命事件，不是可恢�
 > libpcap 完全一致的吞吐/丢包曲线，可后续在 `af_packet.rs` 内加 mmap ring（不影响其他模块）。
 
 > **实时抓取面的重复帧（A1，已定根因并修复）**：loopback 上内核把每个报文 tap **两次**
-> （出站 `dev_queue_xmit_nit` + 入站 `__netif_receive_skb`），libpcap/tcpdump 只交付**收到**的那一份
-> （实测 1×），而裸 `recvmsg` socket 会交付 2×。Rust capturer 现对 **loopback 接口**设置
-> `PACKET_IGNORE_OUTGOING`（内核 <4.17 时在用户态按 `sll_pkttype==PACKET_OUTGOING` 丢弃），
-> 从而与 libpcap 一致；回归测试 `live_capture_loopback_does_not_duplicate_frames`（1 万报文交付 ~1×，
-> 修复前为 2×）。**非 loopback 接口不丢出站**（libpcap 在 veth 发送侧同样能看到出站帧，实测 tcpdump 抓到 5000）。
+> （出站 `dev_queue_xmit_nit` + 入站 `__netif_receive_skb`），并把**两份都**拷进 `PACKET_RX_RING`
+> （也都在 `tp_packets` 里计数，即 libpcap 的 `ps_recv`）。libpcap 在**用户态**丢弃出站那份
+> （`linux_check_direction()`，`pcap-linux.c`），`PACKET_IGNORE_OUTGOING` 则在内核丢弃。因此
+> tcpdump 在 lo 上交付 **1×**，而裸 `recvmsg` socket 交付 **2×**。机制由
+> `crates/cpworker/src/bin/tpacket_ring_probe.rs` 实测确认
+> （`sudo target/debug/tpacket_ring_probe lo 3000 41267` → `ring_frames=6000 outgoing=3000 host=3000`；
+> 加 `ignore_outgoing` → `3000/0/3000`）。Rust capturer 现对 **loopback 接口**设置 `PACKET_IGNORE_OUTGOING`
+> （内核 <4.17 时在用户态按 `sll_pkttype==PACKET_OUTGOING` 丢弃），从而与 libpcap 一致；
+> 回归测试 `live_capture_loopback_does_not_duplicate_frames`（1 万报文交付 ~1×，修复前为 2×）；
+> veth 上的采集保真度硬门禁 `live_capture_veth_delivers_exactly_n_frames`（发 N 帧 ⇒ 交付恰 N）已进入
+> `live-capture` CI job。**非 loopback 接口不丢出站**（libpcap 在 veth 发送侧同样能看到）。
 >
 > 另：M5 记录的 “C ×0.79” 不可全信——`bench/live_bench.py` 用 **Rust `cpctl`** 读 C worker 统计时
 > 存在**时序竞态**（Rust 客户端把 payload 与 `\n` 分两次 write，而 C 服务端握手是单次 recv，可能漏掉 `\n`，

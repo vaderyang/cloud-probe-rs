@@ -366,6 +366,267 @@ fn live_capture_falls_back_to_userspace_filtering() {
     }
 }
 
+/// Read a interface's MAC address from sysfs.
+fn iface_mac(ifname: &str) -> [u8; 6] {
+    let raw = std::fs::read_to_string(format!("/sys/class/net/{ifname}/address"))
+        .unwrap_or_else(|e| panic!("read MAC of {ifname}: {e}"));
+    let mut mac = [0u8; 6];
+    for (i, part) in raw.trim().split(':').take(6).enumerate() {
+        mac[i] = u8::from_str_radix(part, 16)
+            .unwrap_or_else(|e| panic!("bad MAC '{raw}' on {ifname}: {e}"));
+    }
+    mac
+}
+
+/// Ones-complement 16-bit sum, as an IPv4 header carries it.
+fn inet_csum(data: &[u8]) -> u16 {
+    let mut total: u32 = 0;
+    let mut d: Vec<u8> = data.to_vec();
+    if !d.len().is_multiple_of(2) {
+        d.push(0);
+    }
+    for pair in d.chunks(2) {
+        total += u32::from(u16::from_be_bytes([pair[0], pair[1]]));
+    }
+    total = (total >> 16) + (total & 0xFFFF);
+    total += total >> 16;
+    !(total as u16)
+}
+
+/// One Ethernet/IPv4/UDP frame carrying `seq` in its payload.
+///
+/// The sequence number is what lets the fidelity test assert *exactly* N distinct
+/// frames rather than "N frames, some of them twice". UDP checksum 0 means "not
+/// computed", which is legal for IPv4; the IP header checksum is computed because
+/// a receiving host validates it.
+fn udp_frame(
+    seq: u32,
+    dst_mac: &[u8; 6],
+    src_mac: &[u8; 6],
+    dst_ip: [u8; 4],
+    port: u16,
+) -> Vec<u8> {
+    let mut payload = seq.to_be_bytes().to_vec();
+    payload.resize(20, 0x5a);
+    let mut udp = Vec::with_capacity(8 + payload.len());
+    udp.extend_from_slice(&50000u16.to_be_bytes()); // sport
+    udp.extend_from_slice(&port.to_be_bytes()); // dport
+    udp.extend_from_slice(&((8 + payload.len()) as u16).to_be_bytes()); // length
+    udp.extend_from_slice(&0u16.to_be_bytes()); // checksum: not computed
+    udp.extend_from_slice(&payload);
+
+    let total_len = 20 + udp.len() as u16;
+    let mut ip = Vec::with_capacity(20);
+    ip.extend_from_slice(&[0x45, 0]);
+    ip.extend_from_slice(&total_len.to_be_bytes());
+    ip.extend_from_slice(&1u16.to_be_bytes()); // id
+    ip.extend_from_slice(&0u16.to_be_bytes()); // flags/frag
+    ip.extend_from_slice(&[64, 17]); // ttl, proto=UDP
+    ip.extend_from_slice(&0u16.to_be_bytes()); // checksum
+    ip.extend_from_slice(&[169, 254, 99, 2]); // src (not configured anywhere)
+    ip.extend_from_slice(&dst_ip); // dst
+    let csum = inet_csum(&ip);
+    ip[10..12].copy_from_slice(&csum.to_be_bytes());
+
+    let mut frame = Vec::with_capacity(14 + ip.len() + udp.len());
+    frame.extend_from_slice(dst_mac);
+    frame.extend_from_slice(src_mac);
+    frame.extend_from_slice(&0x800u16.to_be_bytes());
+    frame.extend_from_slice(&ip);
+    frame.extend_from_slice(&udp);
+    frame
+}
+
+/// A raw `AF_PACKET` transmitter bound to one interface.
+struct RawTx {
+    fd: std::os::fd::RawFd,
+    ll: libc::sockaddr_ll,
+}
+
+impl RawTx {
+    fn new(ifname: &str) -> Self {
+        let cname = std::ffi::CString::new(ifname).unwrap();
+        // SAFETY: socket()/if_nametoindex() with a valid C string.
+        let (fd, ifindex) = unsafe {
+            let fd = libc::socket(
+                libc::AF_PACKET,
+                libc::SOCK_RAW,
+                i32::from(0x0003u16.to_be()),
+            );
+            let ifindex = libc::if_nametoindex(cname.as_ptr());
+            (fd, ifindex)
+        };
+        assert!(fd >= 0, "raw tx socket on {ifname}");
+        assert!(ifindex > 0, "unknown interface {ifname}");
+        let mut ll: libc::sockaddr_ll = unsafe { std::mem::zeroed() };
+        ll.sll_family = libc::AF_PACKET as u16;
+        ll.sll_protocol = 0x0003u16.to_be();
+        ll.sll_ifindex = ifindex as i32;
+        RawTx { fd, ll }
+    }
+
+    /// Send one raw frame; panics on any socket error (a failed injection is not a
+    /// capture result, so it must never be counted as "the capturer missed it").
+    fn send(&self, frame: &[u8]) {
+        // SAFETY: valid fd, buffer and sockaddr_ll.
+        let n = unsafe {
+            libc::sendto(
+                self.fd,
+                frame.as_ptr().cast::<libc::c_void>(),
+                frame.len(),
+                0,
+                std::ptr::addr_of!(self.ll).cast::<libc::sockaddr>(),
+                std::mem::size_of::<libc::sockaddr_ll>() as libc::socklen_t,
+            )
+        };
+        assert!(n > 0, "injecting a {}-byte raw frame failed", frame.len());
+    }
+}
+
+impl Drop for RawTx {
+    fn drop(&mut self) {
+        // SAFETY: this fd was created by `RawTx::new` and is owned by it.
+        unsafe { libc::close(self.fd) };
+    }
+}
+
+/// An exclusively named veth pair, deleted again on `Drop`.
+///
+/// The names embed the test process id: the CI job and any manual run must not be
+/// able to collide with each other (or with the `veth0`/`veth1` pair the VLAN test
+/// uses), and deleting one end deletes the whole pair.
+struct VethPair {
+    a: String,
+    b: String,
+}
+
+impl VethPair {
+    fn new() -> Self {
+        let tag = std::process::id() % 0xFFFF;
+        let a = format!("cplv{tag:04x}a");
+        let b = format!("cplv{tag:04x}b");
+        run_ok(
+            "ip",
+            &["link", "add", &a, "type", "veth", "peer", "name", &b],
+        );
+        run_ok("ip", &["link", "set", &a, "up"]);
+        run_ok("ip", &["link", "set", &b, "up"]);
+        // A freshly created veth has no carrier until the peer is up; the first
+        // frames sent without one are simply dropped by the driver.
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        VethPair { a, b }
+    }
+}
+
+impl Drop for VethPair {
+    fn drop(&mut self) {
+        let _ = std::process::Command::new("ip")
+            .args(["link", "del", &self.a])
+            .status();
+    }
+}
+
+/// veth capture fidelity: injecting exactly N frames must deliver exactly those N
+/// frames - no loss, no duplication, no reordering.
+///
+/// This is the hard gate behind `bench/live_bench.py`'s `frames/datagram == 1.0`
+/// number, which was only ever produced by hand (AUDIT4 qwen §4-5/§4-7, "门禁盲
+/// 区"). Two things make it a *fidelity* gate rather than a smoke test:
+///
+/// * the traffic is injected as **raw frames from the veth peer**, because a UDP
+///   socket on the same host would be routed to `lo` by the kernel and would never
+///   traverse the veth at all (measured: capturing `veth0` while sending to its own
+///   address delivers 0 frames);
+/// * every frame carries a sequence number, so `cap_packets == N` cannot be reached
+///   by duplicating one frame N times.
+///
+/// A `drop_packets == 0` counter is *not* sufficient evidence of a lossless path
+/// (AUDIT4 P5-02: `tp_drops` only counts socket-queue overflow), which is exactly
+/// why the count itself is asserted.
+#[test]
+#[ignore = "requires CAP_NET_RAW + CAP_NET_ADMIN (run with sudo); creates a veth pair"]
+fn live_capture_veth_delivers_exactly_n_frames() {
+    assert_privileged("live_capture_veth_delivers_exactly_n_frames");
+    const PORT: u16 = 41247;
+    const N: u32 = 400;
+
+    let veth = VethPair::new();
+    let dst_mac = iface_mac(&veth.a);
+    let src_mac = iface_mac(&veth.b);
+    // Destination address: not configured on either end, so the frame is tapped by
+    // AF_PACKET and then dropped by the IP layer - no socket, no ICMP reply, no
+    // outgoing frame that could be tapped a second time on the capture end.
+    let dst_ip = [198, 51, 100, 7];
+
+    let json = format!(
+        r#"{{
+            "log_level": "INFO",
+            "execution_model": "rtc",
+            "tasks": [{{
+                "capturer": {{ "type": "libpcap", "libpcap": {{
+                    "interface": "{ifname}",
+                    "bpf": "udp and dst port {PORT}",
+                    "buffer_size_mb": 8,
+                    "timeout_ms": 50
+                }} }},
+                "outputs": []
+            }}]
+        }}"#,
+        ifname = veth.a
+    );
+    let cfg = Config::parse_str(&json).expect("parse config");
+    let tasks = cfg.tasks.clone();
+    let stats = Arc::new(CaptureStats::default());
+    let mut cap = new_capturer(&tasks, &tasks[0], stats.clone()).expect("capturer");
+
+    let tx = RawTx::new(&veth.b);
+    let frames: Vec<Vec<u8>> = (0..N)
+        .map(|seq| udp_frame(seq, &dst_mac, &src_mac, dst_ip, PORT))
+        .collect();
+    // All N frames are injected before the first read: 400 * 70 B is far below the
+    // 8 MB socket buffer, so a shortfall cannot be explained by ring pressure.
+    for f in &frames {
+        tx.send(f);
+    }
+
+    let mut sink = Collect::default();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    while (sink.pkts.len() as u32) < N && std::time::Instant::now() < deadline {
+        cap.capture_once(&mut sink);
+    }
+
+    let got = sink.pkts.len() as u32;
+    assert_eq!(
+        got, N,
+        "capturer delivered {got} of {N} injected frames (loss or duplication)"
+    );
+    assert_eq!(
+        stats.cap_packets.load().0,
+        N as u64,
+        "cap_packets does not match the {N} frames injected"
+    );
+    assert_eq!(
+        stats.drop_packets.load().0,
+        0,
+        "the capturer reported drops while delivering {N} frames"
+    );
+    // Exactly the injected set, in order: no duplicate, no gap, no reordering.
+    let seqs: Vec<u32> = sink
+        .pkts
+        .iter()
+        .map(|p| {
+            let off = 14 + 20 + 8;
+            assert_eq!(u16::from_be_bytes([p[off - 6], p[off - 5]]), PORT);
+            u32::from_be_bytes([p[off], p[off + 1], p[off + 2], p[off + 3]])
+        })
+        .collect();
+    assert_eq!(
+        seqs,
+        (0..N).collect::<Vec<u32>>(),
+        "delivered frames are not the injected frames in order"
+    );
+}
+
 /// On loopback the kernel taps every datagram twice (transmitted +
 /// received); libpcap/tcpdump deliver only the received copy. The capturer must
 /// match that, i.e. ~1 frame per datagram, not ~2.
