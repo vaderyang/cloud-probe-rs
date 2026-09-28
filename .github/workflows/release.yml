@@ -67,6 +67,7 @@ jobs:
       - name: Package
         shell: bash
         run: |
+          # shellcheck disable=SC2015
           set -euo pipefail
           bin="target/${{ matrix.target }}/release"
           name="cloud-probe-rs-${{ matrix.target }}"
