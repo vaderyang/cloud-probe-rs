@@ -189,18 +189,23 @@ WP2 与 WP3 可并行；M1 必须最先（唯一可能"完全无数据"的缺陷
 3. **`af_packet_live` 在 root 下是否真通过**：需在带 `CAP_NET_RAW` 环境实测并在 CI 固化。
 4. **libpcap TPACKET ring 相对 `SO_RCVBUF` 的真实容量优势**：核心结论（256 MiB→8 MiB）已实测；"ring 可用 MB 级"需高负载实测。
 5. **VLAN/H3 的现场影响**：需在 trunk/镜像口实测确认严重度。
-6. **实时抓取面的“同流不同包数”（A1，已定根因：测量伪影，非缺陷）**：
-   - 在**确定性 veth**（每帧只被投递一次）上，Rust 采集 `frames/datagram == **1.0000**`
-     （多次运行零丢失）；同一接口的裸 AF_PACKET / libpcap 探针为 0.88–0.98（探针窗口与调度噪声）。
-     **Rust 侧无采集保真度缺陷。**
-   - `lo` 上每个报文被 tap **两次**（出站 `dev_queue_xmit_nit` + 入站
-     `__netif_receive_skb`），所以 `~2×` 才是“全抓”的期望值；而 libpcap 在 loopback 上
-     `ps_recv ≈ 2 × pcap_next_ex 交付`（计数口径），看起来 R/C 各有差异。
-   - M5 记录里的 “C ×0.79” 不可信：`bench/live_bench.py` 用 **Rust `cpctl`** 去读 C worker 的
-     统计，而两者控制协议本就不兼容（现复现为 `Connection reset by peer`），且 C 构建树不含 `cpctl`；
-     另外计时/窗口错位也会少计尾部。
+6. **实时抓取面的“同流不同包数”（A1，结论已修正并修复，P1）**：
+   - **初版结论（本计划 b60c8a6）是错的**：它把 loopback 上 Rust 交付 2× 当成“全抓的正确行为”。经
+     GLM-5.3 与 Qwen3.8 两份独立审查证伪：C/libpcap 在 lo 上只交付 **1×**（用能从源码构建的 Go `cpctl`
+     + 延迟读、以及 tcpdump 都复现），Rust 交付 **2×** ——这是**真实的 R/C 采集语义分歧**，
+     会导致下游 GRE/VXLAN/ZMQ 收到双份、`cap_bytes` 翻倍（实测 71,957,732 vs 35,978,866）。
+   - **已修**：对**loopback 接口**设 `PACKET_IGNORE_OUTGOING`（内核 <4.17 时用户态按
+     `sll_pkttype==PACKET_OUTGOING` 丢弃）；非 loopback 保留出站（libpcap 在 veth 发送侧也能看到出站，
+     实测 tcpdump 抓到 5000）。回归测试 `live_capture_loopback_does_not_duplicate_frames`（红→绿：
+     无修复时 1 万报文交付 20000，修复后 ~10000）。`PARITY.md §4` 已登记。
+   - `lo` 上每个报文被 tap **两次**（出站 `dev_queue_xmit_nit` + 入站 `__netif_receive_skb`）；
+     libpcap 的 `ps_recv ≈ 2 × pcap_next_ex 交付`（计数口径）解释了为何容易误判。
+   - “C ×0.79”另有时序竞态因素：`bench/live_bench.py` 用 **Rust `cpctl`** 读 C worker 统计时，
+     Rust 客户端把 payload 与 `\n` 分两次 write、C 服务端握手单次 recv，可能漏掉 `\n`（残留空行被当命令）
+     → `Connection reset by peer`；**并非协议不兼容**（Go `cpctl` 与重试的 Rust `cpctl` 都能成功）。
    - `drop_packets == 0` 不能作为“无丢失”的证据（只有 socket 队列溢出才计入 `tp_drops`）。
-   - 处置：`bench/live_bench.py` 文档改为“保真度对拍请用 veth 而非 lo”，并在 C 侧统计不可用时不再中断整个 A/B。
+   - **顺带修了一个 UB**：`parse_control` 的 cmsg 缓冲区 `[u8; 256]` 未按 `cmsghdr` 对齐，
+     `&*cmsg` 会 misaligned deref（调试构建下 abort）；改用 `#[repr(align(8))] CmsgBuf`。
 7. **实时抓包吞吐门禁**：`live_bench.py` 是手工工具（需 root、需真实接口、发送端通常是瓶颈），不进 CI。
    若要固化成回归网，需要 veth + 可控注入速率与丢包断言，属独立工程项。
 

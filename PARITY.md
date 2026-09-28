@@ -268,6 +268,8 @@ M4 的问题大多不是"移植错了"，而是"移植得比原实现更宽松�
   直接累加；首次读取作基线。`ps_ifdrop` 在 Linux 恒为 0（与 libpcap 一致）。
 * **VLAN**：启用 `PACKET_AUXDATA`，内核剥离标签后由 `TP_STATUS_VLAN_VALID`/`tp_vlan_tci`
   在 MAC 后重插 4 字节 802.1Q 头（TPID 取 `tp_vlan_tpid`，缺省 0x8100）。
+* **loopback 重复帧**：仅对 loopback 接口设 `PACKET_IGNORE_OUTGOING`（否则用户态按
+  `PACKET_OUTGOING` 丢弃），与 libpcap 一致；非 loopback 不丢出站。
 * **接收缓冲**：优先 `SO_RCVBUFFORCE`（需 `CAP_NET_ADMIN`），失败回退 `SO_RCVBUF`，
   并用 `getsockopt` 回读实际值，被 `net.core.rmem_max` 截断时告警。
 * **启动无空窗**：socket 以协议 0 创建 → 挂 BPF → 再 `bind(ETH_P_ALL, ifindex)`，
@@ -348,11 +350,17 @@ release profile 用 `panic = "abort"`：**panic 是致命事件，不是可恢�
 > **读后清零**，实现按“本窗口增量直接累加”处理（详见上文采集面语义）。若需要与
 > libpcap 完全一致的吞吐/丢包曲线，可后续在 `af_packet.rs` 内加 mmap ring（不影响其他模块）。
 
-> **实时抓取面的包数一致性尚未对拍**（AUDIT4 M5 登记）：实时路径没有 C 侧 oracle 可用（需
-> 真实接口 + root），`bench/live_bench.py`（手工工具）在 lo 上用同一份 UDP 灼流对拍时发现
-> Rust 侧 `cap_packets` 恒为“发包数 ×2”（loopback 出站 + 回环入站各一份，都命中过滤器），
-> 而本地 C/libpcap 构建为“×0.79”，两侧 `drop_packets` 都报 0。尚未定性为哪一侧错，因此
-> **不作为一致性结论、也不作为性能结论引用**；根因分析入口见 `IMPROVEMENT_PLAN_AUDIT4.md §5-6`。
+> **实时抓取面的重复帧（A1，已定根因并修复）**：loopback 上内核把每个报文 tap **两次**
+> （出站 `dev_queue_xmit_nit` + 入站 `__netif_receive_skb`），libpcap/tcpdump 只交付**收到**的那一份
+> （实测 1×），而裸 `recvmsg` socket 会交付 2×。Rust capturer 现对 **loopback 接口**设置
+> `PACKET_IGNORE_OUTGOING`（内核 <4.17 时在用户态按 `sll_pkttype==PACKET_OUTGOING` 丢弃），
+> 从而与 libpcap 一致；回归测试 `live_capture_loopback_does_not_duplicate_frames`（1 万报文交付 ~1×，
+> 修复前为 2×）。**非 loopback 接口不丢出站**（libpcap 在 veth 发送侧同样能看到出站帧，实测 tcpdump 抓到 5000）。
+>
+> 另：M5 记录的 “C ×0.79” 不可全信——`bench/live_bench.py` 用 **Rust `cpctl`** 读 C worker 统计时
+> 存在**时序竞态**（Rust 客户端把 payload 与 `\n` 分两次 write，而 C 服务端握手是单次 recv，可能漏掉 `\n`，
+> 残留空行被当命令 → `Connection reset by peer`）；用 Go/源码 `cpctl` 或对齐后的时序可正常读取。
+> 详见 `IMPROVEMENT_PLAN_AUDIT4.md §5-6`。
 
 > **”纯 Rust”的定义**：不链接任何 C 库（`libc`/`nix` 仅声明 syscall ABI，保留）。
 > 去 C 依赖对应改进计划 P3，**已完成**。离线 `pcap_file` 过滤也已接入纯 Rust BPF。

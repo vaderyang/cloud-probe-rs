@@ -19,25 +19,25 @@ interface (the flood binds a receiver, so nothing is ICMP-refused):
     cpu_s            worker utime+stime burned during the window
     cpu_s_per_mpps   cpu_s / cap_packets * 1e6  <- the comparable number
 
-Read `cap_packets` before trusting anything: on loopback a datagram is tapped
-**twice** (the transmit `dev_queue_xmit_nit` copy and the receive
-`__netif_receive_skb` copy), so `frames/datagram ~ 2` means "captured
-everything", and only on a *non-loopback* interface (e.g. a veth pair) does a
-ratio near `1` mean that. A smaller number means the capturer missed frames, but
-note that **neither implementation reports those losses as drops**: `tp_drops`
-only counts socket-queue overflows, and `ps_recv` on loopback counts about twice
-what `pcap_next_ex` actually delivers. A zero drop counter is therefore not
-evidence of a lossless path (AUDIT4 P5-02).
+Read `cap_packets` before trusting anything. On loopback a datagram is tapped
+**twice** by the kernel (the transmit `dev_queue_xmit_nit` copy and the receive
+`__netif_receive_skb` copy); libpcap/tcpdump deliver only the received copy, and
+the Rust capturer was fixed to match that (`PACKET_IGNORE_OUTGOING` on loopback),
+so both now show `frames/datagram ~ 1` on `lo`. On a *non-loopback* interface a
+ratio near `1` also means "captured everything". A smaller number means the
+capturer missed frames, but note that **neither implementation reports those
+losses as drops**: `tp_drops` only counts socket-queue overflows, and `ps_recv`
+on loopback counts about twice what `pcap_next_ex` actually delivers. A zero drop
+counter is therefore not evidence of a lossless path (AUDIT4 P5-02).
 
-A1 note (AUDIT4 §5-6): this A/B was originally read as "Rust x2.00 vs C x0.79".
-That is a measurement artifact, not a capture defect: 1) loopback duplicates
-every datagram, so `~2x` is the expected/correct Rust ratio; 2) libpcap's
-`ps_recv` double-counts on loopback; 3) the C worker's stats were read through
-the *Rust* `cpctl`, whose control protocol is not compatible with the C worker
-(the call now fails with `Connection reset by peer`), and the C project ships no
-`cpctl` in its build tree. On a deterministic veth interface the Rust capturer
-records `frames/datagram == 1.0000` in every run. Use a veth pair, not `lo`, for
-any capture-fidelity comparison.
+A1 note (AUDIT4 §5-6): the original read of "Rust x2.00 vs C x0.79" as a mere
+measurement artifact was **wrong**. On loopback the kernel taps every datagram
+twice; libpcap/tcpdump deliver only the received copy (1x) while a plain
+`recvmsg` socket delivered both (2x). The Rust capturer was subsequently fixed to
+match libpcap, so `lo` now yields ~1x too. The C `x0.79` was additionally
+distorted by reading the C worker's stats through the *Rust* `cpctl` (a timing
+race can yield `Connection reset by peer`; the Go `cpctl` from the C tree works).
+Use a non-loopback interface (veth) for an unambiguous frames/datagram number.
 """
 import json
 import os
