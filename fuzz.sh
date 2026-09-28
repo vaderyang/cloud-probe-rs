@@ -23,6 +23,17 @@ ALL_TARGETS="packet_split config vxlan zmq_batch sim_dst bpf zmtp_wire zmtp_clie
 # green.
 CARGO_FUZZ_VERSION="0.13.2"
 
+# Per-input wall-clock limit (qwen P3-7 remainder). libFuzzer's default is 60s, so
+# a single pathological input could burn a minute of the smoke job's 5s budget and
+# nothing failed. 10s is deliberately far above what these targets need (the whole
+# bpf corpus of 784 entries replays in ~0.06s per input on this box) and far below
+# a resolver timeout, so "one input hangs" is a red build rather than slow fuzzing.
+# Making that gate *possible* is what the offline resolver in fuzz_targets/bpf.rs
+# is for: while `host <name>` inputs called getaddrinfo(), the resolver timeout
+# (measured: 5.07s for one lookup on this box, glibc's own, not ours to shorten)
+# sat right next to any threshold one could pick.
+FUZZ_TIMEOUT="${FUZZ_TIMEOUT:-10}"
+
 ensure_toolchain() {
     if ! rustup toolchain list | grep -q '^nightly'; then
         echo "==> installing nightly toolchain (libFuzzer needs it)"
@@ -68,7 +79,7 @@ case "$MODE" in
     --check)
         TIME=5
         TARGETS="${2:-$ALL_TARGETS}"
-        ARGS=(-max_total_time="$TIME" -rss_limit_mb=4096)
+        ARGS=(-max_total_time="$TIME" -rss_limit_mb=4096 -timeout="$FUZZ_TIMEOUT")
         ;;
     repro)
         TARGET="$2"
@@ -78,7 +89,7 @@ case "$MODE" in
     *)
         TIME="${1:-30}"
         TARGETS="${2:-$ALL_TARGETS}"
-        ARGS=(-max_total_time="$TIME" -rss_limit_mb=4096)
+        ARGS=(-max_total_time="$TIME" -rss_limit_mb=4096 -timeout="$FUZZ_TIMEOUT")
         if [ -n "${FUZZ_SEED:-}" ]; then
             ARGS+=(-seed="$FUZZ_SEED")
         fi
@@ -101,7 +112,7 @@ done
 fail=0
 for t in $TARGETS; do
     echo "=========================================================="
-    echo " fuzz: $t (max_total_time=${ARGS[0]#-max_total_time=}s)"
+    echo " fuzz: $t (max_total_time=${ARGS[0]#-max_total_time=}s, timeout=${FUZZ_TIMEOUT}s)"
     echo "=========================================================="
     if cargo +nightly fuzz run --target "$HOST_TRIPLE" "$t" -- "${ARGS[@]}"; then
         echo "  $t: OK"

@@ -77,12 +77,30 @@ impl Program {
 
 /// Compile a tcpdump-subset expression into a classic-BPF program.
 ///
+/// Names in the expression are resolved through the platform resolver, memoised
+/// process-wide (see [`resolvers`]); use [`compile_with`] to substitute one.
+///
 /// # Errors
 /// Returns an error for syntax errors, unsupported keywords, unresolvable host
 /// names, address/protocol mismatches, or programs exceeding the cBPF branch
 /// limit.
 pub fn compile(expr: &str) -> Result<Program> {
-    let ast = parser::parse(expr)?;
+    compile_with(expr, &resolvers::CachedResolver::system())
+}
+
+/// [`compile`] with an injected [`Resolver`].
+///
+/// The compiler itself is pure; the only thing that can reach outside the process
+/// is turning a host name into addresses. Handing that to the caller makes
+/// compilation deterministic and side-effect free, which is what the fuzz target
+/// needs: through [`compile`] a corpus entry containing `host <name>` performs a
+/// real `getaddrinfo()` (glibc's resolver timeout is not ours to shorten), so the
+/// run is slow, depends on the network, and cannot use a `-timeout=` gate.
+///
+/// # Errors
+/// As [`compile`], plus whatever the injected resolver reports.
+pub fn compile_with(expr: &str, resolver: &dyn Resolver) -> Result<Program> {
+    let ast = parser::parse_with(expr, resolver)?;
     compiler::compile_ast(&ast)
 }
 
@@ -119,6 +137,63 @@ mod tests {
         // The auto-generated exclusion used by the config layer.
         let p = compile("(port 80) and not host 10.0.0.9").unwrap();
         assert!(!p.is_empty());
+    }
+
+    /// The injected-resolver entry point the fuzz target relies on: the addresses a
+    /// name expands to must come from the caller's resolver, and nothing may reach
+    /// for the network (which is what a `-timeout=` fuzz gate requires).
+    #[test]
+    fn compile_with_uses_the_injected_resolver_only() {
+        use std::net::Ipv4Addr;
+
+        #[derive(Default)]
+        struct Counting {
+            hits: std::sync::atomic::AtomicUsize,
+        }
+        impl Resolver for Counting {
+            fn lookup(&self, host: &str) -> std::io::Result<Vec<std::net::IpAddr>> {
+                self.hits.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                // A name that the platform resolver cannot know: if anything ever
+                // consulted DNS here, the filter below would fail to compile.
+                assert_eq!(host, "fuzz-gate.invalid");
+                Ok(vec![
+                    std::net::IpAddr::V4(Ipv4Addr::new(192, 0, 2, 7)),
+                    std::net::IpAddr::V4(Ipv4Addr::new(192, 0, 2, 8)),
+                ])
+            }
+        }
+
+        let r = Counting::default();
+        let p = compile_with("host fuzz-gate.invalid", &r).expect("compile_with");
+        assert_eq!(
+            r.hits.load(std::sync::atomic::Ordering::Relaxed),
+            1,
+            "the injected resolver must be consulted exactly once per name"
+        );
+        // P2-8 semantics through the injected resolver: both addresses match.
+        for last in [7u8, 8u8] {
+            let mut frame = vec![0u8; 34];
+            frame[12..14].copy_from_slice(&0x0800u16.to_be_bytes());
+            frame[16] = 45;
+            frame[23] = 17; // proto: UDP
+            frame[26] = 192;
+            frame[27] = 0;
+            frame[28] = 2;
+            frame[29] = last;
+            assert!(p.apply(&frame), "host must match 192.0.2.{last}");
+        }
+        let mut other = vec![0u8; 34];
+        other[12..14].copy_from_slice(&0x0800u16.to_be_bytes());
+        other[16] = 45;
+        other[23] = 17;
+        other[26] = 192;
+        other[27] = 0;
+        other[28] = 2;
+        other[29] = 9;
+        assert!(
+            !p.apply(&other),
+            "192.0.2.9 is not one of the resolved addresses"
+        );
     }
 
     #[test]
