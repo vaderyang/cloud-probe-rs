@@ -66,6 +66,20 @@ Two conventions worth knowing before reading:
 
 ### Fixed
 
+- A task capturing on an interface that is down - or simply idle - no longer spins a
+  core (P2-6). Measured on a dedicated veth pair with the repository default
+  `timeout_ms: 0`, 6s window, `utime+stime`: 4 tasks on a down interface cost
+  30.2% of one core before and 3.2% after; two things were needed, because the
+  `Err` branch alone was *not* the busy loop: the kernel returns `ENETDOWN` only for
+  the frames still queued at the moment the link went down and `EAGAIN` afterwards.
+  (a) `ErrorBackoff` on hard `recvmsg` errors - 1ms, doubling, capped at 100ms, reset
+  by any successful socket operation; (b) after an empty read with `timeout_ms = 0`,
+  `poll(POLLIN, 1)` instead of returning immediately - entered only when the queue
+  was just drained, so throughput and latency are untouched (verified: 100,000
+  datagrams -> 100,000 records, ratio 1.0000, before and after). C avoids the whole
+  question by failing `pcap_activate` and not creating the task at all; that
+  difference, and why `error_drop_*` is deliberately *not* touched, is in
+  [PARITY.md §2.6](PARITY.md).
 - `net <name>` now OR-expands **every** address the name resolves to, like
   `host <name>` already did (P2-8). P5-08 was only half applied: `parse_net()` went
   through `parse_addr()`, i.e. `to_socket_addrs().next()`, so a multi-homed name in

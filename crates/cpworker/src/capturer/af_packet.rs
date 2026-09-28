@@ -11,7 +11,7 @@
 use std::ffi::CString;
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use super::{Capturer, PacketHeader, PacketSink};
 use crate::bpf::{self, Program};
@@ -24,6 +24,8 @@ use crate::req_pattern::ReqPattern;
 use crate::stats::CaptureStats;
 
 const DROP_STAT_DUR_SEC: i64 = 2;
+/// Idle wait (ms) for `timeout_ms = 0`; see [`readability_wait_ms`].
+const IDLE_POLL_MS: i32 = 1;
 const ETH_P_ALL: u16 = 0x0003;
 /// `SOL_PACKET` option (Linux >= 4.17) that makes the kernel drop outgoing
 /// (`PACKET_OUTGOING`) copies.
@@ -104,6 +106,43 @@ impl DropCounter {
             return 0;
         }
         sample.map_or(0, u64::from)
+    }
+}
+
+/// Exponential backoff for *hard* `recvmsg` errors: 1ms, doubling, capped at 100ms.
+///
+/// A down interface makes `recvmsg` fail immediately (`ENETDOWN`, or `ENODEV` once
+/// the device is gone) instead of returning `EAGAIN`, so there is nothing to wait
+/// for - and with the default `timeout_ms = 0` there is no `poll` either. Measured
+/// on a dedicated veth pair with the repository's default configuration: 0.65s of
+/// CPU per 6s of wall clock (≈10.8% of one core) for a single idle task that
+/// cannot possibly receive anything, scaling linearly with the number of tasks on
+/// down interfaces. `Ok(..)` resets it, so a recovering interface goes back to full
+/// speed on the first success.
+#[derive(Default)]
+struct ErrorBackoff {
+    current: Option<Duration>,
+}
+
+impl ErrorBackoff {
+    /// Smallest wait, taken on the first error.
+    const MIN: Duration = Duration::from_millis(1);
+    /// Largest wait; also the worst-case extra latency on shutdown for one task.
+    const MAX: Duration = Duration::from_millis(100);
+
+    /// Account one consecutive error and return how long to wait.
+    fn on_error(&mut self) -> Duration {
+        let wait = match self.current {
+            None => Self::MIN,
+            Some(cur) => (cur * 2).min(Self::MAX),
+        };
+        self.current = Some(wait);
+        wait
+    }
+
+    /// A successful socket operation: drop out of backoff.
+    fn reset(&mut self) {
+        self.current = None;
     }
 }
 
@@ -259,6 +298,23 @@ fn configure_socket(fd: RawFd, buffer_size: i32, interface: &str) -> bool {
     false
 }
 
+/// How long `capture_once` may wait for readability after an empty read.
+///
+/// `timeout_ms > 0` is honoured as before. `timeout_ms == 0` - the repository
+/// default - used to mean "return immediately", i.e. the main loop came back
+/// ~100k times/s doing `recvmsg`+10µs sleep and burned ~22% of one core per
+/// *idle or down* task (measured, see `PARITY.md §2.6`). Waiting up to
+/// [`IDLE_POLL_MS`] changes no capture semantics: `poll` wakes the instant a
+/// frame is queued, so there is no added latency and no throughput cost when
+/// traffic flows (the wait is only entered after an empty read).
+fn readability_wait_ms(timeout_ms: i32) -> i32 {
+    if timeout_ms > 0 {
+        timeout_ms
+    } else {
+        IDLE_POLL_MS
+    }
+}
+
 /// The line logged when a filter program has to run here instead of in the kernel.
 ///
 /// One stable, greppable token with the instruction count, because this fallback
@@ -399,6 +455,7 @@ pub struct AfPacketCapturer {
     drop_outgoing: bool,
 
     drops: DropCounter,
+    backoff: ErrorBackoff,
     next_error: Option<String>,
     last_error_log: i64,
 }
@@ -516,6 +573,7 @@ impl AfPacketCapturer {
             userspace_filter,
             drop_outgoing,
             drops: DropCounter::default(),
+            backoff: ErrorBackoff::default(),
             next_error: None,
             last_error_log: 0,
         })
@@ -640,16 +698,16 @@ impl AfPacketCapturer {
 impl Capturer for AfPacketCapturer {
     fn capture_once(&mut self, sink: &mut dyn PacketSink) -> u64 {
         // Try to receive first (the socket is always non-blocking); only when it
-        // would block and a timeout is configured do we wait for readability.
+        // would block do we wait for readability.
         let mut res = self.recv_matching();
-        if self.timeout_ms > 0 && matches!(res, Ok(None)) {
+        if matches!(res, Ok(None)) {
             let mut pfd = libc::pollfd {
                 fd: self.fd.as_raw_fd(),
                 events: libc::POLLIN,
                 revents: 0,
             };
             // SAFETY: single valid pollfd.
-            let r = unsafe { libc::poll(&mut pfd, 1, self.timeout_ms) };
+            let r = unsafe { libc::poll(&mut pfd, 1, readability_wait_ms(self.timeout_ms)) };
             if r > 0 && (pfd.revents & libc::POLLIN) != 0 {
                 res = self.recv_matching();
             }
@@ -659,6 +717,7 @@ impl Capturer for AfPacketCapturer {
         let now;
         match res {
             Ok(Some(meta)) => {
+                self.backoff.reset();
                 let hdr = PacketHeader {
                     ts_sec: meta.ts_sec,
                     ts_usec: meta.ts_usec,
@@ -677,6 +736,9 @@ impl Capturer for AfPacketCapturer {
                 now = meta.ts_sec;
             }
             Ok(None) => {
+                // The socket works, it just has nothing: leave backoff (the
+                // throughput-critical `timeout_ms = 0` path must not slow down).
+                self.backoff.reset();
                 sink.on_heartbeat();
                 now = now_sec();
             }
@@ -687,6 +749,11 @@ impl Capturer for AfPacketCapturer {
                         self.interface, self.netns_path
                     ));
                 }
+                // Hard errors return immediately; without this wait the task spins
+                // a core for as long as the interface stays down (AUDIT4 P5-12 /
+                // P2-6). C does not have this problem because `pcap_activate` fails
+                // and the task is never created - see PARITY.md §2.6.
+                std::thread::sleep(self.backoff.on_error());
                 now = now_sec();
             }
         }
@@ -744,6 +811,49 @@ mod tests {
     fn loopback_interface_detection() {
         assert!(interface_is_loopback("lo"));
         assert!(!interface_is_loopback("definitely-not-a-real-iface0"));
+    }
+
+    /// AUDIT4 P5-12/P2-6: the acceptance criterion is "no busy loop while the
+    /// interface is down". The backoff must start small (a flapping interface should
+    /// not become sluggish), grow, saturate at 100ms, and reset on the first
+    /// successful socket operation.
+    /// AUDIT4 P2-6: the "no busy loop" acceptance criterion is about the *idle*
+    /// socket too - `timeout_ms = 0` is the default, and returning immediately on
+    /// an empty read spun a core (measured 22% with a down *or* an idle-up veth).
+    #[test]
+    fn empty_read_always_waits_for_readability() {
+        assert_eq!(
+            readability_wait_ms(0),
+            IDLE_POLL_MS,
+            "default must not spin"
+        );
+        assert_eq!(readability_wait_ms(200), 200, "configured timeout honoured");
+        assert_eq!(
+            readability_wait_ms(-1),
+            IDLE_POLL_MS,
+            "nonsense falls back to idle"
+        );
+        assert!(
+            IDLE_POLL_MS <= 5,
+            "the idle wait must stay well below packet-scale latency"
+        );
+    }
+
+    #[test]
+    fn hard_error_backoff_grows_saturates_and_resets() {
+        let mut b = ErrorBackoff::default();
+        assert_eq!(b.on_error(), Duration::from_millis(1));
+        assert_eq!(b.on_error(), Duration::from_millis(2));
+        assert_eq!(b.on_error(), Duration::from_millis(4));
+        for _ in 0..12 {
+            assert!(
+                b.on_error() <= ErrorBackoff::MAX,
+                "backoff must never exceed the cap"
+            );
+        }
+        assert_eq!(b.on_error(), ErrorBackoff::MAX);
+        b.reset();
+        assert_eq!(b.on_error(), Duration::from_millis(1), "must start over");
     }
 
     #[test]

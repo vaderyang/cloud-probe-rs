@@ -243,6 +243,41 @@ M4 的问题大多不是"移植错了"，而是"移植得比原实现更宽松�
 差分向量分配：`parity/gen_config.py` **只产生范围内的数值**——范围外两侧定义上就分歧，比较它只会重复验证
 钳位；22 条越界的合法 JSON 向量固化在 `parity/verify_config.sh` 的 "AUDIT4 P5-15" 段，断言 Rust 侧全部拒绝。
 
+## 2.6 采集错误路径、down 接口与空转的有意分歧（AUDIT4 P5-12 / 复核 P2-6）
+
+C 走 libpcap 的 `pcap_activate()`，Rust 走裸 `AF_PACKET` 的 `socket()+bind()`，两者对"接口存在但没
+UP"的反应**不是一回事**。独占 veth 对（`p2spin0/p2spin1`，实验后已删除）、debug 构建、6 秒窗口内取
+`/proc/<pid>/stat` 的 utime+stime、`timeout_ms` 取仓库默认 **0**：
+
+| 场景 | 修复前 | 修复后 | 说明 |
+|---|---|---|---|
+| 4 个 task，抓包口 down | **30.2%** 单核 | **3.2%** 单核 | 每 task 约 3.6% 的空转被消除，且不再随 task 数线性放大 |
+| 4 个 task，口 UP 但无流量 | 30.3% | 3.2% | 同上：空转主体是"读不到包就立刻返回"的紧循环 |
+| 1 个 task，口 down | 18.5–22.0% | 3.8–4.3% | |
+| 0 个 task（进程基线） | 15.8% | 15.3% | **未改**：主循环 `num_pkts==0 → sleep(10µs)` 自身的开销；C 同样有（审查实测 C 侧 0 task 时 13.2%），属既有平价而非回归 |
+| 采集保真度（lo，10 万 UDP 报文，`timeout_ms=0`） | records/sent = 1.0000 | 1.0000（caplen 直方图单一、无尾部残帧） | 1ms 空闲等待不引入丢包/延迟：`poll` 在帧入队的那一刻就醒 |
+
+行为差异与做法：
+
+* **task 存活 vs 创建失败**：C 的 `pcap_activate` 在 down 口上失败 → **task 创建失败**（worker 以 0 个
+  task 继续）；Rust 的 `socket()+bind()` 在 down 口上成功，task **存活**并持续失败（按 2s 窗口打一条错误
+  日志）。保留 Rust 语义（接口随后 UP 即可立刻恢复采集，不必重载配置），代价是必须自带退避。
+* **`Err` 分支退避**（P5-12 验收原文）：`ErrorBackoff` 1ms 起、倍增、100ms 封顶，任何一次成功的 socket
+  操作（含 `EAGAIN`）立即复位；实测硬错误风暴（例如拔卡式 `ENODEV`）下 CPU 由紧循环降到 ~0。
+* **`timeout_ms = 0` 的空闲等待**（新发现，实测才是这里的主体）：接口 down 时内核只在"链路断开瞬间还有
+  排队帧"的那一次返回 `ENETDOWN`，之后一律 `EAGAIN`，因此单靠 `Err` 退避**并不能**满足"CPU 不空转"。
+  现在空读之后最多 `poll(POLLIN, 1ms)`；这只在"刚读空"时进入，流量持续时永不进入，故对吞吐与延迟无影响
+  （上表保真度行即为此断言的证据），心跳频率由 ~10 万次/s 降到 ~1 千次/s（`Output::heartbeat(now)` 以**秒**
+  为参数，无精度损失）。
+* **不把 recvmsg 硬错误计入 `error_drop_*`**：`error_drop_*` 在 C 里是**输出侧**计数
+  （`output->base.stats`，见 `output_gre.c:114`、`output_rotating_file.c:103`），采集侧 schema 只有
+  `cap_bytes`/`cap_packets`/`drop_packets`/`ifdrop_packets`；把"读失败"记成"丢包"会破坏 §2.4 已声明的对外
+  口径并让运维把观测错误当成本征损失。原计划 P5-12 的这句话已按 C 的 schema 在 `IMPROVEMENT_PLAN_AUDIT4.md`
+  中改写并说明理由。
+
+`drop_packets` 仍只来自 `getsockopt(PACKET_STATISTICS)` 的 `tp_drops`（§4 采集面语义），退避与空闲等待不改变
+任何计数口径。
+
 ## 3. 关键一致性向量（已通过）
 
 * `workerTaskBuilder` 产出的 task fingerprint（含 Go 反射标签算法的怪异 `UUID()`

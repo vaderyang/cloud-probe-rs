@@ -95,10 +95,13 @@
 - 【修复】`socket(AF_PACKET, SOCK_RAW, 0)` → 挂 filter → `bind(ETH_P_ALL, ifindex)`；或先挂 reject-all 并清空队列。
 - 【验收】启动首批包不含非目标接口/不匹配过滤器的帧。
 
-**P5-12 错误路径限速 + 正确计数**
-- 【证据】`af_packet.rs:393-408` 每次 `capture_once` 都打日志（C 版受 2s 窗口门控）；错误未计入 `error_drop_*`。
-- 【修复】错误日志与 `DROP_STAT_DUR_SEC` 对齐或限速；持续错误退避；错误计入 `error_drop_*`。
-- 【验收】接口 down 场景下不刷屏、CPU 不空转；统计可观测。
+**P5-12 错误路径限速 + 持续错误退避**
+- 【证据】`af_packet.rs:393-408` 每次 `capture_once` 都打日志（C 版受 2s 窗口门控）；~~错误未计入 `error_drop_*`~~。
+- 【修复】错误日志与 `DROP_STAT_DUR_SEC` 对齐限速 ✅；持续错误退避 ✅（M6：1ms→100ms 封顶，收包/socket 恢复即复位）；
+  ~~错误计入 `error_drop_*`~~ **【修正的验收标准】**：`error_drop_*` 在 C 里是**输出侧**计数
+  （`output->base.stats`，见 `output_gre.c:114`、`output_rotating_file.c:103`），采集侧 schema 里根本没有这两个计数器；
+  把"recvmsg 读失败"记成"丢包"既改口径又把观测错误伪装成本征损失。见 `PARITY.md §2.6`。
+- 【验收】接口 down 场景下不刷屏 ✅、CPU 不空转 ✅（实测修复前 10.8% 单核/task，修复后见 §8 M6）；统计口径不变。
 
 **P5-13 忙轮询 / 批量化**
 - 【证据】`timeout_ms=0` → 非阻塞 `recvmsg` 紧循环（~10 万/s）；`timeout_ms>0` 每包 `poll`+`recvmsg`。
@@ -460,6 +463,7 @@ WP2 与 WP3 可并行；M1 必须最先（唯一可能"完全无数据"的缺陷
 | P2-7 | VLAN 重插突破 snaplen：`caplen` 可达 `snaplen+4`，违反"每包 ≤ snaplen"契约（同条件 tcpdump 给 `caplen==snaplen`） | `insert_vlan()` 改为 `Some((caplen+4).min(snaplen))`（tag 计入 snaplen，被推过上限的尾部字节不报告），返回 `Option` 让调用方知道"是否真的重插"，`orig_len` 仍 +4 | 单测 `insert_vlan_truncated_frame_stays_within_snaplen`：`caplen 20 broke the 'never more than snaplen (16)' contract` → ok；live `live_capture_reinserts_vlan_on_veth` 增加 `snaplen:16` 阶段：`frame 0: caplen 20 exceeds the configured snaplen 16 (P2-7)` → ok（真 veth 实测） |
 | P2-3 | `verify_hygiene.sh` 四条门禁全部可被**等价改写**绕过（注入后 4 条仍 ✅、EXIT=0） | ① 逐块判定测试代码 + 新增"测试块之后不得再有生产条目"门禁（`verify_liveness.sh` 同步）；② 覆盖 `as libc::c_int`/`as u32`/`as _` 全部写法并把范围扩到所有反序列化文件 + 新增"读 serde_json 数字的文件不得用 `as` 窄化"整文件规则；③ `[[bin]]` 改用 `cargo metadata --no-deps` 且双向校验；④ P5-22 改成"正向断言"（文档声称 fsync ⇒ flush() 必须真的 `sync_all`） | 新增 `parity/verify_hygiene_reverse.sh`（7 个等价改写注入，全部要求变红）。同一份注入树对照：旧门禁 4 ✅/EXIT=0，新门禁 6 ❌/EXIT=1。副产物：抓到并修复 `cripid` 的 `pid as i32`（4294967296→PID 0） |
 | P2-2 | `af_packet_live` 非 root 时打印 `ok. 4 passed`（CI 特权 job 可全绿零执行） | `!privileged()` → `assert_privileged()` **panic**；CI 断言 `--ignored --list` 条数（≥4）== `test result: ok. N passed; 0 failed` | uid=1000：修复前 `ok. 4 passed`（exit 0）→ 修复后 `FAILED. 0 passed; 4 failed`（exit 101）；root：`ok. 4 passed`（exit 0） |
+| P2-6 | down 接口忙轮询（4 个 down task = 30.2% 单核）+ 与 C 的 down-interface 差异未登记 | `ErrorBackoff`（1ms→100ms 封顶，成功即复位）**加**空读后 `poll(POLLIN,1ms)`（实测证明单靠 `Err` 退避不满足"CPU 不空转"：down 口只在断链瞬间返回一次 ENETDOWN，之后都是 EAGAIN）；`PARITY.md §2.6` 登记与 C 的三点差异 | 独占 veth 实测：4 down task 30.2%→3.2%、4 idle-up task 30.3%→3.2%、1 down task 18.5–22%→3.8–4.3%；保真度不变（10 万报文→10 万记录，ratio 1.0000）；单测 `hard_error_backoff_grows_saturates_and_resets`、`empty_read_always_waits_for_readability` |
 | P2-8 | `net <name>` 仍只取首个解析地址（P5-08 只做了一半） | 选定"**全部地址 OR 展开**"（非拒绝主机名）：`net_expr()` + 纯函数 `net_masks()`（同网络去重；`mask` 形式只保留同族地址，全被滤掉则报错）；`mask` 不再做主机名解析。理由：拒绝会把现在能工作的过滤器变成 task 失败，而展开规模被 P2-9 的上限约束 | `net_name_expands_to_every_resolved_address`：`left: [(192.0.2.0, 255.255.255.0)] right: [192.0.2.0/24, 198.51.100.0/24]` → ok；`net_mask_without_matching_family_is_an_error` |
 | P2-9 | 解析结果数量无上限 → DNS 数据可把程序推过 4096 指令而**静默退化**为用户态逐帧解释 | 新增 `MAX_RESOLVED_ADDRS=64`（越界报错含主机名 + 两个数量）；用户态回退打印可告警的 `bpf_userspace_fallback insns=N limit=4096 kernel=BPF_MAXINSNS`；解析改走可注入的 `Resolver` seam（`parse_with`），使上限与 OR 展开可离线测试 | `oversized_resolution_is_refused_by_name_not_silently_expand`（去掉上限即失败）；`userspace_fallback_warning_carries_the_instruction_count` |
 ### 低优先项（同批完成）
