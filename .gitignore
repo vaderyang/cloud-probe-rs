@@ -9,3 +9,7 @@ crates/cpworker/fuzz/coverage/
 # Editor / OS
 *.swp
 .DS_Store
+
+# verification coverage artifacts
+verification/__pycache__/
+target/llvm-cov/

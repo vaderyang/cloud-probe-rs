@@ -16,6 +16,14 @@ Two conventions worth knowing before reading:
 
 ### Added
 
+- **Verification Coverage 体系**（决策记录 [ADR-0001](docs/adr/0001-verification-coverage.md)，
+  细节 [VERIFICATION_COVERAGE.md](VERIFICATION_COVERAGE.md)）：按风险分层的覆盖率策略
+  （Tier 0/1/2/3 目标 line 95/90/80/60、关键函数 100% function coverage、变更行 line 90%/branch 85%、
+  `coverage must not decrease` 棘轮），并落成机器可读的
+  [`verification/policy.toml`](verification/policy.toml) + 基线 [`verification/baseline.json`](verification/baseline.json)
+  + 门禁 [`verification/coverage_gate.py`](verification/coverage_gate.py) 与本地入口 [`verify_coverage.sh`](verify_coverage.sh)。
+  测试必须先从 ADR/Spec 出发（spec-first）。mutation / behaviour / risk / system 维度按阶段的路线图
+  在 VERIFICATION_COVERAGE.md §10 收敛。
 - `cpdaemon` now exposes a **library target** (`src/lib.rs`) and has end-to-end
   tests under `crates/cpdaemon/tests/`. This closes the largest remaining test
   gap in the port: `cpdaemon` previously had 14 unit tests and **no integration

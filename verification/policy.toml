@@ -1,0 +1,173 @@
+# Verification-coverage policy. The single source of truth for the executables
+# gates in verification/coverage_gate.py and verification/requirements_gate.py.
+# Design and rationale: VERIFICATION_COVERAGE.md.
+
+[report]
+# lcov produced by `cargo llvm-cov` (absolute SF paths; the gate normalizes by
+# cutting at `crates/`).
+lcov = "target/llvm-cov/lcov.info"
+baseline = "verification/baseline.json"
+
+[change]
+# Diff-coverage base. In CI this is overridden with the PR base sha.
+base = "origin/main"
+line = 90.0
+branch = 85.0
+# Tier 3 (glue/tooling) is excluded from diff coverage.
+exclude_tiers = [3]
+
+# ---------------------------------------------------------------------------
+# Tiers. First matching glob wins; `fallback = true` catches the rest (Tier 2).
+# Coverage floors are ratcheted from verification/baseline.json (see gate).
+# ---------------------------------------------------------------------------
+
+[[tier]]
+id = 0
+name = "safety-integrity-critical"
+line = 95.0
+branch = 90.0
+function = 95.0
+mcdc = 90.0
+mutation = 85.0
+paths = [
+  "crates/cpworker/src/capturer/af_packet.rs",
+  "crates/cpworker/src/capturer/pcap_file.rs",
+  "crates/cpworker/src/packet.rs",
+  "crates/cpworker/src/packet_split.rs",
+  "crates/cpworker/src/bpf/*.rs",
+  "crates/cpworker/src/zmtp/*.rs",
+  "crates/cpworker/src/output/vxlan.rs",
+  "crates/cpworker/src/output/gre.rs",
+  "crates/cpworker/src/output/zmq.rs",
+  "crates/cpworker/src/output/pcap_writer.rs",
+  "crates/cpworker/src/config.rs",
+  "crates/cpworker/src/sockopt.rs",
+  "crates/cpworker/src/netns.rs",
+]
+
+[[tier]]
+id = 1
+name = "core-product-logic"
+line = 90.0
+branch = 85.0
+function = 90.0
+mcdc = 80.0
+mutation = 75.0
+paths = [
+  "crates/cpworker/src/task.rs",
+  "crates/cpworker/src/output/mod.rs",
+  "crates/cpworker/src/output/file.rs",
+  "crates/cpworker/src/output/rotating_file.rs",
+  "crates/cpworker/src/output/null.rs",
+  "crates/cpworker/src/ratelimit.rs",
+  "crates/cpworker/src/ring_buffer.rs",
+  "crates/cpworker/src/stats.rs",
+  "crates/cpworker/src/unix_manager.rs",
+  "crates/cpworker/src/req_pattern.rs",
+  "crates/cpworker/src/netutil.rs",
+  "crates/cpworker/src/capturer/mod.rs",
+  "crates/cpdaemon/src/cpm/*.rs",
+  "crates/cpdaemon/src/worker.rs",
+  "crates/cpdaemon/src/config.rs",
+  "crates/cpdaemon/src/reslimit.rs",
+  "crates/cpgolib/src/cpworker/client.rs",
+  "crates/cpgolib/src/worker_config.rs",
+  "crates/cripid/src/main.rs",
+  "crates/dockerpid/src/main.rs",
+]
+
+[[tier]]
+id = 3
+name = "glue-low-risk"
+line = 60.0
+branch = 0.0
+function = 0.0
+mcdc = 0.0
+mutation = 0.0
+paths = [
+  "crates/cpworker-parity/*",
+  "crates/sim/*",
+  "crates/cpworker/src/main.rs",
+  "crates/cpdaemon/src/main.rs",
+  "crates/cpctl/src/main.rs",
+  "crates/cpdaemon/src/httpmix.rs",
+  "crates/cpgolib/src/slogx/*",
+  "crates/cpctl/src/cli.rs",
+  "crates/cpctl/src/format.rs",
+]
+
+[[tier]]
+id = 2
+name = "normal"
+line = 80.0
+branch = 75.0
+function = 80.0
+mcdc = 0.0
+mutation = 60.0
+fallback = true
+
+# ---------------------------------------------------------------------------
+# Critical functions: function coverage MUST be 100% (a `FNDA:0` is a failure).
+# Matched against `c++filt -s rust`-demangled names, `[hash]`/`<>` stripped.
+# ---------------------------------------------------------------------------
+
+[critical_functions]
+patterns = [
+  "cpworker::bpf::compiler::Builder::finish",
+  "cpworker::bpf::interp::run",
+  "cpworker::bpf::parser::parse",
+  "cpworker::packet::parse_packet",
+  "cpworker::packet_split::build_fragment",
+  "cpworker::output::vxlan::vxlan_encapsulate",
+  "cpworker::output::gre::gre_header",
+  "cpworker::zmtp::codec::parse_frame",
+  "cpworker::capturer::pcap_file::PcapFileCapturer::new",
+  "cpgolib::cpworker::client::UnixClient::run_command",
+]
+
+# Boundary functions exercised only by the privileged `live-capture` job
+# (CAP_NET_RAW). Tracked here so they are not silently dropped; stage 2 folds
+# the live job's coverage into this gate.
+[[critical_waiver]]
+pattern = "cpworker::capturer::af_packet::AfPacketCapturer::open"
+reason = "root-only AF_PACKET path; exercised by the live-capture CI job, not cargo test"
+covered_by = "live-capture"
+
+# ---------------------------------------------------------------------------
+# Ratchet waivers: tiers below their target must name an owner + plan + expiry.
+# An expired waiver fails the gate. Update as the gap closes.
+# ---------------------------------------------------------------------------
+
+[[waiver]]
+tier = 0
+owner = "core"
+reason = "Tier 0 below the 95% line target (regions 75.8%); root-only paths and error arms outstanding"
+expires = "2026-12-31"
+
+[[waiver]]
+tier = 1
+owner = "core"
+reason = "Tier 1 below the 90% line target (regions 72.6%)"
+expires = "2026-12-31"
+
+[[waiver]]
+tier = 2
+owner = "core"
+reason = "Tier 2 below the 80% line target; cpctl stats/ping/info are the main gap"
+expires = "2026-12-31"
+
+[[waiver]]
+tier = 3
+owner = "core"
+reason = "Tier 3 below the 60% line target; tooling/entrypoints are intentionally light"
+expires = "2026-12-31"
+
+# ---------------------------------------------------------------------------
+# Exclusions (path + reason + owner). Keep this the only place a blind spot can
+# be declared; hygiene review checks that it stays honest.
+# ---------------------------------------------------------------------------
+
+[[exclude]]
+path = "crates/cpworker-parity/*"
+reason = "differential/diagnostic tooling, driven by parity/*.sh rather than cargo test"
+owner = "core"
