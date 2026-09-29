@@ -1,0 +1,188 @@
+# Risk coverage registry: risk -> verification means (VERIFICATION_COVERAGE.md §6).
+#
+# Categories: security | concurrency | data_integrity | failure_modes.
+# Evidence entries are `test:<fn>`, `path:<file>`, `cmd:<command>` or free text.
+# Every P0 risk must have at least one *executable* evidence entry whose subject
+# exists (`test:` name found in the sources, `path:` file exists, `cmd:` presence
+# is recorded). P0 risk coverage must be 100%.
+
+[[risk]]
+id = "RISK-CPM-TLS"
+category = "security"
+priority = "P0"
+source = "SECURITY.md / UPSTREAM_ISSUES #232"
+description = "MITM on the CPM channel can inject tasks/BPF; the client is InsecureSkipVerify"
+evidence = ["path:SECURITY.md", "path:verification/policy.toml"]
+
+[[risk]]
+id = "RISK-UNTRUSTED-CONFIG"
+category = "security"
+priority = "P0"
+source = "AUDIT4 P5-15 / PARITY.md §2.3"
+description = "Untrusted/CPM-supplied config or BPF could truncate values or exhaust/abort the worker"
+evidence = [
+  "test:numeric_fields_are_range_checked_not_truncated",
+  "test:rejects_over_long_or_deep",
+  "test:zmq_hwm_is_range_checked",
+]
+
+[[risk]]
+id = "RISK-UNTRUSTED-PACKETS"
+category = "security"
+priority = "P0"
+source = "PARITY.md §2.2 / AUDIT4 P5-20"
+description = "Untrusted frames and capture files could read/write out of bounds or forward garbage"
+evidence = [
+  "test:split_payload",
+  "test:rejects_caplen_larger_than_orig_len",
+  "test:bounds_one_record_allocation",
+  "cmd:./fuzz.sh --check",
+]
+
+[[risk]]
+id = "RISK-PRIVILEGE"
+category = "security"
+priority = "P0"
+source = "SECURITY.md; PARITY.md §4"
+description = "CAP_NET_RAW/CAP_NET_ADMIN and netns handling; raw socket option misuse"
+evidence = ["path:SECURITY.md", "test:parse_control_ignores_a_cmsg_that_overruns_the_buffer"]
+
+[[risk]]
+id = "RISK-RING-CONCURRENCY"
+category = "concurrency"
+priority = "P0"
+source = "PARITY.md §5.1"
+description = "ring buffer producer/consumer correctness under concurrent access"
+evidence = ["test:ring_capacity", "test:allocator_bounds", "test:releasing_more_than_was_reserved_saturates_at_zero"]
+
+[[risk]]
+id = "RISK-OUTPUT-LIFECYCLE-RACE"
+category = "concurrency"
+priority = "P0"
+source = "AUDIT4 P5-04"
+description = "destroy/reload racing the output writer loses or double-frees outputs"
+evidence = [
+  "test:stop_destroys_every_output_exactly_once",
+  "test:reload_destroys_replaced_outputs",
+  "test:pipeline_stop_destroys_outputs_after_output_thread_joined",
+]
+
+[[risk]]
+id = "RISK-ZMTP-WRITE-FIFO"
+category = "concurrency"
+priority = "P0"
+source = "AUDIT4 P5-10"
+description = "interleaved/partial writes corrupt the ZMTP wire"
+evidence = [
+  "test:short_write_during_greeting_keeps_the_wire_in_order",
+  "test:short_write_during_ready_does_not_interleave_messages",
+]
+
+[[risk]]
+id = "RISK-RELOAD-CONCURRENCY"
+category = "concurrency"
+priority = "P0"
+source = "AUDIT4 P2-10"
+description = "SIGHUP reload must not block capture or race task swaps"
+evidence = [
+  "test:reload_worker_does_not_block_the_capture_loop",
+  "test:warm_task_names_resolves_names_and_reports_bad_filters",
+  "test:prepare_reload_resolves_into_the_shared_cache",
+]
+
+[[risk]]
+id = "RISK-WIRE-BYTES"
+category = "data_integrity"
+priority = "P0"
+source = "PARITY.md §2.2 / issue #231"
+description = "VXLAN/GRE/ZMTP encapsulation bytes must match the original exactly"
+evidence = [
+  "test:vxlan_v1_capture_time",
+  "test:vni2_tag",
+  "path:parity/fuzz_proto.sh",
+]
+
+[[risk]]
+id = "RISK-DIFF-PARITY"
+category = "data_integrity"
+priority = "P0"
+source = "PARITY.md §2"
+description = "behaviour must match the C/Go original, divergences documented"
+evidence = ["path:parity/all.sh", "cmd:./parity/all.sh"]
+
+[[risk]]
+id = "RISK-PCAP-FORMAT"
+category = "data_integrity"
+priority = "P0"
+source = "AUDIT4 P5-20 / P5-22"
+description = "pcap read/write format integrity and honest length fields"
+evidence = [
+  "test:pcap_roundtrip",
+  "test:corrupt_record_header_leaves_the_previous_record_intact",
+  "test:parsing_is_independent_of_read_chunking",
+]
+
+[[risk]]
+id = "RISK-VLAN-REINSERT"
+category = "data_integrity"
+priority = "P0"
+source = "AUDIT4 P5-03 / P2-7"
+description = "VLAN reinsertion must not exceed snaplen or corrupt the frame"
+evidence = [
+  "test:insert_vlan_reinserts_after_macs",
+  "test:insert_vlan_truncated_frame_stays_within_snaplen",
+]
+
+[[risk]]
+id = "RISK-DNS-FAILURE"
+category = "failure_modes"
+priority = "P0"
+source = "AUDIT4 P5-10 / P2-10"
+description = "DNS failure or change must not hang capture or pin stale addresses"
+evidence = [
+  "test:a_failed_lookup_is_not_cached",
+  "test:connector_picks_up_a_dns_change_on_reconnect",
+  "test:connector_covers_every_resolved_address",
+]
+
+[[risk]]
+id = "RISK-BACKPRESSURE"
+category = "failure_modes"
+priority = "P0"
+source = "AUDIT4 P5-11"
+description = "collector backpressure must be bounded, not an OOM"
+evidence = [
+  "test:queue_is_bounded_in_bytes",
+  "test:queue_budget_is_bounded_by_hwm_and_bytes",
+  "test:hwm_drops_when_socket_blocks",
+]
+
+[[risk]]
+id = "RISK-HANDSHAKE-TIMEOUT"
+category = "failure_modes"
+priority = "P0"
+source = "AUDIT4 P5-10"
+description = "a silent/garbage peer must be given up on and retried"
+evidence = [
+  "test:silent_peer_handshake_times_out_and_reconnects",
+  "test:garbage_peer_is_rejected_and_reconnects",
+]
+
+[[risk]]
+id = "RISK-DISK-ERROR"
+category = "failure_modes"
+priority = "P0"
+source = "AUDIT4 P5-22 / M3"
+description = "file output errors (bad interval, unwritable dir) must be reported, not panic"
+evidence = [
+  "test:out_of_range_file_time_is_an_error_not_a_panic",
+  "test:build_task_fails_when_an_output_cannot_be_created",
+]
+
+[[risk]]
+id = "RISK-IFACE-DOWN"
+category = "failure_modes"
+priority = "P1"
+source = "PARITY.md §2.6"
+description = "capture interface going down should be handled (Rust keeps the task and backs off)"
+evidence = ["path:PARITY.md"]

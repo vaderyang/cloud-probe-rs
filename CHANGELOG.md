@@ -31,6 +31,11 @@ Two conventions worth knowing before reading:
   变更行 line 90%/branch 85%、P0 requirements），并新增每周 `.github/workflows/verification.yml`
   （nightly `--branch` 分支覆盖 + `cargo-mutants`，暂 advisory）；mutation 配置
   [`verification/mutants.toml`](verification/mutants.toml) + 入口 [`verify_mutation.sh`](verify_mutation.sh)。
+- **Verification Coverage 阶段 3**：风险覆盖登记 [`verification/risk.toml`](verification/risk.toml)
+  （16 条 P0 风险，security/concurrency/data-integrity/failure-modes）+ 门禁
+  [`verification/risk_gate.py`](verification/risk_gate.py)（**P0 风险 100% 有存在性验证**），纳入 CI `verify-coverage`。
+  mutation 首次基线记录于 [`verification/MUTATION_BASELINE.md`](verification/MUTATION_BASELINE.md)：
+  `output/gre.rs` 76/76 mutant 存活 → 已登记为待补测试缺口；每周 mutation 任务改为 4 shard 有界运行（advisory）。
 - `cpdaemon` now exposes a **library target** (`src/lib.rs`) and has end-to-end
   tests under `crates/cpdaemon/tests/`. This closes the largest remaining test
   gap in the port: `cpdaemon` previously had 14 unit tests and **no integration

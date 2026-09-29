@@ -115,8 +115,10 @@ PR 里若新增测试却无法指向其规范来源，视为不合格（见 §9 
 
 ## 7. Test effectiveness（mutation / poison）
 
-- **mutation testing**：`cargo-mutants`（配置见 `verification/mutants.toml`）。分层阈值见 §2。
-  先对 **Tier 0/1** 运行；`--in-place` 关闭、按 crate 限定范围、对已知等价 mutant 用 `exclude`。
+- **mutation testing**：`cargo-mutants`（配置见 `verification/mutants.toml`；入口 `verify_mutation.sh`）。分层阈值见 §2。
+  先对 **Tier 0/1** 运行；按 crate/文件限定范围、对已知等价 mutant 用 `exclude`。首次测量与缺口见
+  [`verification/MUTATION_BASELINE.md`](verification/MUTATION_BASELINE.md)（GRE 输出 76/76 存活）；
+  每周 `verification.yml` 分 4 shard 运行，**暂 advisory**，基线建立后纳阻塞。
 - **poison / 故障注入**：向黄金路径注入可观测故障（截断 chunk、错误 checksum、延迟/丢包、
   半包写入、cgroup 失败），断言系统**检测并正确降级**而不是静默通过（DST 思想）。
   已有实例：`decode_chunked` 截断注入、ZMTP 短写、`P5-02` 读后清零注入。
@@ -181,8 +183,9 @@ CI 门禁（`.github/workflows/ci.yml`）：
 - **阶段 2 ✅ 基本完成**：`requirements.toml` + `requirements_gate.py`（P0 场景 100%，已阻塞进 `verify-coverage`）；
   nightly `verification.yml` 跑 `cargo +nightly llvm-cov --branch`（branch 数据 + 分层报告，advisory）。
   待办：`--mcdc`（condition 门禁）与把 branch 纳入阻塞（待基线建立）。
-- **阶段 3 (进行中)**：`cargo-mutants` 配置 `verification/mutants.toml` + `verify_mutation.sh` + nightly mutation job（advisory）；
-  待办：mutation 阈值基线化并纳阻塞；poison/DST harness。
+- **阶段 3（进行中）**：`cargo-mutants` 配置 + `verify_mutation.sh` + 每周分片 mutation job（advisory）；
+  首次测量与缺口记录于 `verification/MUTATION_BASELINE.md`（GRE 输出 76/76 存活）。
+  待办：按测量收敛缺口 → mutation 阈值基线化并纳阻塞；poison/DST harness。
 - **阶段 4**：soak / chaos / fault-injection 定时 job；`risk.toml` P0 收敛到 100%。
 
 ---

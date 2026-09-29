@@ -108,8 +108,9 @@
 - **阶段 2 ✅ 基本完成**：`verification/requirements.toml` + `requirements_gate.py`（P0 场景 100%）；
   CI `verify-coverage` 阻塞化（分层/关键函数/no-decrease/diff/requirements）；
   weekly `verification.yml` 跑 nightly `--branch`。待办：`--mcdc`、branch 纳入阻塞。
-- **阶段 3（进行中）**：`cargo-mutants` 配置 + `verify_mutation.sh` + weekly mutation job（advisory）；
-  待办：mutation 阈值基线化并纳阻塞；poison/DST harness。
+- **阶段 3（进行中）**：`cargo-mutants` 配置 + `verify_mutation.sh` + 每周 4-shard mutation job（advisory）；
+  首次测量（GRE 输出 76/76 存活）记录于 `verification/MUTATION_BASELINE.md`；
+  `verification/risk.toml` + `risk_gate.py`（P0 风险 100%）已纳入 CI。待办：mutation 阈值纳阻塞；poison/DST harness。
 - **阶段 4**：soak / chaos / fault-injection 定时 job；`risk.toml` P0 收敛到 100%。
 
 ## 6. 被否决的备选方案（Alternatives）

@@ -224,6 +224,8 @@ jobs:
           fi
       - name: Behaviour coverage gate (P0 scenario = 100%)
         run: python3 verification/requirements_gate.py
+      - name: Risk coverage gate (P0 risks verified)
+        run: python3 verification/risk_gate.py
       - name: Upload lcov artifact
         uses: actions/upload-artifact@v4
         with:
