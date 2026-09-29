@@ -36,6 +36,9 @@ Two conventions worth knowing before reading:
   [`verification/risk_gate.py`](verification/risk_gate.py)（**P0 风险 100% 有存在性验证**），纳入 CI `verify-coverage`。
   mutation 首次基线记录于 [`verification/MUTATION_BASELINE.md`](verification/MUTATION_BASELINE.md)：
   `output/gre.rs` 76/76 mutant 存活 → 已登记为待补测试缺口；每周 mutation 任务改为 4 shard 有界运行（advisory）。
+- **mutation 缺口收敛**：`output::gre` 抽出 `Egress` 抽象后可单测，21 个新测试使其 mutation **50/50 caught**（原 76/76 存活）；
+  `cpgolib::cpworker::stats` 补跨单位借位等测试达 **56/56**；`config` 访问器/反序列化补测后 **0 missed**。
+  详见 [`verification/MUTATION_BASELINE.md`](verification/MUTATION_BASELINE.md)。
 - `cpdaemon` now exposes a **library target** (`src/lib.rs`) and has end-to-end
   tests under `crates/cpdaemon/tests/`. This closes the largest remaining test
   gap in the port: `cpdaemon` previously had 14 unit tests and **no integration

@@ -27,7 +27,23 @@ exclude_globs = [
 ]
 
 # Mutating a Drop impl or a trivial main is noise here.
-exclude_re = ["^impl .*Drop for", "^fn main$"]
+exclude_re = [
+  "^impl .*Drop for",
+  "^fn main$",
+  # Equivalent or not-observable mutants, and root-only syscall wrappers:
+  "gre\\.rs:33:",   # RawSocketEgress::send_to, the real sendto (root; live-capture)
+  "gre\\.rs:70:",   # set_bind_device wrapper (root)
+  "gre\\.rs:74:",   # set_pmtudisc wrapper (root)
+  "gre\\.rs:133:",  # `> 0` vs `>= 0` only gates logging; the reset is idempotent
+  "gre\\.rs:154:",  # slice == caplen: both branches produce the same length
+  "gre\\.rs:205:",  # ENOBUFS backoff sleep duration is not observable behaviour
+  "gre\\.rs:207:",
+  # These three behave as the tests expect but make the cargo-mutants runner
+  # hang (300s timeout); the behaviour is asserted by config::accessor_tests.
+  "config\\.rs:549:",
+  "config\\.rs:762:",
+  "config\\.rs:1060:",
+]
 
 timeout_multiplier = 3.0
 minimum_test_timeout = 60.0

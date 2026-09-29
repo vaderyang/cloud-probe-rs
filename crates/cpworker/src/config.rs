@@ -1505,3 +1505,355 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+mod accessor_tests {
+    use super::*;
+
+    fn vxlan(host: &str) -> VxlanConfig {
+        VxlanConfig {
+            host: host.into(),
+            port: 4789,
+            capture_time: false,
+            vni_version: 1,
+            vni: 0,
+            bind_device: String::new(),
+            pmtudisc: -1,
+            split: SplitConfig::default(),
+        }
+    }
+
+    fn gre(host: &str) -> GreConfig {
+        GreConfig {
+            host: host.into(),
+            service_tag: 0,
+            bind_device: String::new(),
+            pmtudisc: -1,
+        }
+    }
+
+    fn zmq(host: &str) -> ZmqConfig {
+        ZmqConfig {
+            host: host.into(),
+            port: 0,
+            hwm: DEFAULT_ZMQ_HWM,
+            service_tag: 0,
+            uuid: String::new(),
+            heartbeat_ms: 0,
+        }
+    }
+
+    fn libpcap(iface: &str, snaplen: i32) -> LibpcapConfig {
+        LibpcapConfig {
+            interface: iface.into(),
+            snaplen,
+            netns: String::new(),
+            bpf: String::new(),
+            buffer_size_mb: 0,
+            timeout_ms: 0,
+            not_filter_output_hosts: false,
+        }
+    }
+
+    fn oc(kind: OutputKind) -> OutputConfig {
+        OutputConfig {
+            kind,
+            rate_limit_mbps: 0,
+            slice: 0,
+        }
+    }
+
+    #[test]
+    fn output_type_strings() {
+        assert_eq!(
+            oc(OutputKind::Vxlan(vxlan("h"))).output_type(),
+            OUTPUT_TYPE_VXLAN
+        );
+        assert_eq!(oc(OutputKind::Gre(gre("h"))).output_type(), OUTPUT_TYPE_GRE);
+        assert_eq!(oc(OutputKind::Zmq(zmq("h"))).output_type(), OUTPUT_TYPE_ZMQ);
+        assert_eq!(
+            oc(OutputKind::File(FileConfig { name: "f".into() })).output_type(),
+            OUTPUT_TYPE_FILE
+        );
+        assert_eq!(
+            oc(OutputKind::RotatingFile(RotatingFileConfig {
+                file_root: "/tmp".into(),
+                max_file_interval: 60,
+            }))
+            .output_type(),
+            OUTPUT_TYPE_ROTATING_FILE
+        );
+        assert_eq!(oc(OutputKind::Null).output_type(), OUTPUT_TYPE_NULL);
+    }
+
+    #[test]
+    fn forward_host_only_for_network_outputs() {
+        assert_eq!(
+            oc(OutputKind::Vxlan(vxlan("10.0.0.1"))).forward_host(),
+            Some("10.0.0.1")
+        );
+        assert_eq!(
+            oc(OutputKind::Gre(gre("10.0.0.2"))).forward_host(),
+            Some("10.0.0.2")
+        );
+        assert_eq!(
+            oc(OutputKind::Zmq(zmq("10.0.0.3"))).forward_host(),
+            Some("10.0.0.3")
+        );
+        assert_eq!(
+            oc(OutputKind::File(FileConfig { name: "f".into() })).forward_host(),
+            None
+        );
+        assert_eq!(oc(OutputKind::Null).forward_host(), None);
+    }
+
+    #[test]
+    fn capturer_type_strings() {
+        assert_eq!(
+            CapturerKind::Libpcap(libpcap("eth0", 128)).capturer_type(),
+            CAPTURER_TYPE_LIBPCAP
+        );
+        assert_eq!(
+            CapturerKind::PcapFile(PcapFileConfig {
+                file_name: "x.pcap".into(),
+                bpf: String::new(),
+            })
+            .capturer_type(),
+            CAPTURER_TYPE_PCAP_FILE
+        );
+        assert_eq!(
+            CapturerKind::DpdkPdump(DpdkPdumpConfig {
+                interface: "eth1".into(),
+                snaplen: 64,
+                bpf: String::new(),
+                ring_size: 1024,
+            })
+            .capturer_type(),
+            CAPTURER_TYPE_DPDK_PDUMP
+        );
+    }
+
+    #[test]
+    fn capturer_snaplen_and_interface() {
+        let l = CapturerKind::Libpcap(libpcap("eth7", 128));
+        assert_eq!(l.snaplen(), 128);
+        assert_eq!(l.interface(), Some("eth7"));
+
+        let p = CapturerKind::PcapFile(PcapFileConfig {
+            file_name: "x.pcap".into(),
+            bpf: String::new(),
+        });
+        assert_eq!(p.snaplen(), 262144);
+        assert_eq!(p.interface(), None);
+
+        let d = CapturerKind::DpdkPdump(DpdkPdumpConfig {
+            interface: "eth9".into(),
+            snaplen: 64,
+            bpf: String::new(),
+            ring_size: 1024,
+        });
+        assert_eq!(d.snaplen(), 64);
+        assert_eq!(d.interface(), Some("eth9"));
+    }
+
+    #[derive(serde::Deserialize, Debug)]
+    struct NonNull {
+        #[serde(default, deserialize_with = "super::de_nonnull")]
+        x: Option<String>,
+    }
+
+    #[derive(serde::Deserialize, Debug)]
+    struct NonNullBool {
+        #[serde(default, deserialize_with = "super::de_nonnull_bool")]
+        b: bool,
+    }
+
+    #[test]
+    fn de_nonnull_allows_absent_and_value_but_rejects_null() {
+        assert!(serde_json::from_str::<NonNull>("{}").unwrap().x.is_none());
+        assert_eq!(
+            serde_json::from_str::<NonNull>(r#"{"x":"v"}"#)
+                .unwrap()
+                .x
+                .as_deref(),
+            Some("v")
+        );
+        let e = serde_json::from_str::<NonNull>(r#"{"x":null}"#).unwrap_err();
+        assert!(e.to_string().contains("null value not allowed"), "{e}");
+    }
+
+    #[test]
+    fn de_nonnull_bool_allows_absent_and_value_but_rejects_null() {
+        assert!(!serde_json::from_str::<NonNullBool>("{}").unwrap().b);
+        assert!(
+            serde_json::from_str::<NonNullBool>(r#"{"b":true}"#)
+                .unwrap()
+                .b
+        );
+        let e = serde_json::from_str::<NonNullBool>(r#"{"b":null}"#).unwrap_err();
+        assert!(e.to_string().contains("null value not allowed"), "{e}");
+    }
+
+    const DUMP_JSON: &str = r#"{
+        "tasks": [{
+            "fingerprint": "fp1",
+            "req_pattern": { "type": "auto" },
+            "capturer": { "type": "libpcap", "libpcap": { "interface": "eth7", "bpf": "udp" } },
+            "outputs": [
+                { "type": "vxlan", "vxlan": { "host": "10.0.0.9", "vni1": 7 } },
+                { "type": "gre", "gre": { "host": "10.0.0.10" } },
+                { "type": "zmq", "zmq": { "host": "10.0.0.11", "port": 5555 } },
+                { "type": "null" }
+            ]
+        }]
+    }"#;
+
+    #[test]
+    fn canonical_dump_lists_every_output_and_the_libpcap_capturer() {
+        let c = Config::parse_str(DUMP_JSON).expect("parse dump json");
+        let d = canonical_dump(&c);
+        assert!(d.contains("capturer=libpcap snaplen="), "{d}");
+        assert!(d.contains("bpf=udp"), "{d}");
+        assert!(
+            d.contains("output type=vxlan") && d.contains("host=10.0.0.9"),
+            "{d}"
+        );
+        assert!(
+            d.contains("output type=gre") && d.contains("host=10.0.0.10"),
+            "{d}"
+        );
+        assert!(
+            d.contains("output type=zmq") && d.contains("host=10.0.0.11"),
+            "{d}"
+        );
+        assert!(
+            d.lines()
+                .any(|l| l.starts_with("  output type=null") && l.ends_with("host=")),
+            "null output has no forward host: {d}"
+        );
+        assert!(
+            d.contains("exclude_bpf=(udp) and not host 10.0.0.9")
+                && d.contains("not host 10.0.0.10"),
+            "exclusion must keep the capturer bpf and list the output hosts: {d}"
+        );
+    }
+
+    fn err_msg(json: &str) -> String {
+        match Config::parse_str(json) {
+            Ok(_) => panic!("expected an error for {json}"),
+            Err(e) => e.to_string(),
+        }
+    }
+
+    fn task_with(output: &str) -> String {
+        format!(
+            r#"{{"tasks":[{{"fingerprint":"a","req_pattern":{{"type":"auto"}},"capturer":{{"type":"libpcap","libpcap":{{"interface":"eth0"}}}},"outputs":[{output}]}}]}}"#
+        )
+    }
+
+    #[test]
+    fn int_in_enforces_the_inclusive_bounds() {
+        assert_eq!(int_in("f", 5, 0, 10).unwrap(), 5);
+        assert_eq!(int_in("f", 0, 0, 10).unwrap(), 0);
+        assert_eq!(int_in("f", 10, 0, 10).unwrap(), 10);
+        assert!(int_in("f", -1, 0, 10).is_err());
+        assert!(int_in("f", 11, 0, 10).is_err());
+    }
+
+    #[test]
+    fn parse_pmtudisc_maps_the_three_keywords() {
+        assert_eq!(parse_pmtudisc("do").unwrap(), IP_PMTUDISC_DO);
+        assert_eq!(parse_pmtudisc("dont").unwrap(), IP_PMTUDISC_DONT);
+        assert_eq!(parse_pmtudisc("want").unwrap(), IP_PMTUDISC_WANT);
+        match parse_pmtudisc("maybe") {
+            Ok(_) => panic!("expected an error"),
+            Err(e) => assert!(e.to_string().contains("invalid pmtudisc"), "{e}"),
+        }
+    }
+
+    #[test]
+    fn omitted_pmtudisc_defaults_to_minus_one() {
+        let v = Config::parse_str(&task_with(
+            r#"{"type":"vxlan","vxlan":{"host":"1.2.3.4","vni1":1}}"#,
+        ))
+        .unwrap();
+        match &v.tasks[0].outputs[0].kind {
+            OutputKind::Vxlan(c) => assert_eq!(c.pmtudisc, -1),
+            other => panic!("expected vxlan, got {other:?}"),
+        }
+        let g =
+            Config::parse_str(&task_with(r#"{"type":"gre","gre":{"host":"1.2.3.4"}}"#)).unwrap();
+        match &g.tasks[0].outputs[0].kind {
+            OutputKind::Gre(c) => assert_eq!(c.pmtudisc, -1),
+            other => panic!("expected gre, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn rotating_file_default_interval_is_minus_one() {
+        let c = Config::parse_str(&task_with(
+            r#"{"type":"rotating_file","rotating_file":{"file_root":"/tmp"}}"#,
+        ))
+        .unwrap();
+        match &c.tasks[0].outputs[0].kind {
+            OutputKind::RotatingFile(r) => assert_eq!(r.max_file_interval, -1),
+            other => panic!("expected rotating_file, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn task_capturer_snaplen_matches_the_capturer() {
+        let c = Config::parse_str(
+            r#"{"tasks":[{"fingerprint":"a","req_pattern":{"type":"auto"},"capturer":{"type":"libpcap","libpcap":{"interface":"eth0","snaplen":3000}},"outputs":[{"type":"null"}]}]}"#,
+        )
+        .unwrap();
+        assert_eq!(task_capturer_snaplen(&c.tasks[0]), 3000);
+    }
+
+    #[test]
+    fn log_levels_map_and_reject_unknown() {
+        for (s, want) in [
+            ("DEBUG", LOG_DEBUG),
+            ("Info", LOG_INFO),
+            ("warn", LOG_WARN),
+            ("error", LOG_ERROR),
+        ] {
+            let c = Config::parse_str(&format!(r#"{{"log_level":"{s}","tasks":[]}}"#)).unwrap();
+            assert_eq!(c.log_level, want, "log_level {s}");
+        }
+        assert_eq!(
+            Config::parse_str(r#"{"tasks":[]}"#).unwrap().log_level,
+            LOG_INFO
+        );
+        assert!(Config::parse_str(r#"{"log_level":"TRACE","tasks":[]}"#).is_err());
+    }
+
+    #[test]
+    fn execution_model_pipeline_requires_and_reads_the_pipeline_block() {
+        let m = err_msg(r#"{"execution_model":"pipeline","tasks":[]}"#);
+        assert!(m.contains("missing pipeline config"), "{m}");
+        let c = Config::parse_str(
+            r#"{"execution_model":"pipeline","pipeline":{"buffer_size_mb":64},"tasks":[]}"#,
+        )
+        .unwrap();
+        assert_eq!(c.execution_model, ExecutionModel::Pipeline);
+        assert_eq!(c.pipeline_buffer_size_mb, 64);
+    }
+
+    #[test]
+    fn empty_fingerprints_are_dropped_and_duplicates_rejected() {
+        let two = |a: &str, b: &str| {
+            format!(
+                r#"{{"tasks":[
+                    {{"fingerprint":"{a}","req_pattern":{{"type":"auto"}},"capturer":{{"type":"libpcap","libpcap":{{"interface":"eth0"}}}},"outputs":[{{"type":"null"}}]}},
+                    {{"fingerprint":"{b}","req_pattern":{{"type":"auto"}},"capturer":{{"type":"libpcap","libpcap":{{"interface":"eth1"}}}},"outputs":[{{"type":"null"}}]}}
+                ]}}"#
+            )
+        };
+        let c = Config::parse_str(&two("", "a")).unwrap();
+        assert!(c.tasks[0].fingerprint.is_none(), "empty string is dropped");
+        assert_eq!(c.tasks[1].fingerprint.as_deref(), Some("a"));
+        assert!(Config::parse_str(&two("dup", "dup")).is_err());
+        assert!(Config::parse_str(&two("", "")).is_ok());
+    }
+}

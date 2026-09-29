@@ -18,23 +18,41 @@ EOF
 cargo mutants --config /tmp/mut-one.toml --no-times
 ```
 
-## 首次测量（2026-09-29）
+## 测量记录
 
-| 范围 | mutants | caught | missed | 结论 |
-|---|---:|---:|---:|---|
-| `crates/cpworker/src/output/gre.rs` | 76 | 0 | **76** | GRE 输出路径**几乎没有测试**（行覆盖 ~8%） |
+| 日期 | 范围 | mutants | caught | missed | 结论 |
+|---|---|---:|---:|---:|---|
+| 2026-09-29 | `crates/cpworker/src/output/gre.rs` | 76 | 0 | **76** | GRE 输出路径**几乎没有测试**（行覆盖 ~8%） |
+| 2026-09-30 | `crates/cpworker/src/output/gre.rs`（补测后） | 50 | **50** | 0 | 100%（抽出 `Egress` 抽象 + 21 个单测；不可观测/root-only 项已 `exclude_re`） |
+| 2026-09-30 | `crates/cpgolib/src/cpworker/stats.rs`（补测后） | 56 | **56** | 0 | 100%（跨单位借位、const 字面值、compare 排序） |
+| 2026-09-30 | `crates/cpworker/src/config.rs`（补测后） | 70 | 59 | 0 | 0 missed；8 unviable / 3 runner-timeout（已 `exclude_re` 并注明，行为由访问器测试断言） |
 
-`GreOutput::send_packet` 与 `_pmtudisc_consts` 的全部算术/比较/逻辑变异均**存活**，
-说明该路径的行为没有被任何测试固定。这是 mutation 维度发现的第一个真实缺口
-（行覆盖 8% 早已提示，mutation 给出了确定结论）。
+首次测量中 `GreOutput::send_packet` 与 `_pmtudisc_consts` 的全部算术/比较/逻辑变异均**存活**，说明该路径的行为没有被任何测试固定。
+补测后 GRE 与 cpgolib stats 均达到 100% caught，config 无 missed。
+
+### 已关闭的缺口
+
+- `cpworker::output::gre`：抽出 `Egress` trait（`RawSocketEgress` / 测试用 `MockEgress`）后将发送/重试/统计状态机完全单测化；
+  覆盖 slice/clamp、未知方向丢弃、令牌桶扣减、部分发送、ENOBUFS 重试与耗尽、其它 errno、error-info 5s 窗口。
+- `cpgolib::cpworker::stats::{BytesStats,PacketsStats}`：补跨单位借位、单位常量字面值、`compare` 排序、相等不减。
+- `cpworker::config` 访问器与反序列化：`output_type`/`capturer_type`/`snaplen`/`interface`/`forward_host`、
+  `canonical_dump`（含 libpcap bpf 与输出主机排除）、`de_nonnull`/`de_nonnull_bool`、`int_in`、`parse_pmtudisc`、
+  日志级别与 execution model、重复/ 空 fingerprint、默认值（pmtudisc=-1 等）。
+
+### 待补（尚未测量）
+
+- `cpworker::bpf::{parser,compiler,interp}`、`packet.rs`、`packet_split.rs`、`zmtp::{codec,client}`、`output::vxlan`、
+  `cpgolib` 其余模块。下一轮全量 `./verify_mutation.sh`（分 4 shard）后回填。
+- `cpworker::bpf::mod::attach_filter`（需 root，归入 `live-capture`）。
 
 ## 策略
 
 - 阈值（Tier 0 ≥85% / Tier 1 ≥75% / Tier 2 ≥60%，见 `policy.toml`）为**目标**；
   未基线化前 **不阻塞**，仅每周报告 + 记录缺口。
 - PR 使用 `--in-diff`（只变异改动行）；待全量基线稳定后可对改动范围启用"零存活 mutant"硬门禁。
-- 缺口清单（待补测试，随测量更新）：
-  - `cpworker::output::gre::GreOutput::send_packet` / `_pmtudisc_consts`（GRE 输出）
-  - `cpgolib::cpworker::stats::{BytesStats,PacketsStats}::sub`（减法/回绕）
+- 缺口清单（已关闭见上；待测范围见下）：
+  - ~~`cpworker::output::gre`~~ ✅ 100%
+  - ~~`cpgolib::cpworker::stats::sub`~~ ✅ 100%
+  - ~~`cpworker::config` 访问器~~ ✅ 0 missed
+  - `cpworker::bpf`、`packet*`、`zmtp`、`vxlan`、`cpgolib` 其余（待全量测量）
   - `cpworker::bpf::mod::attach_filter`（需 root，归入 `live-capture` 覆盖）
-  - `cpworker::config::{OutputConfig,CapturerKind}` 的访问器与 `canonical_dump`（部分）

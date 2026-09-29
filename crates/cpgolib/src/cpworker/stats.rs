@@ -169,6 +169,60 @@ mod tests {
     use super::*;
 
     #[test]
+    fn unit_constants_are_powers_of_1024_and_ten() {
+        assert_eq!(EIB_IN_BYTES, 1u64 << 60);
+        assert_eq!(PETA_IN_PACKETS, 10u64.pow(16));
+    }
+
+    #[test]
+    fn bytes_compare_orders() {
+        let small = BytesStats { bytes: 1, eib: 0 };
+        let mid = BytesStats { bytes: 5, eib: 1 };
+        let big = BytesStats { bytes: 9, eib: 2 };
+        assert_eq!(small.compare(&big), -1);
+        assert_eq!(big.compare(&small), 1);
+        assert_eq!(mid.compare(&mid.clone()), 0);
+    }
+
+    #[test]
+    fn packets_compare_orders() {
+        let small = PacketsStats {
+            packets: 1,
+            peta: 0,
+        };
+        let mid = PacketsStats {
+            packets: 5,
+            peta: 1,
+        };
+        let big = PacketsStats {
+            packets: 9,
+            peta: 2,
+        };
+        assert_eq!(small.compare(&big), -1);
+        assert_eq!(big.compare(&small), 1);
+        assert_eq!(mid.compare(&mid.clone()), 0);
+    }
+
+    #[test]
+    fn bytes_sub_equal_is_not_less() {
+        let a = BytesStats { bytes: 7, eib: 3 };
+        let (d, less) = a.sub(&a);
+        assert_eq!((d.bytes, d.eib), (0, 0));
+        assert!(!less);
+    }
+
+    #[test]
+    fn packets_sub_equal_is_not_less() {
+        let a = PacketsStats {
+            packets: 7,
+            peta: 3,
+        };
+        let (d, less) = a.sub(&a);
+        assert_eq!((d.packets, d.peta), (0, 0));
+        assert!(!less);
+    }
+
+    #[test]
     fn bytes_sub_simple() {
         let a = BytesStats { bytes: 100, eib: 0 };
         let b = BytesStats { bytes: 50, eib: 0 };
@@ -200,5 +254,63 @@ mod tests {
         assert_eq!(d.packets, 2);
         assert_eq!(d.peta, 0);
         assert!(less);
+    }
+
+    #[test]
+    fn bytes_sub_borrows_across_eib() {
+        let a = BytesStats { bytes: 5, eib: 1 };
+        let b = BytesStats { bytes: 10, eib: 0 };
+        let (d, less) = a.sub(&b);
+        assert_eq!(d.bytes, EIB_IN_BYTES - 5);
+        assert_eq!(d.eib, 0);
+        assert!(!less);
+    }
+
+    #[test]
+    fn bytes_sub_equal_bytes_does_not_borrow() {
+        let a = BytesStats { bytes: 10, eib: 2 };
+        let b = BytesStats { bytes: 10, eib: 1 };
+        let (d, less) = a.sub(&b);
+        assert_eq!((d.bytes, d.eib, less), (0, 1, false));
+    }
+
+    #[test]
+    fn bytes_sub_reversed_order_reports_less() {
+        let a = BytesStats { bytes: 10, eib: 0 };
+        let b = BytesStats { bytes: 5, eib: 1 };
+        let (d, less) = a.sub(&b);
+        assert_eq!(d.bytes, EIB_IN_BYTES - 5);
+        assert_eq!(d.eib, 0);
+        assert!(less);
+    }
+
+    #[test]
+    fn packets_sub_borrows_across_peta() {
+        let a = PacketsStats {
+            packets: 5,
+            peta: 1,
+        };
+        let b = PacketsStats {
+            packets: 10,
+            peta: 0,
+        };
+        let (d, less) = a.sub(&b);
+        assert_eq!(d.packets, PETA_IN_PACKETS - 5);
+        assert_eq!(d.peta, 0);
+        assert!(!less);
+    }
+
+    #[test]
+    fn packets_sub_equal_packets_does_not_borrow() {
+        let a = PacketsStats {
+            packets: 10,
+            peta: 2,
+        };
+        let b = PacketsStats {
+            packets: 10,
+            peta: 1,
+        };
+        let (d, less) = a.sub(&b);
+        assert_eq!((d.packets, d.peta, less), (0, 1, false));
     }
 }
