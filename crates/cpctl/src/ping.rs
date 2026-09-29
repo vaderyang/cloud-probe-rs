@@ -151,3 +151,51 @@ pub fn run(globals: &Globals, count: i32, interval: Duration, quiet: bool) -> an
         std::thread::sleep(interval);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn summary_without_samples_reports_full_loss() {
+        let s = compute_ping_summary(4, &[]);
+        assert_eq!(s.sent, 4);
+        assert_eq!(s.received, 0);
+        assert_eq!(s.loss_pct, 100.0);
+        assert!(!s.has_samples);
+    }
+
+    #[test]
+    fn summary_computes_min_avg_max_and_population_stddev() {
+        let s = compute_ping_summary(3, &[10.0, 20.0, 30.0]);
+        assert_eq!(s.received, 3);
+        assert_eq!(s.loss_pct, 0.0);
+        assert!(s.has_samples);
+        assert_eq!(s.min_ms, 10.0);
+        assert_eq!(s.max_ms, 30.0);
+        assert_eq!(s.avg_ms, 20.0);
+        assert!((s.stddev_ms - (200.0f64 / 3.0).sqrt()).abs() < 1e-9);
+    }
+
+    #[test]
+    fn summary_reports_partial_loss() {
+        let s = compute_ping_summary(4, &[5.0, 5.0]);
+        assert_eq!(s.received, 2);
+        assert_eq!(s.loss_pct, 50.0);
+        assert_eq!(s.stddev_ms, 0.0);
+    }
+
+    #[test]
+    fn a_single_sample_has_no_stddev() {
+        let s = compute_ping_summary(1, &[7.5]);
+        assert_eq!(s.min_ms, 7.5);
+        assert_eq!(s.avg_ms, 7.5);
+        assert_eq!(s.stddev_ms, 0.0);
+    }
+
+    #[test]
+    fn nothing_sent_does_not_divide_by_zero() {
+        let s = compute_ping_summary(0, &[]);
+        assert_eq!(s.loss_pct, 0.0);
+    }
+}

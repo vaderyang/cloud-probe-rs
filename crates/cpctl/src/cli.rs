@@ -95,3 +95,35 @@ pub enum Command {
         interval: Duration,
     },
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn globals(unix: Option<&str>) -> Globals {
+        Globals {
+            unix: unix.map(str::to_string),
+            format: "text".into(),
+            timeout: Duration::from_secs(1),
+        }
+    }
+
+    #[test]
+    fn format_parses_text_and_the_jsonl_aliases() {
+        assert_eq!(Format::parse("text").unwrap(), Format::Text);
+        assert_eq!(Format::parse("TEXT").unwrap(), Format::Text);
+        assert_eq!(Format::parse("jsonl").unwrap(), Format::Jsonl);
+        assert_eq!(Format::parse("ndjson").unwrap(), Format::Jsonl);
+        assert!(Format::parse("yaml").is_err());
+    }
+
+    #[test]
+    fn require_unix_rejects_missing_or_empty() {
+        assert!(globals(None).require_unix().is_err());
+        assert!(globals(Some("")).require_unix().is_err());
+        assert_eq!(
+            globals(Some("/tmp/cpworker.sock")).require_unix().unwrap(),
+            "unix:///tmp/cpworker.sock"
+        );
+    }
+}

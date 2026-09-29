@@ -52,6 +52,13 @@ Two conventions worth knowing before reading:
   `DOCKER_API_VERSION` short-circuiting it, inspect, and the usage/parse
   failures). Writing them exposed and fixed a panic: `decode_chunked` sliced out
   of bounds on a truncated chunk instead of returning an error.
+- `cpctl` gained tests for `compute_ping_summary` (loss %, min/avg/max/
+  population stddev, no-samples and single-sample cases) and for CLI
+  `--format`/`--unix` parsing (2 → 9 tests).
+- [FIELD_CONFIRMATION.md](FIELD_CONFIRMATION.md): the `IMPROVEMENT_PLAN_AUDIT4.md`
+  §5.1 items that need field or business input before sign-off, written as a
+  checklist (what to collect, why it matters, what decision it unblocks) that can
+  be handed to the teams that have the data.
 - A minimal CPM mock (axum, ephemeral port, request recording) lives in
   `crates/cpdaemon/tests/common/mod.rs` for reuse by future daemon tests.
 
