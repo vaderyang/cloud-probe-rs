@@ -29,6 +29,7 @@ cargo mutants --config /tmp/mut-one.toml --no-times
 | 2026-09-30 | `crates/cpworker/src/output/vxlan.rs`（补测后） | 96 | **96** | 0 | 100%（抽出共享 `Egress` + 19 个单测 + 6 组 golden wire 向量；等价/root-only 项已 `exclude_re`） |
 | 2026-09-30 | `crates/cpworker/src/packet.rs`（补测后） | 284 | 251 | 0 | 0 missed；46 个新测试（VLAN 单/双、IPv4/IPv6 + 扩展头、边界长度、`extract_ipport`/VXLAN 逐层）；剩余为等价边界 guard（已 `exclude_re`） |
 | 2026-09-30 | `crates/cpworker/src/packet_split.rs`（补测后） | 128 | **127** | 0 | 仅 `158:81` 等价（校验和只读 ihl 字节）；补 golden 校验和 / 分片字节 / 校验和归零不变量测试 |
+| 2026-09-30 | `crates/cpworker/src/zmtp/**`（部分） | — | 71 | 27 | 运行被超时中断；已捕获多处 `Conn`/`ZmtpPush` 状态机存活，待补齐（见下） |
 
 首次测量中 `GreOutput::send_packet` 与 `_pmtudisc_consts` 的全部算术/比较/逻辑变异均**存活**，说明该路径的行为没有被任何测试固定。
 补测后 GRE 与 cpgolib stats 均达到 100% caught，config 无 missed。

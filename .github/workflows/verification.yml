@@ -47,6 +47,7 @@ jobs:
   mutation:
     name: mutation (cargo-mutants shard ${{ matrix.shard }}/4)
     runs-on: ubuntu-latest
+    timeout-minutes: 120
     # Advisory until mutation is baselined (VERIFICATION_COVERAGE.md §10 stage 3):
     # the first measurement found the GRE output path untested
     # (verification/MUTATION_BASELINE.md). Sharded so a weekly run is bounded.
