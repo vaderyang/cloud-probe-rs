@@ -76,6 +76,8 @@ exclude_re = [
   "packet\\.rs:392:",
   "packet\\.rs:422:",
   "packet_split\\.rs:158:", # calculate_ip_checksum only reads ihl bytes, so a longer slice is equivalent
+  "codec\\.rs:159:",  # metadata name exactly fills the buffer, but the value length read still fails
+  "codec\\.rs:216:",  # FLAG_LONG is never set in `flags`, so | and ^ agree
 ]
 
 timeout_multiplier = 3.0

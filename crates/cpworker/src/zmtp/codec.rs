@@ -363,4 +363,76 @@ mod tests {
         assert!(!peer_type_compatible("SUB"));
         assert!(!peer_type_compatible(""));
     }
+    #[test]
+    fn constants_and_display_are_exact() {
+        assert_eq!(MAX_FRAME_BODY, 16 * 1024 * 1024);
+        assert_eq!(FLAG_MORE, 0x01);
+        assert_eq!(FLAG_LONG, 0x02);
+        assert_eq!(FLAG_COMMAND, 0x04);
+        assert_eq!(CodecError("boom").to_string(), "boom");
+    }
+
+    #[test]
+    fn parse_greeting_rejects_short_and_bad_signature() {
+        assert!(parse_greeting(&[0u8; 10]).is_err(), "short buffer");
+        // Short but with a valid-looking signature prefix: a broken length guard
+        // would read past the end here instead of rejecting.
+        let mut short_valid = [0u8; 20];
+        short_valid[0] = 0xff;
+        short_valid[9] = 0x7f;
+        assert!(parse_greeting(&short_valid).is_err(), "short but signed");
+        let mut bad_first = greeting();
+        bad_first[0] = 0x00;
+        assert!(parse_greeting(&bad_first).is_err());
+        let mut bad_second = greeting();
+        bad_second[9] = 0x00;
+        assert!(parse_greeting(&bad_second).is_err());
+    }
+
+    #[test]
+    fn parse_command_body_rejects_truncated_name() {
+        // name_len = 5 but only the length byte + 4 name bytes are present.
+        let body = [5u8, b'R', b'E', b'A', b'D'];
+        assert!(parse_command_body(&body).is_err());
+    }
+
+    #[test]
+    fn error_command_is_decoded() {
+        let mut body = vec![5u8];
+        body.extend_from_slice(b"ERROR");
+        body.push(3); // reason length prefix
+        body.extend_from_slice(b"bad");
+        let f = Frame {
+            flags: FLAG_COMMAND,
+            body,
+        };
+        match decode_command(&f).unwrap() {
+            Command::Error(reason) => assert_eq!(reason, "bad"),
+            other => panic!("unexpected {other:?}"),
+        }
+    }
+
+    #[test]
+    fn frame_boundary_at_255_uses_the_short_form() {
+        let f = frame(0, &[0u8; 255]);
+        assert_eq!(f[0], 0, "no long flag at exactly 255 bytes");
+        assert_eq!(f[1], 255);
+        let f = frame(0, &[0u8; 256]);
+        assert_eq!(f[0], FLAG_LONG);
+    }
+
+    #[test]
+    fn frame_body_at_the_size_limit_is_not_rejected() {
+        let mut buf = vec![FLAG_LONG];
+        buf.extend_from_slice(&(MAX_FRAME_BODY as u64).to_be_bytes());
+        // Declares exactly the limit but no body yet: Ok(None), not an error.
+        assert_eq!(parse_frame(&buf).unwrap(), None);
+    }
+
+    #[test]
+    fn empty_short_frame_is_parsed() {
+        let (f, n) = parse_frame(&[0x00, 0x00]).unwrap().unwrap();
+        assert_eq!(n, 2);
+        assert_eq!(f.body, Vec::<u8>::new());
+    }
 }
