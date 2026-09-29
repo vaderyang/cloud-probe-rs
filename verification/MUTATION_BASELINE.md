@@ -31,6 +31,7 @@ cargo mutants --config /tmp/mut-one.toml --no-times
 | 2026-09-30 | `crates/cpworker/src/packet_split.rs`（补测后） | 128 | **127** | 0 | 仅 `158:81` 等价（校验和只读 ihl 字节）；补 golden 校验和 / 分片字节 / 校验和归零不变量测试 |
 | 2026-09-30 | `crates/cpworker/src/zmtp/**`（部分） | — | 71 | 27 | 运行被超时中断；已捕获多处 `Conn`/`ZmtpPush` 状态机存活，待补齐（见下） |
 | 2026-09-30 | `crates/cpworker/src/zmtp/codec.rs`（补测后） | 101 | **92** | 0 | 3 例等价（已 `exclude_re`）；补常量/Display/greeting/命令/边界测试 |
+| 2026-09-30 | `crates/cpworker/src/bpf/**`（部分） | — | 44 | 98 | 运行被超时中断；bpf parser/compiler/interp 仍有大量未固定行为，待专门收敛 |
 
 首次测量中 `GreOutput::send_packet` 与 `_pmtudisc_consts` 的全部算术/比较/逻辑变异均**存活**，说明该路径的行为没有被任何测试固定。
 补测后 GRE 与 cpgolib stats 均达到 100% caught，config 无 missed。
@@ -55,7 +56,7 @@ cargo mutants --config /tmp/mut-one.toml --no-times
 
 ### 待补（尚未测量）
 
-- `cpworker::bpf::{parser,compiler,interp}`、`zmtp::client`、`cpgolib` 其余模块。下一轮全量 `./verify_mutation.sh`（分 4 shard）后回填。
+- `cpworker::bpf::{parser,compiler,interp}`、`zmtp::client`、`cpgolib` 其余模块。全量 `./verify_mutation.sh`（分 4 shard，weekly）后回填。
 - `cpworker::bpf::mod::attach_filter`（需 root，归入 `live-capture`）。
 
 ## 策略
@@ -71,5 +72,5 @@ cargo mutants --config /tmp/mut-one.toml --no-times
   - `cpworker::zmtp::codec` ✅ 92/101（3 例等价）
   - ~~`cpgolib::cpworker::stats::sub`~~ ✅ 100%
   - ~~`cpworker::config` 访问器~~ ✅ 0 missed
-  - `cpworker::bpf`、`packet*`、`zmtp`、`vxlan`、`cpgolib` 其余（待全量测量）
+  - `cpworker::bpf::{parser,compiler,interp}`（部分：44 caught / 98 missed，待收敛）
   - `cpworker::bpf::mod::attach_filter`（需 root，归入 `live-capture` 覆盖）
