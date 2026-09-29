@@ -26,6 +26,7 @@ cargo mutants --config /tmp/mut-one.toml --no-times
 | 2026-09-30 | `crates/cpworker/src/output/gre.rs`（补测后） | 50 | **50** | 0 | 100%（抽出 `Egress` 抽象 + 21 个单测；不可观测/root-only 项已 `exclude_re`） |
 | 2026-09-30 | `crates/cpgolib/src/cpworker/stats.rs`（补测后） | 56 | **56** | 0 | 100%（跨单位借位、const 字面值、compare 排序） |
 | 2026-09-30 | `crates/cpworker/src/config.rs`（补测后） | 70 | 59 | 0 | 0 missed；8 unviable / 3 runner-timeout（已 `exclude_re` 并注明，行为由访问器测试断言） |
+| 2026-09-30 | `crates/cpworker/src/output/vxlan.rs`（补测后） | 96 | **96** | 0 | 100%（抽出共享 `Egress` + 19 个单测 + 6 组 golden wire 向量；等价/root-only 项已 `exclude_re`） |
 
 首次测量中 `GreOutput::send_packet` 与 `_pmtudisc_consts` 的全部算术/比较/逻辑变异均**存活**，说明该路径的行为没有被任何测试固定。
 补测后 GRE 与 cpgolib stats 均达到 100% caught，config 无 missed。
@@ -35,14 +36,17 @@ cargo mutants --config /tmp/mut-one.toml --no-times
 - `cpworker::output::gre`：抽出 `Egress` trait（`RawSocketEgress` / 测试用 `MockEgress`）后将发送/重试/统计状态机完全单测化；
   覆盖 slice/clamp、未知方向丢弃、令牌桶扣减、部分发送、ENOBUFS 重试与耗尽、其它 errno、error-info 5s 窗口。
 - `cpgolib::cpworker::stats::{BytesStats,PacketsStats}`：补跨单位借位、单位常量字面值、`compare` 排序、相等不减。
+- `cpworker::output::vxlan`：同样抽出 `Egress`（现与 GRE 共享 `output::Egress`/`RawSocketEgress`），
+  覆盖 fast path / slice / 令牌桶 / 部分发送 / ENOBUFS 重试·耗尽 / 其它 errno / error-info 窗口 /
+  **分片发送路径**（每片一个 datagram、单片回退整帧、不可解析回退）；并用 6 组 golden wire 向量固定
+  VNI v1/v2/方向/时间戳/校验和布局。
 - `cpworker::config` 访问器与反序列化：`output_type`/`capturer_type`/`snaplen`/`interface`/`forward_host`、
   `canonical_dump`（含 libpcap bpf 与输出主机排除）、`de_nonnull`/`de_nonnull_bool`、`int_in`、`parse_pmtudisc`、
   日志级别与 execution model、重复/ 空 fingerprint、默认值（pmtudisc=-1 等）。
 
 ### 待补（尚未测量）
 
-- `cpworker::bpf::{parser,compiler,interp}`、`packet.rs`、`packet_split.rs`、`zmtp::{codec,client}`、`output::vxlan`、
-  `cpgolib` 其余模块。下一轮全量 `./verify_mutation.sh`（分 4 shard）后回填。
+- `cpworker::bpf::{parser,compiler,interp}`、`packet.rs`、`packet_split.rs`、`zmtp::{codec,client}`、`cpgolib` 其余模块。下一轮全量 `./verify_mutation.sh`（分 4 shard）后回填。
 - `cpworker::bpf::mod::attach_filter`（需 root，归入 `live-capture`）。
 
 ## 策略
@@ -52,6 +56,7 @@ cargo mutants --config /tmp/mut-one.toml --no-times
 - PR 使用 `--in-diff`（只变异改动行）；待全量基线稳定后可对改动范围启用"零存活 mutant"硬门禁。
 - 缺口清单（已关闭见上；待测范围见下）：
   - ~~`cpworker::output::gre`~~ ✅ 100%
+  - ~~`cpworker::output::vxlan`~~ ✅ 100%
   - ~~`cpgolib::cpworker::stats::sub`~~ ✅ 100%
   - ~~`cpworker::config` 访问器~~ ✅ 0 missed
   - `cpworker::bpf`、`packet*`、`zmtp`、`vxlan`、`cpgolib` 其余（待全量测量）

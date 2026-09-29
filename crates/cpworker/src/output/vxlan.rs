@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use socket2::{Domain, Protocol, Socket, Type};
 
-use super::{Output, PacketHeader};
+use super::{Egress, Output, PacketHeader, RawSocketEgress};
 use crate::config::{OutputConfig, VxlanConfig};
 use crate::error::{Error, Result};
 use crate::packet::{parse_packet, ETH_HDR_LEN, PKT_DIR_NONCHECK, PKT_DIR_UNKNOWN, VXLAN_HDR_LEN};
@@ -105,8 +105,7 @@ pub struct VxlanOutput {
     vni_version: u8,
     vni: u32,
     capture_time: bool,
-    remote_addr: SocketAddrV4,
-    socket: Socket,
+    egress: Box<dyn Egress>,
     buf: Vec<u8>,
     fragment_buf: Vec<u8>,
     max_payload_size: u16,
@@ -156,8 +155,10 @@ impl VxlanOutput {
             vni_version: cfg.vni_version,
             vni: cfg.vni,
             capture_time: cfg.capture_time,
-            remote_addr,
-            socket,
+            egress: Box::new(RawSocketEgress {
+                socket,
+                remote: SocketAddr::V4(remote_addr),
+            }),
             buf: vec![0u8; VXLAN_OUTPUT_BUFSIZE],
             fragment_buf: vec![0u8; VXLAN_OUTPUT_BUFSIZE],
             max_payload_size: cfg.split.max_payload_size,
@@ -203,8 +204,7 @@ impl VxlanOutput {
         );
         let mut retry = 0;
         loop {
-            let addr: SocketAddr = SocketAddr::V4(self.remote_addr);
-            match self.socket.send_to(&self.buf[..total], &addr.into()) {
+            match self.egress.send_to(&self.buf[..total]) {
                 Ok(sent) => {
                     if sent < total {
                         self.error_info.nb_partial_sends += 1;
@@ -305,5 +305,445 @@ impl Output for VxlanOutput {
             }
         }
         0
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::packet::{ETHERTYPE_IP, IPPROTO_TCP, PKT_DIR_INCOMING, PKT_DIR_NONCHECK};
+    use crate::stats::OutputStats;
+    use std::sync::{Arc, Mutex};
+
+    const VNI: u32 = 0x0012_3456;
+
+    #[derive(Default)]
+    struct MockState {
+        responses: std::collections::VecDeque<std::io::Result<usize>>,
+        sent: Vec<Vec<u8>>,
+    }
+
+    struct MockEgress(Arc<Mutex<MockState>>);
+
+    impl Egress for MockEgress {
+        fn send_to(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            let mut s = self.0.lock().unwrap();
+            s.sent.push(buf.to_vec());
+            s.responses.pop_front().unwrap_or(Ok(buf.len()))
+        }
+    }
+
+    struct Fixture {
+        out: VxlanOutput,
+        stats: Arc<OutputStats>,
+    }
+
+    fn fixture(
+        state: Arc<Mutex<MockState>>,
+        slice: i32,
+        throttle: Option<TokenBucket>,
+        max_payload_size: u16,
+        recalculate_checksum: bool,
+    ) -> Fixture {
+        let stats = Arc::new(OutputStats::default());
+        let out = VxlanOutput {
+            stats: Arc::clone(&stats),
+            throttle,
+            slice,
+            vni_version: 1,
+            vni: VNI,
+            capture_time: false,
+            egress: Box::new(MockEgress(state)),
+            buf: vec![0u8; VXLAN_OUTPUT_BUFSIZE],
+            fragment_buf: vec![0u8; VXLAN_OUTPUT_BUFSIZE],
+            max_payload_size,
+            recalculate_checksum,
+            error_info: ErrorInfo::default(),
+        };
+        Fixture { out, stats }
+    }
+
+    fn mock(responses: Vec<std::io::Result<usize>>) -> Arc<Mutex<MockState>> {
+        Arc::new(Mutex::new(MockState {
+            responses: responses.into(),
+            sent: Vec::new(),
+        }))
+    }
+
+    fn hdr(ts_sec: i64, caplen: u32) -> PacketHeader {
+        PacketHeader {
+            ts_sec,
+            ts_usec: 0,
+            caplen,
+            len: caplen,
+        }
+    }
+
+    fn sent(state: &Arc<Mutex<MockState>>) -> Vec<Vec<u8>> {
+        state.lock().unwrap().sent.clone()
+    }
+
+    fn enobufs() -> std::io::Result<usize> {
+        Err(std::io::Error::from_raw_os_error(ENOBUFS))
+    }
+
+    /// Minimal Ethernet+IPv4+TCP frame with `payload`.
+    fn frame(payload: &[u8]) -> Vec<u8> {
+        let mut p = vec![0u8; 14 + 20 + 20];
+        p[12..14].copy_from_slice(&ETHERTYPE_IP.to_be_bytes());
+        p[14] = 0x45;
+        let ip_total = 20 + 20 + payload.len();
+        p[16..18].copy_from_slice(&(ip_total as u16).to_be_bytes());
+        p[14 + 9] = IPPROTO_TCP;
+        p[14 + 20 + 12] = 0x50;
+        p.extend_from_slice(payload);
+        p
+    }
+
+    fn expect_encap(direct: i32, ts_sec: i64, ts_usec: i64, inner: &[u8]) -> Vec<u8> {
+        let mut b = vec![0u8; VXLAN_OUTPUT_BUFSIZE];
+        let n = vxlan_encapsulate(&mut b, VNI, 1, direct, false, ts_sec, ts_usec, inner);
+        b[..n].to_vec()
+    }
+
+    #[test]
+    fn unknown_direction_drops_before_sending() {
+        let state = mock(vec![]);
+        let mut f = fixture(state.clone(), 0, None, 0, false);
+        let pkt = [0x11u8; 20];
+        assert_eq!(f.out.send_packet(&hdr(1000, 20), &pkt, PKT_DIR_UNKNOWN), -1);
+        assert_eq!(f.stats.direction_drop_bytes.load(), (20, 0));
+        assert_eq!(f.stats.direction_drop_packets.load(), (1, 0));
+        assert!(sent(&state).is_empty());
+    }
+
+    #[test]
+    fn fast_path_sends_the_encapsulated_frame() {
+        let state = mock(vec![]);
+        let mut f = fixture(state.clone(), 0, None, 0, false);
+        let pkt = [0xABu8; 32];
+        assert_eq!(f.out.send_packet(&hdr(1000, 32), &pkt, PKT_DIR_INCOMING), 0);
+        assert_eq!(f.stats.fwd_packets.load(), (1, 0));
+        let s = sent(&state);
+        assert_eq!(s.len(), 1);
+        assert_eq!(s[0], expect_encap(PKT_DIR_INCOMING, 1000, 0, &pkt));
+    }
+
+    #[test]
+    fn slice_truncates_the_inner_frame() {
+        let state = mock(vec![]);
+        let mut f = fixture(state.clone(), 12, None, 0, false);
+        let pkt = [0xCDu8; 32];
+        assert_eq!(f.out.send_packet(&hdr(1000, 32), &pkt, PKT_DIR_INCOMING), 0);
+        assert_eq!(
+            sent(&state)[0],
+            expect_encap(PKT_DIR_INCOMING, 1000, 0, &pkt[..12])
+        );
+    }
+
+    #[test]
+    fn slice_larger_than_caplen_is_ignored() {
+        let state = mock(vec![]);
+        let mut f = fixture(state.clone(), 100, None, 0, false);
+        let pkt = [0xCDu8; 32];
+        assert_eq!(f.out.send_packet(&hdr(1000, 32), &pkt, PKT_DIR_INCOMING), 0);
+        assert_eq!(
+            sent(&state)[0],
+            expect_encap(PKT_DIR_INCOMING, 1000, 0, &pkt)
+        );
+    }
+
+    #[test]
+    fn rate_limit_drop_reports_bytes_and_packets() {
+        let state = mock(vec![]);
+        let mut f = fixture(state.clone(), 0, Some(TokenBucket::new(1)), 0, false);
+        let pkt = [0x22u8; 20];
+        assert_eq!(
+            f.out.send_packet(&hdr(1000, 20), &pkt, PKT_DIR_INCOMING),
+            -1
+        );
+        assert_eq!(
+            f.stats.ratelimit_drop_bytes.load(),
+            (VXLAN_HDR_LEN as u64 + 20, 0)
+        );
+        assert_eq!(f.stats.ratelimit_drop_packets.load(), (1, 0));
+        assert!(sent(&state).is_empty());
+    }
+
+    #[test]
+    fn partial_send_reports_dropped_bytes() {
+        let total = VXLAN_HDR_LEN + 20;
+        let state = mock(vec![Ok(7)]);
+        let mut f = fixture(state.clone(), 0, None, 0, false);
+        let pkt = [0x33u8; 20];
+        assert_eq!(
+            f.out.send_packet(&hdr(1000, 20), &pkt, PKT_DIR_INCOMING),
+            -1
+        );
+        assert_eq!(f.out.error_info.nb_partial_sends, 1);
+        assert_eq!(f.stats.error_drop_bytes.load(), (total as u64 - 7, 0));
+        assert_eq!(f.stats.fwd_bytes.load(), (7, 0));
+        assert_eq!(f.stats.fwd_packets.load(), (1, 0));
+    }
+
+    #[test]
+    fn enobufs_is_retried_then_succeeds() {
+        let state = mock(vec![enobufs(), Ok(VXLAN_HDR_LEN + 20)]);
+        let mut f = fixture(state.clone(), 0, None, 0, false);
+        let pkt = [0x44u8; 20];
+        assert_eq!(f.out.send_packet(&hdr(1000, 20), &pkt, PKT_DIR_INCOMING), 0);
+        assert_eq!(sent(&state).len(), 2);
+        assert_eq!(f.out.error_info.nb_nobufs_drops, 0);
+    }
+
+    #[test]
+    fn enobufs_after_max_retries_is_dropped() {
+        let total = VXLAN_HDR_LEN + 20;
+        let state = mock((0..11).map(|_| enobufs()).collect());
+        let mut f = fixture(state.clone(), 0, None, 0, false);
+        let pkt = [0x55u8; 20];
+        assert_eq!(
+            f.out.send_packet(&hdr(1000, 20), &pkt, PKT_DIR_INCOMING),
+            -1
+        );
+        assert_eq!(f.out.error_info.nb_nobufs_drops, 1);
+        assert_eq!(f.stats.error_drop_bytes.load(), (total as u64, 0));
+        assert_eq!(sent(&state).len(), 11);
+    }
+
+    #[test]
+    fn other_send_error_records_the_first_detail_once() {
+        let state = mock(vec![
+            Err(std::io::Error::from_raw_os_error(libc::EACCES)),
+            Err(std::io::Error::from_raw_os_error(libc::EPERM)),
+        ]);
+        let mut f = fixture(state.clone(), 0, None, 0, false);
+        let pkt = [0x66u8; 20];
+        assert_eq!(
+            f.out.send_packet(&hdr(1000, 20), &pkt, PKT_DIR_INCOMING),
+            -1
+        );
+        let first = f.out.error_info.other_send_error.clone();
+        assert!(!first.is_empty());
+        assert_eq!(
+            f.out.send_packet(&hdr(1001, 20), &pkt, PKT_DIR_INCOMING),
+            -1
+        );
+        assert_eq!(f.out.error_info.nb_other_send_error_drops, 2);
+        assert_eq!(f.out.error_info.other_send_error, first);
+    }
+
+    #[test]
+    fn error_info_flushes_after_the_five_second_window() {
+        let state = mock((0..11).map(|_| enobufs()).collect());
+        let mut f = fixture(state, 0, None, 0, false);
+        let pkt = [0x77u8; 20];
+        assert_eq!(
+            f.out.send_packet(&hdr(1000, 20), &pkt, PKT_DIR_INCOMING),
+            -1
+        );
+        assert_eq!(f.out.error_info.first_pktsec, 1000);
+        assert_eq!(f.out.error_info.nb_nobufs_drops, 1);
+        assert_eq!(f.out.send_packet(&hdr(1006, 20), &pkt, PKT_DIR_INCOMING), 0);
+        assert_eq!(f.out.error_info.first_pktsec, 1006);
+        assert_eq!(f.out.error_info.nb_nobufs_drops, 0);
+    }
+
+    #[test]
+    fn split_path_sends_each_fragment() {
+        let state = mock(vec![]);
+        let mut f = fixture(state.clone(), 0, None, 30, false);
+        let pkt = frame(&(0..100u8).collect::<Vec<_>>());
+        let parse = parse_packet(&pkt).unwrap();
+        let count = calculate_fragment_count(&parse, 30);
+        assert_eq!(count, 4);
+        assert_eq!(
+            f.out
+                .send_packet(&hdr(1000, pkt.len() as u32), &pkt, PKT_DIR_NONCHECK),
+            0
+        );
+        let s = sent(&state);
+        assert_eq!(s.len(), count as usize, "one datagram per fragment");
+        assert_eq!(f.stats.fwd_packets.load(), (count as u64, 0));
+        // First fragment carries the first 30 payload bytes.
+        let mut out0 = vec![0u8; 2048];
+        let n0 = build_fragment(&parse, &pkt, 0, 30, false, &mut out0).unwrap();
+        assert_eq!(s[0], expect_encap(PKT_DIR_NONCHECK, 1000, 0, &out0[..n0]));
+    }
+
+    #[test]
+    fn split_with_a_single_fragment_sends_the_whole_frame() {
+        let state = mock(vec![]);
+        let mut f = fixture(state.clone(), 0, None, 30, false);
+        let pkt = frame(&[1, 2, 3, 4, 5]);
+        assert!(pkt.len() > 30);
+        assert_eq!(
+            f.out
+                .send_packet(&hdr(1000, pkt.len() as u32), &pkt, PKT_DIR_NONCHECK),
+            0
+        );
+        let s = sent(&state);
+        assert_eq!(s.len(), 1);
+        assert_eq!(s[0], expect_encap(PKT_DIR_NONCHECK, 1000, 0, &pkt));
+    }
+
+    #[test]
+    fn unparseable_oversized_frame_falls_back_to_one_send() {
+        let state = mock(vec![]);
+        let mut f = fixture(state.clone(), 0, None, 30, false);
+        // ARP-looking Ethernet frame: parse_packet returns None.
+        let mut pkt = vec![0u8; 60];
+        pkt[12..14].copy_from_slice(&0x0806u16.to_be_bytes());
+        assert!(parse_packet(&pkt).is_none());
+        assert_eq!(
+            f.out
+                .send_packet(&hdr(1000, pkt.len() as u32), &pkt, PKT_DIR_NONCHECK),
+            0
+        );
+        let s = sent(&state);
+        assert_eq!(s.len(), 1);
+        assert_eq!(s[0], expect_encap(PKT_DIR_NONCHECK, 1000, 0, &pkt));
+    }
+
+    #[test]
+    fn flush_error_info_resets_when_only_one_counter_is_set() {
+        for which in 0..3 {
+            let state = mock(vec![]);
+            let mut f = fixture(state, 0, None, 0, false);
+            match which {
+                0 => f.out.error_info.nb_nobufs_drops = 1,
+                1 => f.out.error_info.nb_partial_sends = 1,
+                _ => f.out.error_info.nb_other_send_error_drops = 1,
+            }
+            f.out.flush_error_info();
+            assert_eq!(f.out.error_info.nb_nobufs_drops, 0, "case {which}");
+            assert_eq!(f.out.error_info.nb_partial_sends, 0, "case {which}");
+            assert_eq!(
+                f.out.error_info.nb_other_send_error_drops, 0,
+                "case {which}"
+            );
+        }
+    }
+
+    #[test]
+    fn new_rejects_an_invalid_host() {
+        let cfg = VxlanConfig {
+            host: "not-an-ip".into(),
+            port: 4789,
+            capture_time: false,
+            vni_version: 1,
+            vni: 1,
+            bind_device: String::new(),
+            pmtudisc: -1,
+            split: crate::config::SplitConfig::default(),
+        };
+        let out = OutputConfig {
+            kind: crate::config::OutputKind::Vxlan(cfg.clone()),
+            rate_limit_mbps: 0,
+            slice: 0,
+        };
+        match VxlanOutput::new(&cfg, &out, Arc::new(OutputStats::default())) {
+            Ok(_) => panic!("expected an invalid-host error"),
+            Err(e) => assert!(e.to_string().contains("invalid vxlan host"), "{e}"),
+        }
+    }
+
+    #[test]
+    fn vxlan_encapsulate_matches_golden_vectors() {
+        // Byte-for-byte vectors (also checked against the C `vxlan_encapsulate`
+        // by the parity harness); they pin the VNI/checksum/timestamp layout.
+        let inner: Vec<u8> = (0..24u8).collect();
+        let cases: [(u8, i32, bool, i64, i64, &str); 6] = [
+            (
+                1,
+                0,
+                false,
+                0,
+                0,
+                "080000001234564c000102030405060708090a0b0c0d0e0f1011121314151617",
+            ),
+            (
+                1,
+                1,
+                false,
+                0,
+                0,
+                "080000001004564a000102030405060708090a0b0c0d0e0f1011121314151617",
+            ),
+            (
+                1,
+                2,
+                false,
+                0,
+                0,
+                "080000002004565a000102030405060708090a0b0c0d0e0f1011121314151617",
+            ),
+            (
+                1,
+                1,
+                true,
+                1234,
+                5678,
+                "08000000100456f2000102030405060708090a0b0c0d0e0f1011121314151617000004d20056a3b0",
+            ),
+            (
+                2,
+                1,
+                false,
+                0,
+                0,
+                "0800000000123457000102030405060708090a0b0c0d0e0f1011121314151617",
+            ),
+            (
+                1,
+                -1,
+                false,
+                0,
+                0,
+                "08000000f004562a000102030405060708090a0b0c0d0e0f1011121314151617",
+            ),
+        ];
+        for (vv, d, ct, s, u, hex) in cases {
+            let mut b = vec![0u8; 4096];
+            let n = vxlan_encapsulate(&mut b, 0x0012_3456, vv, d, ct, s, u, &inner);
+            let got: String = b[..n].iter().map(|x| format!("{x:02x}")).collect();
+            assert_eq!(got, hex, "vv={vv} d={d} ct={ct}");
+        }
+    }
+
+    #[test]
+    fn zero_max_payload_size_always_takes_the_fast_path() {
+        let state = mock(vec![]);
+        let mut f = fixture(state.clone(), 0, None, 0, false);
+        let pkt = frame(&[1, 2, 3, 4, 5]);
+        assert_eq!(
+            f.out
+                .send_packet(&hdr(1000, pkt.len() as u32), &pkt, PKT_DIR_NONCHECK),
+            0
+        );
+        assert_eq!(sent(&state).len(), 1);
+    }
+
+    #[test]
+    fn error_info_does_not_flush_at_the_window_edge() {
+        let state = mock(vec![]);
+        let mut f = fixture(state, 0, None, 0, false);
+        let pkt = [0x88u8; 20];
+        assert_eq!(f.out.send_packet(&hdr(1000, 20), &pkt, PKT_DIR_INCOMING), 0);
+        assert_eq!(f.out.send_packet(&hdr(1005, 20), &pkt, PKT_DIR_INCOMING), 0);
+        assert_eq!(
+            f.out.error_info.first_pktsec, 1000,
+            "still inside the window"
+        );
+    }
+
+    #[test]
+    fn rate_limit_consumes_header_plus_payload_bytes() {
+        // 300 tokens admits 28*8 = 224 but not 8*20*8 = 1280.
+        let state = mock(vec![]);
+        let mut f = fixture(state.clone(), 0, Some(TokenBucket::new(300)), 0, false);
+        let pkt = [0x22u8; 20];
+        assert_eq!(f.out.send_packet(&hdr(1000, 20), &pkt, PKT_DIR_INCOMING), 0);
+        assert_eq!(f.stats.ratelimit_drop_packets.load(), (0, 0));
     }
 }

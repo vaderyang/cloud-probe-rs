@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use socket2::{Domain, Protocol, Socket, Type};
 
-use super::{Output, PacketHeader};
+use super::{Egress, Output, PacketHeader, RawSocketEgress};
 use crate::config::{GreConfig, OutputConfig, IP_PMTUDISC_DO, IP_PMTUDISC_DONT, IP_PMTUDISC_WANT};
 use crate::error::{Error, Result};
 use crate::packet::{GRE_HDR_LEN, PKT_DIR_UNKNOWN};
@@ -14,25 +14,6 @@ use crate::stats::OutputStats;
 
 const GRE_OUTPUT_BUFSIZE: usize = 65551;
 const ERROR_INFO_FLUSH_MAX_DUR_SEC: i64 = 5;
-
-/// Destination for an assembled GRE datagram.
-///
-/// Abstracted from the raw socket so the send/retry/stats state machine can be
-/// exercised without `CAP_NET_RAW` (see the unit tests).
-trait Egress: Send {
-    fn send_to(&mut self, buf: &[u8]) -> std::io::Result<usize>;
-}
-
-struct RawSocketEgress {
-    socket: Socket,
-    remote: SocketAddr,
-}
-
-impl Egress for RawSocketEgress {
-    fn send_to(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        self.socket.send_to(buf, &self.remote.into())
-    }
-}
 
 /// Wire-format GRE header used by the GRE output. This is the single source of
 /// truth for the 8-byte header (also used by the protocol parity harness).

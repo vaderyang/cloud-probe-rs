@@ -38,6 +38,15 @@ exclude_re = [
   "gre\\.rs:154:",  # slice == caplen: both branches produce the same length
   "gre\\.rs:205:",  # ENOBUFS backoff sleep duration is not observable behaviour
   "gre\\.rs:207:",
+  "vxlan\\.rs:21:",  # set_bind_device wrapper (root)
+  "vxlan\\.rs:25:",  # set_pmtudisc wrapper (root)
+  "vxlan\\.rs:36:",  # odd-tail branch: the checksum region is always 42 bytes (even)
+  "vxlan\\.rs:81:",  # VXLAN+ETH+20 is even, so a zero-padded even extension is sum-invariant
+  "vxlan\\.rs:173:", # `> 0` vs `>= 0` only gates logging; the reset is idempotent
+  "vxlan\\.rs:222:", # ENOBUFS backoff sleep duration is not observable behaviour
+  "vxlan\\.rs:224:",
+  "vxlan\\.rs:247:", # slice == caplen: both branches produce the same length
+  "vxlan\\.rs:276:", # max_payload_size == 0 forces a fragment count of 1 either way
   # These three behave as the tests expect but make the cargo-mutants runner
   # hang (300s timeout); the behaviour is asserted by config::accessor_tests.
   "config\\.rs:549:",

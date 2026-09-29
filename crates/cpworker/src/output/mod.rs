@@ -9,11 +9,34 @@ pub mod rotating_file;
 pub mod vxlan;
 pub mod zmq;
 
+use std::net::SocketAddr;
 use std::sync::Arc;
+
+use socket2::Socket;
 
 use crate::config::{OutputConfig, OutputKind, TaskConfig};
 use crate::error::Result;
 use crate::stats::OutputStats;
+
+/// Destination for an assembled datagram.
+///
+/// Abstracted from the raw socket so an output's send/retry/stats state machine
+/// can be unit-tested without `CAP_NET_RAW`.
+pub(crate) trait Egress: Send {
+    fn send_to(&mut self, buf: &[u8]) -> std::io::Result<usize>;
+}
+
+/// The production [`Egress`]: a real socket sending to a fixed peer.
+pub(crate) struct RawSocketEgress {
+    pub(crate) socket: Socket,
+    pub(crate) remote: SocketAddr,
+}
+
+impl Egress for RawSocketEgress {
+    fn send_to(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.socket.send_to(buf, &self.remote.into())
+    }
+}
 
 /// Minimal packet metadata passed to outputs (replaces `struct pcap_pkthdr`).
 #[derive(Debug, Clone, Copy)]
