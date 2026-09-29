@@ -55,6 +55,9 @@ Two conventions worth knowing before reading:
 - `cpctl` gained tests for `compute_ping_summary` (loss %, min/avg/max/
   population stddev, no-samples and single-sample cases) and for CLI
   `--format`/`--unix` parsing (2 → 9 tests).
+- `cpgolib`'s `UnixClient` gained protocol-level unit tests (the `{"version":"v1"}`
+  handshake bytes, command framing, non-OK status → error, invalid conn string,
+  missing socket) on top of the daemon end-to-end coverage (7 → 12 tests).
 - [FIELD_CONFIRMATION.md](FIELD_CONFIRMATION.md): the `IMPROVEMENT_PLAN_AUDIT4.md`
   §5.1 items that need field or business input before sign-off, written as a
   checklist (what to collect, why it matters, what decision it unblocks) that can

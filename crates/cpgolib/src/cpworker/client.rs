@@ -266,3 +266,113 @@ pub fn new_client(conn_str: &str) -> Result<UnixClient> {
 pub fn new_client_with_timeout(conn_str: &str, timeout: Duration) -> Result<UnixClient> {
     UnixClient::with_timeout(conn_str, timeout)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::{BufRead, BufReader, Write};
+    use std::os::unix::net::UnixListener;
+
+    fn temp_socket(tag: &str) -> std::path::PathBuf {
+        let p = std::env::temp_dir().join(format!("cpgolib-{}-{tag}.sock", std::process::id()));
+        let _ = std::fs::remove_file(&p);
+        p
+    }
+
+    /// Serve one connection: answer the v1 handshake with `OK`, then answer one
+    /// command with `reply`, returning the two request lines the client sent.
+    fn spawn_mock(
+        path: &std::path::Path,
+        reply: &'static str,
+    ) -> std::thread::JoinHandle<Vec<String>> {
+        let listener = UnixListener::bind(path).expect("bind mock socket");
+        std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("accept");
+            // Bound the second read so a client that sends only the handshake
+            // cannot wedge the test thread.
+            stream
+                .set_read_timeout(Some(Duration::from_secs(5)))
+                .expect("read timeout");
+            let mut reader = BufReader::new(stream.try_clone().expect("clone"));
+            let mut lines = Vec::new();
+
+            let mut handshake = String::new();
+            reader.read_line(&mut handshake).expect("read handshake");
+            lines.push(handshake.trim().to_string());
+            stream
+                .write_all(b"{\"status\":\"OK\"}\n")
+                .expect("write ok");
+            stream.flush().expect("flush");
+
+            let mut command = String::new();
+            if reader.read_line(&mut command).unwrap_or(0) > 0 {
+                lines.push(command.trim().to_string());
+                stream.write_all(reply.as_bytes()).expect("write reply");
+                stream.write_all(b"\n").expect("newline");
+                stream.flush().expect("flush");
+            }
+            lines
+        })
+    }
+
+    #[test]
+    fn unsupported_conn_string_is_rejected() {
+        assert!(UnixClient::new("tcp://127.0.0.1:1").is_err());
+        assert!(UnixClient::new("nonsense").is_err());
+    }
+
+    #[test]
+    fn dial_to_a_missing_socket_is_reported_as_a_dial_error() {
+        let path = temp_socket("missing");
+        let mut client = UnixClient::new(&format!("unix://{}", path.display())).unwrap();
+        let err = client.dial().unwrap_err();
+        assert!(matches!(err, Error::Dial { .. }), "{err}");
+    }
+
+    #[test]
+    fn dial_sends_the_v1_handshake() {
+        let path = temp_socket("handshake");
+        let handle = spawn_mock(&path, "{\"status\":\"OK\"}");
+        let mut client = UnixClient::new(&format!("unix://{}", path.display())).unwrap();
+        client.dial().expect("handshake");
+        drop(client); // close so the mock's second read returns
+        let lines = handle.join().unwrap();
+        assert_eq!(lines[0], r#"{"version":"v1"}"#);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn run_command_round_trips_and_frames_the_command() {
+        let path = temp_socket("command");
+        let handle = spawn_mock(&path, "{\"status\":\"OK\",\"value\":7}");
+        let mut client = UnixClient::new(&format!("unix://{}", path.display())).unwrap();
+        let resp = client
+            .run_command("info", None, Duration::from_secs(2))
+            .expect("command");
+        assert_eq!(resp["status"], "OK");
+        assert_eq!(resp["value"], 7);
+        let lines = handle.join().unwrap();
+        assert_eq!(lines[0], r#"{"version":"v1"}"#);
+        assert!(
+            lines[1].contains(r#""command":"info""#),
+            "command frame: {}",
+            lines[1]
+        );
+        drop(client);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn a_non_ok_status_becomes_an_error() {
+        let path = temp_socket("notok");
+        let handle = spawn_mock(&path, "{\"status\":\"ERROR\",\"message\":\"boom\"}");
+        let mut client = UnixClient::new(&format!("unix://{}", path.display())).unwrap();
+        let err = client
+            .run_command("x", None, Duration::from_secs(2))
+            .unwrap_err();
+        assert!(matches!(err, Error::NotOk(_)), "{err}");
+        assert!(err.to_string().contains("boom"), "{err}");
+        handle.join().unwrap();
+        let _ = std::fs::remove_file(&path);
+    }
+}
