@@ -59,6 +59,9 @@ Two conventions worth knowing before reading:
   §5.1 items that need field or business input before sign-off, written as a
   checklist (what to collect, why it matters, what decision it unblocks) that can
   be handed to the teams that have the data.
+- `release.yml` now also builds **aarch64-unknown-linux-gnu** (cross-compiling all
+  five binaries, verified locally) so releases ship Linux ARM64 alongside x86_64
+  and macOS.
 - A minimal CPM mock (axum, ephemeral port, request recording) lives in
   `crates/cpdaemon/tests/common/mod.rs` for reuse by future daemon tests.
 
