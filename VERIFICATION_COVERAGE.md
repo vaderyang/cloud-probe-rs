@@ -188,6 +188,7 @@ CI 门禁（`.github/workflows/ci.yml`）：
   待办：`--mcdc`（condition 门禁）与把 branch 纳入阻塞（待基线建立）。
 - **阶段 3（进行中）**：`cargo-mutants` 配置 + `verify_mutation.sh` + 每周分片 mutation job（advisory）；
   已关闭 gre/vxlan/stats/config/packet/packet_split 缺口（见 `verification/MUTATION_BASELINE.md`）；
+  PR 上新增 `mutation-diff` job（`--in-diff --exit-code`，变更行零存活，advisory）。
   待办：zmtp/bpf 收敛 → mutation 阈值纳阻塞。DST/poison 已由 `crates/sim` 提供。
 - **阶段 4（进行中）**：`verification/system.toml` + weekly `soak` job（`DST_SEED_RANGE` 大范围种子扫描）；
   待办：更长时长的内存/句柄 soak 与 CI 阻塞化。

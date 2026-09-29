@@ -17,7 +17,7 @@ if [ "${1:-}" = "--in-diff" ]; then
     git diff "$base...HEAD" > "$tmp"
     n="$(grep -c '^diff --git' "$tmp" || true)"
     echo "==> mutation testing only the $n changed file(s) vs $base"
-    exec cargo mutants --workspace --config "$CFG" --in-diff "$tmp"
+    exec cargo mutants --workspace --config "$CFG" --in-diff "$tmp" --exit-code
 fi
 
 exec cargo mutants --workspace --config "$CFG" "$@"

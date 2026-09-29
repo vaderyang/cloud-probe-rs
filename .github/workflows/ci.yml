@@ -233,6 +233,36 @@ jobs:
           path: target/llvm-cov/lcov.info
           if-no-files-found: warn
 
+  mutation-diff:
+    name: mutation (changed lines)
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    # Advisory: fails (exit-code) on any surviving mutant on the changed lines.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: System dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends protobuf-compiler
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-mutants
+      - name: Mutate only changed lines
+        run: ./verify_mutation.sh --in-diff "${{ github.event.pull_request.base.sha }}"
+      - name: Upload mutation report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mutants-diff
+          path: mutants.out
+          if-no-files-found: warn
+
   lint-workflows:
     name: workflow lint (actionlint)
     runs-on: ubuntu-latest
