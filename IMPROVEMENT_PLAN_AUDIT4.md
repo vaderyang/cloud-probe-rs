@@ -150,7 +150,7 @@
 - **P5-26** 新增 MSRV（1.88）CI job。
 - **P5-27** 所有 CI 命令加 `--locked`；workflow 级 `permissions: contents: read`；固定 `verify_bpf.sh` 种子（失败时打印）。
 - **P5-28** `deny.toml`：`wildcards`/`unknown-registry` 提到 `deny`；覆盖 fuzz workspace。
-- **P5-29** parity/oracle 工具移入 `examples/` 或 feature 门控；根目录审计/计划文档移入 `docs/`。
+- **P5-29** ✅ **已完成**：8 个 parity/oracle/诊断工具移入独立 `cpworker-parity` crate（`cargo build -p cpworker` 不再编译它们），并新增 `verify_hygiene.sh` P5-29 门禁 + 反向注入 ⑤。根目录审计/计划文档保持原位（历史快照）。
 - **P5-30** 补 `CONTRIBUTING.md`/`CHANGELOG.md`/`CODEOWNERS`/`SECURITY.md`。
 
 ## 3. 门禁强化（防复发的系统措施）
@@ -169,7 +169,7 @@
 5. **文档承诺也是门禁**（P5-20/P5-22 类）：注释里写的"call flush to fsync"、"校验 linktype"、
    "上限 256 MiB"同样是接口承诺，只有 grep 能防止它再次变成空头承诺。
    ✅ **已落地（M4）**：`parity/verify_hygiene.sh` 四条——配置层不得再有截断 `as` 转换（P5-15）、
-   cpworker 库代码不得有 panic 构造（P5-23，`src/bin/` 对拍工具除外）、`pcap_writer` 文档不得再声称
+   cpworker 库代码不得有 panic 构造（P5-23；对拍工具已移入 `cpworker-parity`，不在扫描范围）、`pcap_writer` 文档不得再声称
    flush 会 fsync（P5-22）、`fuzz/Cargo.toml` 声明的 target 必须出现在 `fuzz.sh`（P5-20：写了不跑等于没写）。
    这四类 `clippy`/`cargo test` 全部看不见；已做反向验证（重新插入违例 → 对应行变 ❌ 且退出码非 0）。
 
@@ -207,7 +207,7 @@ WP2 与 WP3 可并行；M1 必须最先（唯一可能"完全无数据"的缺陷
 
 - **coverage 阈值**：现仅 advisory artifact（`continue-on-error`），加阈值需选值与失败面。
 - **`FUZZ_TIMEOUT` 默认值**（现 10s）：极慢机器上对“合法但重”的输入可能偏紧。
-- **P5-29 目录整理**：7 个 parity/oracle bin 仍在 `src/bin`；方案已给（独立 `cpworker-parity` crate + hygiene 门禁），未实现。
+- ~~**P5-29 目录整理**~~：✅ 已完成（独立 `cpworker-parity` crate + `verify_hygiene.sh` P5-29 门禁，见 §6）。
 
 ## 6. 执行进度
 
@@ -344,7 +344,7 @@ WP2 与 WP3 可并行；M1 必须最先（唯一可能"完全无数据"的缺陷
     `output::rotating_file::tests::out_of_range_file_time_is_an_error_not_a_panic`（修复前均 panic）。
     `zmtp` 那处的"不可达"无法用测试证伪，故改由下面的 grep 门禁守着。
 - ✅ **门禁强化 §3 扩展**：新增 `parity/verify_hygiene.sh`（4 条，已接入 `parity/all.sh` 第 9 项与 CI `test` job）：
-  config.rs 不得再有截断 `as` 转换；cpworker 库代码不得有 panic 构造（`src/bin/` 对拍工具除外）；
+  config.rs 不得再有截断 `as` 转换；cpworker 库代码不得有 panic 构造（对拍工具在 `cpworker-parity`，不在扫描范围）；
   `pcap_writer` 文档不得再声称 flush 会 fsync；`fuzz/Cargo.toml` 声明的每个 target 必须出现在 `fuzz.sh`。
   四条都已做反向验证：把对应违例重新插入一处，该行即变 ❌ 且脚本退出 1。
 
@@ -410,13 +410,12 @@ WP2 与 WP3 可并行；M1 必须最先（唯一可能"完全无数据"的缺陷
   时代数字；本机内核已从 6.14 变为 7.0.0-34，绝对值不可跨机比较，只看比值）。新增 `bench/live_bench.py`：
   手工、需 root 的实时抓包 A/B，报“每百万捕获帧 CPU 秒”，并把 `cap_packets` 与发包数并列以便判断是否真的
   收全 —— 该测量暴露的“同流不同包数”已登记到 §5-6，**未据此下任何性能或一致性结论**。
-- ⚠️ **P5-29 保守处理，未做**：`crates/cpworker/src/bin/` 的 7 个 parity/oracle 工具仍随默认 `cargo build`
-  编译。原因：`run.sh / verify_config.sh / verify_req.sh / fuzz_proto.sh / fuzz_rpc.sh / verify_zmtp.sh /
-  verify_bpf.sh` 全部按 `cargo build -p cpworker --bin X` + `target/debug/X` 调用；加 `required-features` 或
-  移入 `examples/` 需同步改 7 处脚本与 CI `parity` job，而且这些 bin 会因此**退出
-  `cargo clippy --workspace --all-targets` 的 lint 覆盖**（静默变差）。若要动，建议：新建 bin-only crate
-  `crates/cpworker-parity`（留在 workspace 但不属于发布产物集合），脚本改为 `-p cpworker-parity`，并在
-  `verify_hygiene.sh` 补一条“每个 oracle bin 必须被某个脚本引用”的门禁。根目录审计/计划文档保持原位。
+- ✅ **P5-29 已完成**：8 个 parity/oracle/诊断工具移入独立 `crates/cpworker-parity`（留在 workspace、非发布产物：
+  release 只按 `--bin` 列 5 个产品二进制）。`cargo build -p cpworker` 不再编译工具；7 处脚本改为
+  `-p cpworker-parity --bin X`（`target/debug/X` 路径不变）。这些 bin 仍在 workspace，因此**保留**
+  `cargo clippy --workspace --all-targets` 的 lint 覆盖。`verify_hygiene.sh` 新增 P5-29 门禁
+  （cpworker 无 `src/bin`、无多余 `[[bin]]`、`cpworker-parity` 有工具），反向校验新增注入 ⑤。
+  根目录审计/计划文档保持原位（历史快照）。
 - 验证：`cargo build --workspace --locked` ok；`cargo fmt --all -- --check` ok；
   `cargo clippy --workspace --all-targets -- -D warnings` 0 告警；`cargo test --workspace`
   **165 passed / 0 failed（3 个 live 测试 `#[ignore]`）**；`cargo deny check`（根 + fuzz workspace）四项 ok；
@@ -427,7 +426,7 @@ WP2 与 WP3 可并行；M1 必须最先（唯一可能"完全无数据"的缺陷
 - ✅ **A1 已闭环**（P1）：loopback 重复帧已修（见 §5.2），机制由 `tpacket_ring_probe` 确认。
 - ✅ 采集保真度门禁（veth 硬断言）与 `actionlint` CI job 已完成（fin 批次，见 §5.2）。
 - **剩余待办与需外部输入项见 §5**：BPF 现场分布、promisc、ring 容量、VLAN 现场影响、P4.1；
-  以及可选加固（coverage 阈值 / `FUZZ_TIMEOUT` / P5-29）。
+  以及可选加固（coverage 阈值 / `FUZZ_TIMEOUT`）。
 
 
 ## 7. 补充修复（三篇 AUDIT4 + 用户复核）

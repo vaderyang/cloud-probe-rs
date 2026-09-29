@@ -363,7 +363,7 @@ release profile 用 `panic = "abort"`：**panic 是致命事件，不是可恢�
 * 原先那几处"可证不可达"的 `expect`/`unwrap`（`bpf::or_all`、`zmtp::flush_pending`、`rotating_file`
   的时间戳、`packet.rs` 的定长切片）已全部消除——"可证"依赖调用点纪律，纪律会随改动流失，而 abort 不可恢复；
 * `cargo test` 走 `test` profile（`panic = unwind`），`#[should_panic]` 与断言报告不受影响；
-* 回归网：`parity/verify_hygiene.sh` 直接 grep 掉 cpworker 库代码（`src/bin/` 对拍工具除外）中的 panic
+* 回归网：`parity/verify_hygiene.sh` 直接 grep 掉 cpworker 库代码（对拍工具已移入 `cpworker-parity`，不在扫描范围）中的 panic
   构造——这是 clippy 与单测都看不见的盲区。
 
 ### BPF 子集（`crates/cpworker/src/bpf/`）
@@ -419,7 +419,7 @@ release profile 用 `panic = "abort"`：**panic 是致命事件，不是可恢�
 > （也都在 `tp_packets` 里计数，即 libpcap 的 `ps_recv`）。libpcap 在**用户态**丢弃出站那份
 > （`linux_check_direction()`，`pcap-linux.c`），`PACKET_IGNORE_OUTGOING` 则在内核丢弃。因此
 > tcpdump 在 lo 上交付 **1×**，而裸 `recvmsg` socket 交付 **2×**。机制由
-> `crates/cpworker/src/bin/tpacket_ring_probe.rs` 实测确认
+> `crates/cpworker-parity/src/bin/tpacket_ring_probe.rs` 实测确认
 > （`sudo target/debug/tpacket_ring_probe lo 3000 41267` → `ring_frames=6000 outgoing=3000 host=3000`；
 > 加 `ignore_outgoing` → `3000/0/3000`）。Rust capturer 现对 **loopback 接口**设置 `PACKET_IGNORE_OUTGOING`
 > （内核 <4.17 时在用户态按 `sll_pkttype==PACKET_OUTGOING` 丢弃），从而与 libpcap 一致；

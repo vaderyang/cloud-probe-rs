@@ -37,7 +37,7 @@ gcc -O2 -w -I "$PROJECT_ROOT/cpworker/src" -I "$HERE/shim" \
     -o "$TMP/c_proto"
 
 echo "==> building Rust protocol harness"
-( cd "$RUST_DIR" && cargo build -q --locked -p cpworker --bin proto_parity )
+( cd "$RUST_DIR" && cargo build -q --locked -p cpworker-parity --bin proto_parity )
 RUST_BIN="$RUST_DIR/target/debug/proto_parity"
 
 total=0

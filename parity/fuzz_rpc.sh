@@ -30,7 +30,7 @@ gcc -w -I "$PROJECT_ROOT/cpworker/src" -I "$HERE/shim" \
     -pthread -o "$TMP/c_rpc"
 
 echo "==> building Rust RPC server"
-( cd "$RUST_DIR" && cargo build -q --locked -p cpworker --bin rpc_parity )
+( cd "$RUST_DIR" && cargo build -q --locked -p cpworker-parity --bin rpc_parity )
 
 "$TMP/c_rpc" "$TMP/c.sock" >"$TMP/c.log" 2>&1 &
 PIDS+=($!)

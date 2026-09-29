@@ -2,7 +2,7 @@
 """Generate protocol-parity cases for gre/vxlan/zmq output encapsulators.
 
 Each case is a file consumed by both `parity/c_proto.c` and
-`cpworker/src/bin/proto_parity.rs`. The generator is deliberately adversarial:
+`cpworker-parity/src/bin/proto_parity.rs`. The generator is deliberately adversarial:
 it emits stacked VLANs, boundary caplen values, timestamps that straddle the
 1-second batch-flush window, and random directions.
 """

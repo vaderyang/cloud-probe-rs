@@ -29,7 +29,7 @@ gcc -O2 -I "$PROJECT_ROOT/cpworker/src" -I "$HERE/shim" \
     -o "$TMP/c_harness"
 
 echo "==> building Rust parity harness"
-( cd "$RUST_DIR" && cargo build -q --locked -p cpworker --bin parity )
+( cd "$RUST_DIR" && cargo build -q --locked -p cpworker-parity --bin parity )
 
 echo "==> generating $N random packets (seed=$SEED)"
 python3 "$HERE/gen.py" "$N" "$SEED" > "$TMP/vectors.txt"

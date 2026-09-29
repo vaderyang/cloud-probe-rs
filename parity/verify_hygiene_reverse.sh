@@ -130,6 +130,14 @@ s=("/// RotatingFileOutput::destroy will fsync the file for you.\n"+s)
 open(p,"w").write(s)
 '
 
+# --- ⑤ parity tooling back in the library crate -----------------------------
+inject "⑤ a tool dropped back into cpworker/src/bin (P5-29)" "P5-29" \
+    '
+import os
+os.makedirs("crates/cpworker/src/bin", exist_ok=True)
+open("crates/cpworker/src/bin/hole_tool.rs","w").write("fn main() {}\n")
+'
+
 echo "=========================================================="
 echo " verify_hygiene.sh reverse check (AUDIT4 P2-3)"
 echo "=========================================================="

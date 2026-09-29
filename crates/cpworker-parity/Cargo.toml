@@ -1,0 +1,24 @@
+[package]
+name = "cpworker-parity"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Differential-parity and diagnostic binaries for cpworker (tooling; not part of the shipped product)"
+publish = false   # internal tooling; see deny.toml [bans] allow-wildcard-paths
+
+# The parity/oracle and diagnostic programs are auto-discovered from
+# src/bin/*.rs. They used to live in cpworker/src/bin, which meant every
+# `cargo build -p cpworker` compiled them (P5-29); keeping them in their own
+# crate means the library/binary build never pulls in the harnesses.
+#
+#   bpf_eval, config_parity, parity, proto_parity, req_parity, rpc_parity,
+#   zmtp_push          - differential oracles driven by parity/*.sh
+#   tpacket_ring_probe - one-off AF_PACKET diagnostic (used to confirm the
+#                        loopback duplicate mechanism, see PARITY.md §4)
+
+[dependencies]
+cpworker = { path = "../cpworker" }
+libc.workspace = true
+parking_lot.workspace = true

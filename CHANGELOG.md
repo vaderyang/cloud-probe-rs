@@ -86,6 +86,13 @@ Two conventions worth knowing before reading:
 
 ### Changed
 
+- Parity/oracle tooling moved out of `cpworker/src/bin` into a new
+  `cpworker-parity` crate (P5-29): `cargo build -p cpworker` no longer compiles
+  the differential harnesses, the seven `parity/*.sh` callers now use
+  `-p cpworker-parity`, and `verify_hygiene.sh` gained a P5-29 gate (plus a
+  reverse-check injection) so the tooling cannot creep back into the library
+  crate. The tools stay in the workspace, so `clippy --all-targets` still lints
+  them.
 - `cpworker`'s unimplemented `dpdk_pdump` capturer now reports "not implemented in
   this port (PARITY.md §5.1)" instead of "rebuild with the DPDK feature" - there
   is no such feature, so the old message pointed operators at a dead end.

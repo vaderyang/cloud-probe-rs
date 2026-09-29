@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
     "crates/cpworker",
+    "crates/cpworker-parity",
     "crates/cpgolib",
     "crates/cpctl",
     "crates/dockerpid",

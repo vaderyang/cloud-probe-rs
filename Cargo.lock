@@ -368,6 +368,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "cpworker-parity"
+version = "0.9.0"
+dependencies = [
+ "cpworker",
+ "libc",
+ "parking_lot",
+]
+
+[[package]]
 name = "cripid"
 version = "0.9.0"
 dependencies = [

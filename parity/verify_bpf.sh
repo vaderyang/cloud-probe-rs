@@ -29,7 +29,7 @@ echo "==> building libpcap oracle"
 "$CC" -O2 -o "$WORK/c_bpf" "$HERE/c_bpf.c" -lpcap
 
 echo "==> building Rust evaluator"
-cargo build -q --locked --manifest-path "$ROOT/Cargo.toml" -p cpworker --bin bpf_eval
+cargo build -q --locked --manifest-path "$ROOT/Cargo.toml" -p cpworker-parity --bin bpf_eval
 
 echo "==> generating corpus (seed=$SEED pkts=$NPKTS exprs=$NEXPRS)"
 python3 "$HERE/gen_bpf_cases.py" "$SEED" "$NPKTS" "$NEXPRS" "$WORK/exprs.txt" "$WORK/pkts.txt"

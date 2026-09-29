@@ -190,6 +190,33 @@ forbid "P5-23 cpworker library has no unwrap()/expect()/panic!()/unreachable!()"
     '\.unwrap\(\)|\.expect\(|panic!\(|unreachable!\(|todo!\(|unimplemented!\(' \
     '/src/bin/'
 
+# --- P5-29: parity/oracle tooling stays out of the library crate -------------
+# `cargo build -p cpworker` used to compile the differential/fuzz harnesses
+# alongside the product binary. They now live in the cpworker-parity crate; this
+# gate catches a tool creeping back into the shipped library crate (which would
+# also silently re-widen the P5-23 exclusion above).
+nbin=$(grep -cE '^[[:space:]]*\[\[bin\]\]' crates/cpworker/Cargo.toml 2>/dev/null || true)
+nbin=${nbin:-0}
+tools=$(find crates/cpworker-parity/src/bin -maxdepth 1 -name '*.rs' 2>/dev/null | wc -l)
+p529=""
+if compgen -G "crates/cpworker/src/bin/*.rs" >/dev/null 2>&1; then
+    p529+="     crates/cpworker/src/bin still contains tooling:"$'\n'
+    p529+="$(ls crates/cpworker/src/bin/*.rs | sed 's/^/       /')"$'\n'
+fi
+if [ "$nbin" -gt 1 ]; then
+    p529+="     cpworker/Cargo.toml declares $nbin [[bin]] targets (expected 1)"$'\n'
+fi
+if [ "$tools" -lt 1 ]; then
+    p529+="     crates/cpworker-parity/src/bin has no tooling"$'\n'
+fi
+if [ -n "$p529" ]; then
+    echo "❌ P5-29 parity/oracle tooling must live in cpworker-parity, not cpworker:"
+    printf '%s' "$p529"
+    fail=1
+else
+    echo "✅ P5-29 parity/oracle tooling lives in cpworker-parity ($tools binaries)"
+fi
+
 # Positive counterpart of ①: test code belongs at the end of the file. Without
 # this, "test code" is only whatever the block tracker managed to see; with it, a
 # `#[cfg(test)] mod early {}` marker placed at the top of a file to blind the

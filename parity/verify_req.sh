@@ -30,7 +30,7 @@ gcc -O2 -w -I "$PROJECT_ROOT/cpworker/src" -I "$HERE/shim" \
     -o "$TMP/c_req"
 
 echo "==> building Rust req_pattern harness"
-( cd "$RUST_DIR" && cargo build -q --locked -p cpworker --bin req_parity )
+( cd "$RUST_DIR" && cargo build -q --locked -p cpworker-parity --bin req_parity )
 
 echo "==> generating $N queries (seed=$SEED)"
 python3 "$HERE/gen_req.py" "$N" "$SEED" > "$TMP/in.txt"

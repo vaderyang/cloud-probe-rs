@@ -10,7 +10,7 @@
  *   OK <bits>    where bit i is '1' iff packet i matches
  *   ERR <msg>    if libpcap could not compile the expression
  *
- * The Rust side (`cpworker --bin bpf_eval`) prints the same format; the two are
+ * The Rust side (`cpworker-parity --bin bpf_eval`) prints the same format; the two are
  * diffed by parity/verify_bpf.sh.
  */
 #include <stdio.h>
