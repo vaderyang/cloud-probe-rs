@@ -161,6 +161,10 @@ CI 门禁（`.github/workflows/ci.yml`）：
 | `mutation` | 阻塞（Tier0/1，nightly 或 PR 限量）+ 定时全量 | mutation score ≥ 阈值 | §7 |
 | `system` | 定时（nightly/weekly） | soak / chaos / DST | §8 |
 
+> 当前落地：`.github/workflows/ci.yml` 的 `verify-coverage`（line/function、关键函数、no-decrease、
+> diff、P0 requirements）已**阻塞**；branch 与 mutation 在 `.github/workflows/verification.yml`
+> 每周运行且暂为 advisory，待基线建立后纳入阻塞。
+
 **PR 评审清单（新增）**：
 1. 新测试能指向规范来源（ADR/PARITY/requirements id）？无则不合格。
 2. 变更行是否达到 90/85？未达部分是否逐条 `cov:ignore` 并说明？
@@ -172,10 +176,13 @@ CI 门禁（`.github/workflows/ci.yml`）：
 
 ## 10. 分阶段落地
 
-- **阶段 1（本次）**：框架文档 + `policy/baseline/gate`（line·function·关键函数·no-decrease·diff）
-  + `mutants.toml` + `requirements.toml`（P0 种子）+ CI `coverage-gate` job。
-- **阶段 2**：nightly `--branch`（branch 门禁）与 `--mcdc`（condition 门禁）；补齐 Tier0/1 关键函数测试。
-- **阶段 3**：`cargo-mutants` 全量 + mutation 阈值门禁；poison/DST harness。
+- **阶段 1 ✅ 已完成**：框架文档 + `policy/baseline/gate`（line·function·关键函数·no-decrease·diff）
+  + CI `verify-coverage`（阻塞）。
+- **阶段 2 ✅ 基本完成**：`requirements.toml` + `requirements_gate.py`（P0 场景 100%，已阻塞进 `verify-coverage`）；
+  nightly `verification.yml` 跑 `cargo +nightly llvm-cov --branch`（branch 数据 + 分层报告，advisory）。
+  待办：`--mcdc`（condition 门禁）与把 branch 纳入阻塞（待基线建立）。
+- **阶段 3 (进行中)**：`cargo-mutants` 配置 `verification/mutants.toml` + `verify_mutation.sh` + nightly mutation job（advisory）；
+  待办：mutation 阈值基线化并纳阻塞；poison/DST harness。
 - **阶段 4**：soak / chaos / fault-injection 定时 job；`risk.toml` P0 收敛到 100%。
 
 ---

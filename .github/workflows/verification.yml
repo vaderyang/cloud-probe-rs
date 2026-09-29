@@ -1,0 +1,70 @@
+name: verification (nightly)
+
+# The blocking gates (line/function, critical functions, no-decrease, diff) run
+# on every PR/push in ci.yml. This workflow adds the expensive dimensions that do
+# not belong on the critical path: branch coverage (needs nightly llvm-cov) and
+# mutation testing. Both are advisory while their baselines are established
+# (VERIFICATION_COVERAGE.md §10 stages 2-3).
+
+on:
+  schedule:
+    - cron: "17 3 * * 1" # Mondays 03:17 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  branch-coverage:
+    name: branch coverage (nightly llvm-cov)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v7
+      - name: System dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends protobuf-compiler
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: llvm-tools-preview
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-llvm-cov
+      - name: Collect branch coverage
+        run: |
+          cargo +nightly llvm-cov --workspace --locked --branch \
+            --lcov --output-path target/llvm-cov/lcov.info
+      - name: Report per tier (advisory until branch baselines land)
+        run: |
+          cargo +nightly llvm-cov report --summary-only
+          python3 verification/coverage_gate.py --lcov target/llvm-cov/lcov.info || true
+
+  mutation:
+    name: mutation (cargo-mutants, Tier 0/1)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v7
+      - name: System dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends protobuf-compiler
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-mutants
+      - name: Run mutation testing
+        run: ./verify_mutation.sh
+      - name: Upload mutation report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mutants-out
+          path: mutants.out
+          if-no-files-found: warn

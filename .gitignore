@@ -13,3 +13,7 @@ crates/cpworker/fuzz/coverage/
 # verification coverage artifacts
 verification/__pycache__/
 target/llvm-cov/
+
+# cargo-mutants output
+mutants.out/
+mutants.out.old/

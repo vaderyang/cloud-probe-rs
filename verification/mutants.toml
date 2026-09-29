@@ -1,0 +1,33 @@
+# cargo-mutants configuration (VERIFICATION_COVERAGE.md §7, ADR-0001).
+#
+# Scope is the pure-logic part of Tier 0 (and the small Tier 1 protocol client):
+# the capture-ring paths (af_packet) are only exercised with CAP_NET_RAW in the
+# privileged job and would otherwise show up as unviable/timeout noise, so they
+# are mutated via the privileged job once live coverage is folded in (stage 2/3).
+#
+#   ./verify_mutation.sh            # this scope, full
+#   ./verify_mutation.sh --in-diff  # only lines changed vs origin/main
+
+examine_globs = [
+  "crates/cpworker/src/bpf/**",
+  "crates/cpworker/src/packet.rs",
+  "crates/cpworker/src/packet_split.rs",
+  "crates/cpworker/src/zmtp/**",
+  "crates/cpworker/src/output/vxlan.rs",
+  "crates/cpworker/src/output/gre.rs",
+  "crates/cpworker/src/config.rs",
+  "crates/cpgolib/src/**",
+]
+
+exclude_globs = [
+  "crates/cpworker-parity/**",
+  "crates/sim/**",
+  "crates/*/tests/**",
+  "crates/*/src/bin/**",
+]
+
+# Mutating a Drop impl or a trivial main is noise here.
+exclude_re = ["^impl .*Drop for", "^fn main$"]
+
+timeout_multiplier = 3.0
+minimum_test_timeout = 60.0

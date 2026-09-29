@@ -186,14 +186,17 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
 
-  coverage:
-    name: coverage (llvm-cov)
-    # Advisory: reports line coverage and uploads an lcov artifact. It is not a
-    # hard gate yet (see IMPROVEMENT_PLAN.md P2.3).
-    continue-on-error: true
+  verify-coverage:
+    name: verification coverage (tiered, blocking)
+    # Blocking since ADR-0001: per-tier line/function coverage, critical-function
+    # 100% function coverage, coverage-must-not-decrease and changed-line (diff)
+    # coverage, plus the P0 behaviour-coverage gate. See VERIFICATION_COVERAGE.md.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          # Diff coverage needs the PR base commit to be reachable.
+          fetch-depth: 0
       - name: System dependencies
         run: |
           sudo apt-get update
@@ -207,14 +210,25 @@ jobs:
         with:
           tool: cargo-llvm-cov
       - name: Collect coverage
-        run: cargo llvm-cov --workspace --locked --lcov --output-path lcov.info
+        run: cargo llvm-cov --workspace --locked --lcov --output-path target/llvm-cov/lcov.info
       - name: Summary
         run: cargo llvm-cov report --summary-only
+      - name: Tiered coverage gate (line/function, critical functions, no-decrease, diff)
+        run: |
+          BASE="${{ github.event.pull_request.base.sha || github.event.before }}"
+          if [ -z "$BASE" ] || [ "$BASE" = "0000000000000000000000000000000000000000" ]; then
+            python3 verification/coverage_gate.py --lcov target/llvm-cov/lcov.info --tolerance 0.5
+          else
+            python3 verification/coverage_gate.py --lcov target/llvm-cov/lcov.info \
+              --tolerance 0.5 --diff --diff-base "$BASE"
+          fi
+      - name: Behaviour coverage gate (P0 scenario = 100%)
+        run: python3 verification/requirements_gate.py
       - name: Upload lcov artifact
         uses: actions/upload-artifact@v4
         with:
           name: coverage-lcov
-          path: lcov.info
+          path: target/llvm-cov/lcov.info
           if-no-files-found: warn
 
   lint-workflows:

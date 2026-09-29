@@ -103,12 +103,13 @@
 
 ## 5. 落地状态与分阶段
 
-- **已落地（阶段 1）**：`VERIFICATION_COVERAGE.md`、`verification/policy.toml`、
-  `verification/coverage_gate.py`、`verification/baseline.json`、`verify_coverage.sh`；
-  门禁本地验证通过（分层 line/function、关键函数 100%、no-decrease、diff 900/85）。
-- **阶段 2**：nightly `--branch`（branch 门禁）+ `--mcdc`（condition 门禁）；补齐 Tier0/1 关键函数测试；
-  接入 CI `coverage-gate`（阻塞）与 `requirements_gate`。
-- **阶段 3**：`cargo-mutants` 全量 + mutation 阈值门禁；poison/DST harness。
+- **阶段 1 ✅ 已完成**：`VERIFICATION_COVERAGE.md`、`verification/policy.toml`、
+  `verification/coverage_gate.py`、`verification/baseline.json`、`verify_coverage.sh`。
+- **阶段 2 ✅ 基本完成**：`verification/requirements.toml` + `requirements_gate.py`（P0 场景 100%）；
+  CI `verify-coverage` 阻塞化（分层/关键函数/no-decrease/diff/requirements）；
+  weekly `verification.yml` 跑 nightly `--branch`。待办：`--mcdc`、branch 纳入阻塞。
+- **阶段 3（进行中）**：`cargo-mutants` 配置 + `verify_mutation.sh` + weekly mutation job（advisory）；
+  待办：mutation 阈值基线化并纳阻塞；poison/DST harness。
 - **阶段 4**：soak / chaos / fault-injection 定时 job；`risk.toml` P0 收敛到 100%。
 
 ## 6. 被否决的备选方案（Alternatives）

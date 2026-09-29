@@ -35,15 +35,25 @@ gate list and the changelog: [CONTRIBUTING.md](CONTRIBUTING.md),
 
 ### Coverage
 
-Line coverage is collected in CI (advisory) with `cargo-llvm-cov` and uploaded
-as an `lcov` artifact. To reproduce locally:
+Verification coverage is a **blocking CI gate** (ADR-0001,
+[VERIFICATION_COVERAGE.md](VERIFICATION_COVERAGE.md)): per-tier line/function
+coverage with a must-not-decrease ratchet, 100% function coverage for a list of
+critical safety/integrity functions, changed-line coverage (line 90% / branch
+85%) and 100% P0 behaviour (requirement/scenario) coverage. Policy lives in
+[`verification/policy.toml`](verification/policy.toml), the ratchet baseline in
+`verification/baseline.json`. To reproduce locally:
 
 ```bash
 rustup component add llvm-tools-preview
 cargo install cargo-llvm-cov
-cargo llvm-cov --workspace --lcov --output-path lcov.info
-cargo llvm-cov report --summary-only
+./verify_coverage.sh              # collect + gate (tiered, critical, diff)
+./verify_coverage.sh --no-run     # re-export lcov from the last run, then gate
+python3 verification/requirements_gate.py   # P0 scenario coverage
 ```
+
+Branch coverage (nightly `cargo +nightly llvm-cov --branch`) and mutation
+testing (`./verify_mutation.sh`) run in the weekly `.github/workflows/verification.yml`
+workflow while their baselines are established.
 
 ### System dependencies
 

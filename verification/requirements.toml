@@ -1,0 +1,286 @@
+# Behaviour coverage registry: requirement -> scenario -> state transition -> tests.
+#
+# Design: VERIFICATION_COVERAGE.md §5. P0 requirements MUST have 100% scenario
+# coverage: every `tests` name below must exist as a real test function (the gate
+# greps the crate sources), and every P0 requirement must map to at least one.
+#
+# Spec-first rule (ADR-0001): a `source` here is the specification the test is
+# derived from, not the implementation. `tests` are test FUNCTION names.
+
+[[requirement]]
+id = "REQ-BPF-COMPILE"
+priority = "P0"
+source = "PARITY.md §4 (tcpdump subset)"
+scenario = "compile the supported tcpdump subset and decide identically to libpcap"
+tests = [
+  "parses_direction_and_proto_syntax",
+  "parses_basic_predicates",
+  "and_or_precedence",
+  "parentheses",
+  "matches_ip_host_and_port",
+  "long_port_or_chain_compiles",
+  "long_not_host_chain_uses_trampolines_and_matches",
+  "port_parsing_matches_c_strtol",
+]
+
+[[requirement]]
+id = "REQ-BPF-LIMITS"
+priority = "P0"
+source = "AUDIT4 P5-07"
+scenario = "over-long/over-deep expressions return an error instead of aborting"
+tests = [
+  "rejects_over_long_or_deep",
+  "or_all_rejects_an_empty_alternative_list_without_panicking",
+]
+
+[[requirement]]
+id = "REQ-BPF-RESOLVE"
+priority = "P0"
+source = "AUDIT4 P5-08 / P2-10"
+scenario = "host/net names expand to every A/AAAA address; resolution is off-lock and failures are not cached"
+tests = [
+  "host_name_expands_to_every_resolved_address",
+  "net_name_expands_to_every_resolved_address",
+  "oversized_resolution_is_refused_by_name_not_silently_expanded",
+  "a_failed_lookup_is_not_cached",
+  "background_resolver_does_not_block_the_caller",
+  "system_resolver_returns_every_address_for_localhost",
+  "prewarming_resolves_what_the_compile_needs",
+  "compile_with_uses_the_injected_resolver_only",
+]
+
+[[requirement]]
+id = "REQ-BPF-KERNEL"
+priority = "P0"
+source = "AUDIT4 P5-09"
+scenario = "attach the filter before bind; fall back to userspace filtering when the kernel refuses"
+tests = [
+  "kernel_accepts_attached_program",
+  "long_filters_exceed_the_kernel_instruction_limit",
+  "live_capture_falls_back_to_userspace_filtering",
+  "userspace_fallback_warning_carries_the_instruction_count",
+  "effective_bpf_follows_the_exclusion_flag",
+]
+
+[[requirement]]
+id = "REQ-CAPTURE-LOOPBACK"
+priority = "P0"
+source = "PARITY.md §4 (A1 loopback duplicate)"
+scenario = "loopback delivers each frame once (PACKET_IGNORE_OUTGOING), non-loopback keeps outgoing"
+tests = [
+  "live_capture_loopback_does_not_duplicate_frames",
+  "loopback_interface_detection",
+]
+
+[[requirement]]
+id = "REQ-CAPTURE-FIDELITY"
+priority = "P0"
+source = "AUDIT4 qwen §4-5"
+scenario = "inject exactly N raw frames => capturer delivers exactly those N, in order, drop == 0"
+tests = ["live_capture_veth_delivers_exactly_n_frames"]
+
+[[requirement]]
+id = "REQ-CAPTURE-VLAN"
+priority = "P0"
+source = "AUDIT4 P5-03 / P2-7"
+scenario = "reinsert the 802.1Q tag from AUXDATA without exceeding snaplen"
+tests = [
+  "live_capture_reinserts_vlan_on_veth",
+  "insert_vlan_reinserts_after_macs",
+  "insert_vlan_truncated_frame_stays_within_snaplen",
+  "insert_vlan_refuses_prefix_without_ethernet_header",
+  "parse_control_reads_timestamp_and_vlan",
+  "parse_control_ignores_a_cmsg_that_overruns_the_buffer",
+]
+
+[[requirement]]
+id = "REQ-PCAP-READER"
+priority = "P0"
+source = "AUDIT4 P5-20"
+scenario = "validate linktype/version/caplen<=orig_len<=MAX_CAPLEN and stop cleanly on corruption"
+state_transition = "open -> global-header-validated -> record-read -> (eof | corrupt-stop)"
+tests = [
+  "rejects_non_ethernet_linktype",
+  "rejects_caplen_larger_than_orig_len",
+  "bounds_one_record_allocation",
+  "rejects_unknown_pcap_version",
+  "truncated_files_stop_without_forwarding_garbage",
+  "parsing_is_independent_of_read_chunking",
+  "corrupt_record_header_leaves_the_previous_record_intact",
+  "all_byte_orders_and_timestamp_resolutions_decode",
+  "truncation_is_reported_once_by_the_capturer",
+]
+
+[[requirement]]
+id = "REQ-PACKET-PARSE"
+priority = "P0"
+source = "PARITY.md §2.2"
+scenario = "parse untrusted frames and build fragments without out-of-bounds or wrong offsets"
+tests = [
+  "split_payload",
+  "frame_short_and_long",
+  "oversized_frame_rejected",
+  "short_packet_does_not_match",
+  "evaluate_no_match_on_short_frame",
+]
+
+[[requirement]]
+id = "REQ-ZMTP-WIRE"
+priority = "P0"
+source = "PARITY.md §2.4 (ZMTP 3.x)"
+scenario = "encode/decode greetings, commands and messages byte-for-byte"
+tests = [
+  "greeting_roundtrip",
+  "ready_roundtrip",
+  "pong_command_roundtrips",
+  "handshake_and_send",
+  "peer_type_compat",
+  "frame_short_and_long",
+]
+
+[[requirement]]
+id = "REQ-ZMTP-RESILIENCE"
+priority = "P0"
+source = "AUDIT4 P5-10"
+scenario = "handshake deadline, keepalive/user-timeout, DNS re-resolve and a single write FIFO"
+state_transition = "connecting -> greeting -> ready -> (closed -> reconnecting)"
+tests = [
+  "silent_peer_handshake_times_out_and_reconnects",
+  "garbage_peer_is_rejected_and_reconnects",
+  "real_tcp_reconnects_after_disconnect",
+  "reconnect_after_eof",
+  "connector_covers_every_resolved_address",
+  "connector_picks_up_a_dns_change_on_reconnect",
+  "short_write_during_greeting_keeps_the_wire_in_order",
+  "short_write_during_ready_does_not_interleave_messages",
+  "tcp_transport_enables_keepalive_and_user_timeout",
+]
+
+[[requirement]]
+id = "REQ-ZMTP-QUEUE"
+priority = "P0"
+source = "AUDIT4 P5-11"
+scenario = "bounded queue by hwm and bytes, with published gauges"
+tests = [
+  "zmq_hwm_is_range_checked",
+  "queue_is_bounded_in_bytes",
+  "queue_budget_is_bounded_by_hwm_and_bytes",
+  "queued_bytes_tracks_the_queue",
+  "queue_backlog_is_published_as_gauges",
+  "queued_messages_survive_disconnect",
+  "hwm_drops_when_socket_blocks",
+]
+
+[[requirement]]
+id = "REQ-OUTPUT-ENCAP"
+priority = "P0"
+source = "PARITY.md §2.2 (issue #231)"
+scenario = "encapsulate VXLAN/GRE on the wire without corrupting bytes"
+tests = ["vxlan_v1_capture_time", "vxlan_fragmentation", "vni2_tag", "zmq_vlan_slice_never_corrupts"]
+
+[[requirement]]
+id = "REQ-OUTPUT-LIFECYCLE"
+priority = "P0"
+source = "AUDIT4 P5-04"
+scenario = "Output::destroy has a single call point and drains before the writer thread is joined"
+state_transition = "created -> active -> (reload | stop) -> destroyed"
+tests = [
+  "stop_destroys_every_output_exactly_once",
+  "reload_destroys_replaced_outputs",
+  "destroy_flushes_buffered_packets",
+  "manager_drop_destroys_outputs",
+  "pending_outputs_destroys_everything_it_throws_away",
+  "pipeline_stop_destroys_outputs_after_output_thread_joined",
+  "stop_flushes_pcap_file_output",
+]
+
+[[requirement]]
+id = "REQ-CONFIG-VALIDATION"
+priority = "P0"
+source = "AUDIT4 P5-15 / PARITY.md §2.3"
+scenario = "numeric config is range-checked, never silently truncated"
+tests = [
+  "numeric_fields_are_range_checked_not_truncated",
+  "zmq_hwm_is_range_checked_by_a_single_wellformed_gate",
+  "snaplen_falls_back_to_the_traditional_default",
+]
+
+[[requirement]]
+id = "REQ-NETUTIL-UTF8"
+priority = "P0"
+source = "AUDIT4 P5-21"
+scenario = "interface-name replacement preserves non-ASCII bytes"
+tests = [
+  "non_ascii_text_survives_unchanged",
+  "non_ascii_around_a_token_is_preserved",
+  "replaces_every_nic_token",
+  "unicode_whitespace_terminates_the_interface_name",
+]
+
+[[requirement]]
+id = "REQ-CPDAEMON-SYNC"
+priority = "P0"
+source = "REVIEW_CPDAEMON_TESTS.md / cpdaemon/pkg/cpm"
+scenario = "register -> versioned strategy pull (304 handled) -> metrics push"
+state_transition = "unregistered -> registered -> syncing"
+tests = [
+  "syncer_registers_pulls_strategy_and_pushes_metrics",
+  "sync_strategy_304_reports_not_changed",
+  "register_body_error_code_is_rejected",
+  "sync_metrics_accepts_a_body_code_like_the_go_client",
+]
+
+[[requirement]]
+id = "REQ-CPDAEMON-WORKER"
+priority = "P0"
+source = "AUDIT4 / REVIEW_CPDAEMON_TESTS.md (DS-3)"
+scenario = "serialize a strategy, spawn the real cpworker, drive control, reload and stop"
+state_transition = "created -> running -> reloaded -> stopped"
+tests = [
+  "daemon_supervises_the_real_cpworker",
+  "worker_manager_spawns_the_real_cpworker",
+]
+
+[[requirement]]
+id = "REQ-CPGOLIB-PROTOCOL"
+priority = "P0"
+source = "cpgolib/cpworker (unix control)"
+scenario = "v1 handshake, command framing and error mapping"
+tests = [
+  "run_command_round_trips_and_frames_the_command",
+  "dial_sends_the_v1_handshake",
+  "a_non_ok_status_becomes_an_error",
+  "unsupported_conn_string_is_rejected",
+  "dial_to_a_missing_socket_is_reported_as_a_dial_error",
+]
+
+[[requirement]]
+id = "REQ-CONTAINER-PID"
+priority = "P0"
+source = "cptools/dockerpid + cripid"
+scenario = "resolve a container host pid without truncation; report API/parse failures"
+tests = [
+  "out_of_range_pid_is_an_error_not_a_truncated_pid",
+  "pid_is_taken_from_the_json_number_when_it_fits",
+  "pid_is_found_when_another_info_value_has_no_usable_pid",
+  "negotiates_the_api_version_then_prints_the_host_pid",
+  "docker_api_version_skips_the_ping_and_uses_the_unversioned_path",
+  "missing_pid_is_a_reported_failure",
+]
+
+[[requirement]]
+id = "REQ-DST-DETERMINISM"
+priority = "P0"
+source = "AUDIT4 §3 (DST)"
+scenario = "same seed => identical trace; harsh network preserves invariants; corrupted input is handled"
+tests = [
+  "determinism_same_seed",
+  "different_seeds_diverge",
+  "harsh_network_determinism",
+  "harsh_network_invariants",
+  "dst_pcap_and_zmtp_deterministic",
+  "dst_pcap_reader_clean_file",
+  "dst_pcap_reader_corrupted_header",
+  "dst_pcap_reader_truncated",
+  "dst_zmtp_client_state_machine",
+]

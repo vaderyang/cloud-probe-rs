@@ -260,17 +260,22 @@ def main() -> int:
     print("=" * 78)
     print(" verification coverage — tiered gate")
     print("=" * 78)
-    print(f"{'tier':4} {'name':28} {'line':>16} {'function':>14}  verdict")
+    print(f"{'tier':4} {'name':26} {'line':>16} {'branch':>8} {'function':>14}  verdict")
     for t in tiers:
         c = current[str(t.id)]
         base = baseline.get(str(t.id), {})
         base_line = base.get("line", 0.0)
         base_fn = base.get("function", 0.0)
+        base_br = base.get("branch", 0.0)
+        has_branch = c["branch"] > 0.0
 
         verdict = "ok"
-        # ratchet: never below baseline
-        if base and (c["line"] < base_line - args.tolerance
-                     or c["function"] < base_fn - args.tolerance):
+        # ratchet: never below baseline (branch only once branch data exists)
+        if base and (
+            c["line"] < base_line - args.tolerance
+            or c["function"] < base_fn - args.tolerance
+            or (has_branch and base_br > 0.0 and c["branch"] < base_br - args.tolerance)
+        ):
             verdict = "DECREASE"
             failures.append(
                 f"tier {t.id} coverage decreased: line {c['line']:.1f} < {base_line:.1f} "
@@ -280,6 +285,16 @@ def main() -> int:
         elif base_line >= t.line_target and c["line"] + args.tolerance < t.line_target:
             verdict = f"< target {t.line_target:.0f}"
             failures.append(f"tier {t.id} line {c['line']:.1f} < target {t.line_target:.0f}")
+        elif (
+            t.branch_target > 0.0
+            and base_br >= t.branch_target
+            and has_branch
+            and c["branch"] + args.tolerance < t.branch_target
+        ):
+            verdict = f"< branch {t.branch_target:.0f}"
+            failures.append(
+                f"tier {t.id} branch {c['branch']:.1f} < target {t.branch_target:.0f}"
+            )
         elif not base or base_line < t.line_target:
             w = waivers.get(t.id)
             if w is None:
@@ -298,9 +313,11 @@ def main() -> int:
                 else:
                     verdict = f"waived→{w['expires']}"
 
+        branch_s = f"{c['branch']:6.1f}%" if has_branch else "     -"
         print(
-            f"{t.id:<4} {t.name:28} "
+            f"{t.id:<4} {t.name:26} "
             f"{c['line']:6.1f}% ({c['line_hit']:>5}/{c['line_total']:<5}) "
+            f"{branch_s:>8} "
             f"{c['function']:5.1f}% ({c['fn_hit']:>4}/{c['fn_total']:<4})  {verdict}"
         )
 
