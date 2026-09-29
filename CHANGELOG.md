@@ -46,6 +46,12 @@ Two conventions worth knowing before reading:
   `cpworker` spawn bridge - config serialization, process spawn, unix control and
   captured loopback packets - and the `live-capture` CI job builds `cpworker` and
   asserts the test executed rather than silently skipping.
+- `dockerpid` gained tests (it had none): unit tests for the chunked-transfer
+  and inspect-JSON parsers, plus an end-to-end suite that drives the real binary
+  against a mock Docker Engine API over TCP (negotiation via `/_ping`,
+  `DOCKER_API_VERSION` short-circuiting it, inspect, and the usage/parse
+  failures). Writing them exposed and fixed a panic: `decode_chunked` sliced out
+  of bounds on a truncated chunk instead of returning an error.
 - A minimal CPM mock (axum, ephemeral port, request recording) lives in
   `crates/cpdaemon/tests/common/mod.rs` for reuse by future daemon tests.
 

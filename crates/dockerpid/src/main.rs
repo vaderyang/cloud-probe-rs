@@ -138,8 +138,12 @@ fn decode_chunked(data: &[u8]) -> Result<Vec<u8>> {
         if size == 0 {
             break;
         }
-        out.extend_from_slice(&data[pos..pos + size]);
-        pos += size + 2;
+        let end = pos
+            .checked_add(size)
+            .filter(|end| *end <= data.len())
+            .ok_or_else(|| anyhow!("truncated chunked encoding"))?;
+        out.extend_from_slice(&data[pos..end]);
+        pos = end + 2;
     }
     Ok(out)
 }
@@ -169,14 +173,17 @@ fn container_pid(api_version: Option<&str>, container_id: &str) -> Result<i64> {
             String::from_utf8_lossy(&resp.body)
         );
     }
+    parse_container_pid(&resp.body)
+}
+
+/// Extract `State.Pid` from a Docker `containers/{id}/json` body.
+fn parse_container_pid(body: &[u8]) -> Result<i64> {
     let v: serde_json::Value =
-        serde_json::from_slice(&resp.body).context("invalid docker inspect response")?;
-    let pid = v
-        .get("State")
+        serde_json::from_slice(body).context("invalid docker inspect response")?;
+    v.get("State")
         .and_then(|s| s.get("Pid"))
         .and_then(|p| p.as_i64())
-        .ok_or_else(|| anyhow!("Pid not found in container inspect response"))?;
-    Ok(pid)
+        .ok_or_else(|| anyhow!("Pid not found in container inspect response"))
 }
 
 fn main() {
@@ -209,4 +216,100 @@ fn run(container_id: &str) -> Result<()> {
     let pid = container_pid(api_version.as_deref(), container_id)?;
     println!("{pid}");
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::{Read, Write};
+    use std::net::{TcpListener, TcpStream};
+
+    #[test]
+    fn decodes_a_single_chunk() {
+        assert_eq!(
+            decode_chunked(b"5\r\nhello\r\n0\r\n\r\n").unwrap(),
+            b"hello"
+        );
+    }
+
+    #[test]
+    fn decodes_multiple_chunks_until_the_zero_chunk() {
+        assert_eq!(
+            decode_chunked(b"5\r\nhello\r\n6\r\n world\r\n0\r\n\r\n").unwrap(),
+            b"hello world"
+        );
+    }
+
+    #[test]
+    fn rejects_a_bad_chunk_size() {
+        assert!(decode_chunked(b"zz\r\nhi\r\n0\r\n\r\n").is_err());
+        assert!(decode_chunked(b"5\r\nhi").is_err());
+    }
+
+    #[test]
+    fn parses_state_pid_from_an_inspect_body() {
+        assert_eq!(
+            parse_container_pid(br#"{"State":{"Pid":4321}}"#).unwrap(),
+            4321
+        );
+        // Extra fields and a plus sign must not confuse it.
+        assert_eq!(
+            parse_container_pid(br#"{"Id":"x","State":{"Running":true,"Pid":7}}"#).unwrap(),
+            7
+        );
+    }
+
+    #[test]
+    fn rejects_inspect_bodies_without_a_numeric_pid() {
+        assert!(parse_container_pid(b"not json").is_err());
+        assert!(parse_container_pid(br#"{"State":{}}"#).is_err());
+        assert!(parse_container_pid(br#"{"State":{"Pid":"4321"}}"#).is_err());
+    }
+
+    /// Serve one canned response on a local TCP port and return the connect target.
+    fn one_shot_http(response: &'static str) -> std::net::SocketAddr {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        std::thread::spawn(move || {
+            let (mut s, _) = listener.accept().unwrap();
+            let mut buf = [0u8; 1024];
+            let _ = s.read(&mut buf);
+            let _ = s.write_all(response.as_bytes());
+        });
+        addr
+    }
+
+    #[test]
+    fn http_get_parses_status_headers_and_a_chunked_body() {
+        let addr = one_shot_http(
+            "HTTP/1.1 200 OK\r\nApi-Version: 1.41\r\nTransfer-Encoding: chunked\r\n\r\n\
+             5\r\nhello\r\n6\r\n world\r\n0\r\n\r\n",
+        );
+        let mut stream = Stream::Tcp(TcpStream::connect(addr).unwrap());
+        let resp = http_get(&mut stream, "/_ping").unwrap();
+        assert_eq!(resp.status, 200);
+        assert_eq!(
+            resp.headers.get("api-version").map(String::as_str),
+            Some("1.41")
+        );
+        assert_eq!(resp.body, b"hello world");
+    }
+
+    #[test]
+    fn http_get_parses_a_fixed_length_body() {
+        let addr = one_shot_http(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 5\r\n\r\n{a:1}",
+        );
+        let mut stream = Stream::Tcp(TcpStream::connect(addr).unwrap());
+        let resp = http_get(&mut stream, "/containers/x/json").unwrap();
+        assert_eq!(resp.status, 200);
+        assert_eq!(resp.body, b"{a:1}");
+    }
+
+    #[test]
+    fn http_get_rejects_a_malformed_response() {
+        let addr = one_shot_http("not http at all");
+        let mut stream = Stream::Tcp(TcpStream::connect(addr).unwrap());
+        assert!(http_get(&mut stream, "/_ping").is_err());
+    }
 }
