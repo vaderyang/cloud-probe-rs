@@ -261,3 +261,232 @@ mod tests {
         assert_eq!(&out[n - 30..n], &payload[30..60]);
     }
 }
+
+#[cfg(test)]
+mod checksum_tests {
+    use super::*;
+    use crate::packet::parse_packet;
+
+    fn ip4() -> Vec<u8> {
+        let mut ip = vec![0u8; 20];
+        ip[0] = 0x45;
+        ip[2..4].copy_from_slice(&40u16.to_be_bytes());
+        ip[8] = 64;
+        ip[9] = IPPROTO_TCP;
+        ip[12..16].copy_from_slice(&[10, 0, 0, 1]);
+        ip[16..20].copy_from_slice(&[10, 0, 0, 2]);
+        ip
+    }
+    fn tcpseg() -> Vec<u8> {
+        let mut t = vec![0u8; 20];
+        t[0..2].copy_from_slice(&0x1234u16.to_be_bytes());
+        t[2..4].copy_from_slice(&0x0050u16.to_be_bytes());
+        t[4..8].copy_from_slice(&1u32.to_be_bytes());
+        t[12] = 0x50;
+        t
+    }
+    fn ip6() -> Vec<u8> {
+        let mut ip = vec![0u8; 40];
+        ip[0] = 0x60;
+        ip[6] = IPPROTO_TCP;
+        ip[8..24].copy_from_slice(&[0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1]);
+        ip[24..40].copy_from_slice(&[0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2]);
+        ip
+    }
+    fn frame(payload: &[u8]) -> Vec<u8> {
+        let mut p = vec![0u8; 14 + 20 + 20];
+        p[12..14].copy_from_slice(&0x0800u16.to_be_bytes());
+        p[14] = 0x45;
+        p[16..18].copy_from_slice(&((20 + 20 + payload.len()) as u16).to_be_bytes());
+        p[14 + 9] = IPPROTO_TCP;
+        p[14 + 12..14 + 16].copy_from_slice(&[10, 0, 0, 1]);
+        p[14 + 16..14 + 20].copy_from_slice(&[10, 0, 0, 2]);
+        p[14 + 20 + 12] = 0x50;
+        p.extend_from_slice(payload);
+        p
+    }
+
+    #[test]
+    fn checksum_helpers_have_known_values() {
+        assert_eq!(cksum_fold(0x0001_FFFF), 1);
+        assert_eq!(cksum_finish(0), 0xFFFF);
+        assert_eq!(cksum_finish(0xFFFF), 0);
+        assert_eq!(
+            cksum_accumulate(&[0x01, 0x02, 0x03], 0),
+            u16::from_ne_bytes([0x01, 0x02]) as u32 + 3
+        );
+        assert_eq!(htons(0x1234), 0x1234u16.to_be());
+    }
+
+    #[test]
+    fn checksums_match_golden_values() {
+        assert_eq!(calculate_ip_checksum(&ip4()), 0xce66);
+        assert_eq!(
+            calculate_tcp_checksum(Some(&ip4()), None, &tcpseg(), 20),
+            0x5d89
+        );
+        assert_eq!(
+            calculate_udp_checksum(Some(&ip4()), None, &tcpseg(), 20),
+            0x5289
+        );
+        assert_eq!(
+            calculate_tcp_checksum(None, Some(&ip6()), &tcpseg(), 20),
+            0xeb41
+        );
+        assert_eq!(
+            calculate_udp_checksum(None, Some(&ip6()), &tcpseg(), 20),
+            0xe041
+        );
+        // No pseudo-header at all -> plain folded sum complement.
+        assert_eq!(
+            calculate_tcp_checksum(None, None, &tcpseg(), 20),
+            cksum_finish(cksum_accumulate(&tcpseg()[..20], 0))
+        );
+    }
+
+    #[test]
+    fn fragment_count_boundaries() {
+        let f = frame(&(0..100u8).collect::<Vec<_>>());
+        let r = parse_packet(&f).unwrap();
+        assert_eq!(calculate_fragment_count(&r, 0), 1);
+        assert_eq!(calculate_fragment_count(&r, -1), 1);
+        assert_eq!(calculate_fragment_count(&r, 100), 1);
+        assert_eq!(calculate_fragment_count(&r, 30), 4);
+        assert_eq!(calculate_fragment_count(&r, 25), 4);
+    }
+
+    #[test]
+    fn build_fragment_matches_golden_bytes() {
+        let f = frame(&(0..100u8).collect::<Vec<_>>());
+        let r = parse_packet(&f).unwrap();
+        let cases = [
+            (0, true, "000000000000000000000000080045000046000000000006a6b00a0000010a00000200000000000000000000000050000000c8e20000000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d"),
+            (1, true, "000000000000000000000000080045000046000000000006a6b00a0000010a000002000000000000001e0000000050000000050100001e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b"),
+            (3, true, "000000000000000000000000080045000032000000000006a6c40a0000010a000002000000000000005a0000000050000000c3a100005a5b5c5d5e5f60616263"),
+            (0, false, "00000000000000000000000008004500004600000000000600000a0000010a0000020000000000000000000000005000000000000000000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d"),
+        ];
+        for (idx, rc, hex) in cases {
+            let mut out = vec![0u8; 2048];
+            let n = build_fragment(&r, &f, idx, 30, rc, &mut out).unwrap();
+            let got: String = out[..n].iter().map(|x| format!("{x:02x}")).collect();
+            assert_eq!(got, hex, "idx={idx} recalc={rc}");
+        }
+    }
+
+    #[test]
+    fn build_fragment_rejects_out_of_range_and_small_buffers() {
+        let f = frame(&(0..100u8).collect::<Vec<_>>());
+        let r = parse_packet(&f).unwrap();
+        let mut out = vec![0u8; 2048];
+        assert!(
+            build_fragment(&r, &f, 4, 30, false, &mut out).is_none(),
+            "past the end"
+        );
+        let mut tiny = vec![0u8; 8];
+        assert!(build_fragment(&r, &f, 0, 30, false, &mut tiny).is_none());
+        let mut short = vec![0u8; 1500];
+        let short_pkt = &f[..30];
+        assert!(build_fragment(&r, short_pkt, 0, 30, false, &mut short).is_none());
+    }
+    fn frame_dirty(payload: &[u8]) -> Vec<u8> {
+        let mut p = frame(payload);
+        p[14 + 10] = 0xAB;
+        p[14 + 11] = 0xCD;
+        p[14 + 20 + 16] = 0x12;
+        p[14 + 20 + 17] = 0x34;
+        p
+    }
+
+    fn ipv6_udp_frame(payload: &[u8]) -> Vec<u8> {
+        let udp_len = 8 + payload.len();
+        let mut ip = vec![0u8; 40];
+        ip[0] = 0x60;
+        ip[4..6].copy_from_slice(&(udp_len as u16).to_be_bytes());
+        ip[6] = IPPROTO_UDP;
+        ip[8..24].copy_from_slice(&[0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1]);
+        ip[24..40].copy_from_slice(&[0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2]);
+        let mut udp = vec![0u8; 8];
+        udp[0..2].copy_from_slice(&0x1111u16.to_be_bytes());
+        udp[2..4].copy_from_slice(&0x2222u16.to_be_bytes());
+        udp[4..6].copy_from_slice(&0xFFFFu16.to_be_bytes()); // deliberately wrong; build_fragment must fix it
+        udp[6] = 0xDE;
+        udp[7] = 0xAD;
+        udp.extend_from_slice(payload);
+        ip.extend_from_slice(&udp);
+        let mut f = vec![0u8; 14];
+        f[12..14].copy_from_slice(&0x86ddu16.to_be_bytes());
+        f.extend_from_slice(&ip);
+        f
+    }
+
+    #[test]
+    fn calculate_ip_checksum_ignores_trailing_bytes() {
+        let mut buf = ip4();
+        buf.extend_from_slice(&[0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88]);
+        // ihl = 5 -> only the first 20 bytes participate.
+        assert_eq!(calculate_ip_checksum(&buf), 0xce66);
+    }
+
+    #[test]
+    fn build_fragment_accepts_exactly_sized_buffers() {
+        let f = frame(&(0..100u8).collect::<Vec<_>>());
+        let r = parse_packet(&f).unwrap();
+        let header_len = r.payload_offset;
+        let total = header_len + 30;
+        let mut out = vec![0u8; total];
+        let pkt = &f[..header_len + 30];
+        assert_eq!(
+            build_fragment(&r, pkt, 0, 30, false, &mut out).unwrap(),
+            total
+        );
+    }
+
+    #[test]
+    fn build_fragment_recalculated_ipv4_checksums_verify_to_zero() {
+        let f = frame_dirty(&(0..100u8).collect::<Vec<_>>());
+        let r = parse_packet(&f).unwrap();
+        let mut out = vec![0u8; 2048];
+        let _ = build_fragment(&r, &f, 0, 30, true, &mut out).unwrap();
+        let ip = &out[r.ip_offset..r.ip_offset + r.ip_hdr_len];
+        assert_eq!(calculate_ip_checksum(ip), 0, "ip checksum must verify");
+        let tcp_len = (r.l4_hdr_len + 30) as u16;
+        assert_eq!(
+            calculate_tcp_checksum(Some(ip), None, &out[r.l4_offset..], tcp_len),
+            0,
+            "tcp checksum must verify"
+        );
+        // The original dirty values were overwritten.
+        assert_ne!(&out[r.ip_offset + 10..r.ip_offset + 12], &[0xAB, 0xCD]);
+    }
+
+    #[test]
+    fn build_fragment_ipv6_udp_updates_lengths_and_verifies() {
+        let f = ipv6_udp_frame(&(0..100u8).collect::<Vec<_>>());
+        let r = parse_packet(&f).unwrap();
+        assert!(r.is_ipv6 && r.is_udp);
+        let mut out = vec![0u8; 2048];
+        let n = build_fragment(&r, &f, 1, 30, true, &mut out).unwrap();
+        assert_eq!(n, r.payload_offset + 30);
+        let declared = u16::from_be_bytes([out[r.ip_offset + 4], out[r.ip_offset + 5]]);
+        assert_eq!(declared, (r.ipv6_ext_len + r.l4_hdr_len + 30) as u16);
+        let udp_declared = u16::from_be_bytes([out[r.l4_offset + 4], out[r.l4_offset + 5]]);
+        assert_eq!(
+            udp_declared,
+            (r.l4_hdr_len + 30) as u16,
+            "udp length fixed up"
+        );
+        let ip = &out[r.ip_offset..r.ip_offset + 40];
+        let udp_len = (r.l4_hdr_len + 30) as u16;
+        assert_eq!(
+            calculate_udp_checksum(None, Some(ip), &out[r.l4_offset..], udp_len),
+            0,
+            "udp checksum must verify"
+        );
+        assert_ne!(&out[r.l4_offset + 6..r.l4_offset + 8], &[0xDE, 0xAD]);
+        assert_ne!(
+            &out[r.l4_offset + 6..r.l4_offset + 8],
+            &[0, 0],
+            "checksum written"
+        );
+    }
+}

@@ -75,6 +75,7 @@ exclude_re = [
   "packet\\.rs:340:",
   "packet\\.rs:392:",
   "packet\\.rs:422:",
+  "packet_split\\.rs:158:", # calculate_ip_checksum only reads ihl bytes, so a longer slice is equivalent
 ]
 
 timeout_multiplier = 3.0
