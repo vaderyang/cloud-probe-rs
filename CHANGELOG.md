@@ -58,6 +58,8 @@ Two conventions worth knowing before reading:
 - `cpgolib`'s `UnixClient` gained protocol-level unit tests (the `{"version":"v1"}`
   handshake bytes, command framing, non-OK status → error, invalid conn string,
   missing socket) on top of the daemon end-to-end coverage (7 → 12 tests).
+- `cripid` gained tests for the info-map scan (the pid found in a later value,
+  non-JSON and string pids skipped) and `socket_exists` (2 → 5 tests).
 - [FIELD_CONFIRMATION.md](FIELD_CONFIRMATION.md): the `IMPROVEMENT_PLAN_AUDIT4.md`
   §5.1 items that need field or business input before sign-off, written as a
   checklist (what to collect, why it matters, what decision it unblocks) that can

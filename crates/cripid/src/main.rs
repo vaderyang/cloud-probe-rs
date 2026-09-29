@@ -192,4 +192,40 @@ mod tests {
         assert!(parse_pid_from_info(&info_with("0")).is_err());
         assert!(parse_pid_from_info(&info_with("-1")).is_err());
     }
+
+    /// The function scans every info value, so a value without a usable pid
+    /// (here `pid: 0`) must not stop it from finding one in another value.
+    #[test]
+    fn pid_is_found_when_another_info_value_has_no_usable_pid() {
+        let mut m = HashMap::new();
+        m.insert("runtimeSpec".to_string(), r#"{"pid":0}"#.to_string());
+        m.insert("info".to_string(), r#"{"pid":4242}"#.to_string());
+        assert_eq!(parse_pid_from_info(&m).unwrap(), 4242);
+    }
+
+    #[test]
+    fn non_json_values_and_non_numeric_pids_are_skipped() {
+        let mut m = HashMap::new();
+        m.insert("a".to_string(), "not json".to_string());
+        // `pid` as a JSON string is not the host pid.
+        m.insert("b".to_string(), r#"{"pid":"4242"}"#.to_string());
+        assert!(parse_pid_from_info(&m).is_err());
+    }
+
+    #[test]
+    fn socket_exists_only_inspects_unix_paths() {
+        let missing =
+            std::env::temp_dir().join(format!("cripid-missing-{}.sock", std::process::id()));
+        let _ = std::fs::remove_file(&missing);
+        assert!(!socket_exists(&format!("unix://{}", missing.display())).unwrap());
+
+        let present =
+            std::env::temp_dir().join(format!("cripid-present-{}.sock", std::process::id()));
+        std::fs::write(&present, b"").unwrap();
+        assert!(socket_exists(&format!("unix://{}", present.display())).unwrap());
+        let _ = std::fs::remove_file(&present);
+
+        // Non-unix endpoints are left to the dial attempt.
+        assert!(socket_exists("tcp://127.0.0.1:1").unwrap());
+    }
 }
