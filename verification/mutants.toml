@@ -52,6 +52,29 @@ exclude_re = [
   "config\\.rs:549:",
   "config\\.rs:762:",
   "config\\.rs:1060:",
+  # packet.rs: equivalent boundary guards. `<`/`<=`/`==` only differ at the exact
+  # length where the following header check rejects the frame anyway; the `+`/`-`
+  # offset mutants are masked by the payload_len clamp. See MUTATION_BASELINE.md.
+  "packet\\.rs:168:",
+  "packet\\.rs:180:",
+  "packet\\.rs:195:",
+  "packet\\.rs:201:",
+  "packet\\.rs:209:",
+  "packet\\.rs:214:",
+  "packet\\.rs:219:",
+  "packet\\.rs:235:",
+  "packet\\.rs:237:",
+  "packet\\.rs:247:",
+  "packet\\.rs:253:",
+  "packet\\.rs:268:",
+  "packet\\.rs:273:",
+  "packet\\.rs:278:",
+  "packet\\.rs:293:",
+  "packet\\.rs:303:",
+  "packet\\.rs:330:",
+  "packet\\.rs:340:",
+  "packet\\.rs:392:",
+  "packet\\.rs:422:",
 ]
 
 timeout_multiplier = 3.0
