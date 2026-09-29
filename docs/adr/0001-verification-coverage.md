@@ -111,7 +111,8 @@
 - **阶段 3（进行中）**：`cargo-mutants` 配置 + `verify_mutation.sh` + 每周 4-shard mutation job（advisory）；
   首次测量（GRE 输出 76/76 存活）记录于 `verification/MUTATION_BASELINE.md`；
   `verification/risk.toml` + `risk_gate.py`（P0 风险 100%）已纳入 CI。待办：mutation 阈值纳阻塞；poison/DST harness。
-- **阶段 4**：soak / chaos / fault-injection 定时 job；`risk.toml` P0 收敛到 100%。
+- **阶段 4（进行中）**：`verification/system.toml` + weekly `soak` job（`DST_SEED_RANGE` 大范围种子扫描，2000 seeds）；
+  待办：更长时长的内存/句柄 soak 与 CI 阻塞化。
 
 ## 6. 被否决的备选方案（Alternatives）
 

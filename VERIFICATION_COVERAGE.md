@@ -131,8 +131,10 @@ PR 里若新增测试却无法指向其规范来源，视为不合格（见 §9 
 | E2E | mock CPM → syncer → 真 cpworker spawn（root，`live-capture` job） | ✅ 已有 |
 | Differential | `parity/all.sh`（C/Go oracle，10 步） | ✅ 已有 |
 | Performance | `bench/`（null/file/vxlan、live A/B） | ✅ 已有 |
-| Soak | 长跑内存/句柄/丢包稳定性 | ⬜ 计划（nightly） |
-| Chaos / Fault injection / DST | 接口抖动、DNS 抖动、依赖故障、时间/顺序扰动 | ⬜ 计划（nightly） |
+| Soak | 长跑内存/句柄/丢包稳定性 | 🔶 `DST_SEED_RANGE` 大范围种子扫描（weekly `soak` job，2000 seeds） |
+| Chaos / Fault injection / DST | 接口抖动、DNS 抖动、依赖故障、时间/顺序扰动 | ✅ DST harness（`crates/sim`，ChaCha8+虚拟时钟+丢包/重复/乱序/位翻转）；weekly soak 跑 2000 seeds |
+
+系统层矩阵登记于 [`verification/system.toml`](verification/system.toml)（`dst-soak`/`live-capture`/`worker-supervision`）。
 
 ## 9. 机制：把体系变成可执行门禁
 
@@ -144,6 +146,7 @@ verification/
   baseline.json        # 覆盖率基线（ratchet）
   requirements.toml    # 需求/场景/状态迁移 → 测试映射
   risk.toml            # 风险清单 → 验证手段
+  system.toml          # 系统层（soak/e2e/live）矩阵
   mutants.toml         # cargo-mutants 配置
   coverage_gate.py     # 读 lcov+policy+baseline → 分层/关键函数/变更/no-decrease 门禁
   requirements_gate.py # P0 场景/状态覆盖 100%
@@ -184,9 +187,10 @@ CI 门禁（`.github/workflows/ci.yml`）：
   nightly `verification.yml` 跑 `cargo +nightly llvm-cov --branch`（branch 数据 + 分层报告，advisory）。
   待办：`--mcdc`（condition 门禁）与把 branch 纳入阻塞（待基线建立）。
 - **阶段 3（进行中）**：`cargo-mutants` 配置 + `verify_mutation.sh` + 每周分片 mutation job（advisory）；
-  首次测量与缺口记录于 `verification/MUTATION_BASELINE.md`（GRE 输出 76/76 存活）。
-  待办：按测量收敛缺口 → mutation 阈值基线化并纳阻塞；poison/DST harness。
-- **阶段 4**：soak / chaos / fault-injection 定时 job；`risk.toml` P0 收敛到 100%。
+  已关闭 gre/vxlan/stats/config/packet/packet_split 缺口（见 `verification/MUTATION_BASELINE.md`）；
+  待办：zmtp/bpf 收敛 → mutation 阈值纳阻塞。DST/poison 已由 `crates/sim` 提供。
+- **阶段 4（进行中）**：`verification/system.toml` + weekly `soak` job（`DST_SEED_RANGE` 大范围种子扫描）；
+  待办：更长时长的内存/句柄 soak 与 CI 阻塞化。
 
 ---
 

@@ -32,6 +32,16 @@ fn seed_filter(default_lo: u64, default_hi: u64) -> std::ops::RangeInclusive<u64
     if let Ok(s) = std::env::var("DST_SEED") {
         let s: u64 = s.parse().expect("DST_SEED must be an integer");
         s..=s
+    } else if let Ok(r) = std::env::var("DST_SEED_RANGE") {
+        // Soak mode: "lo-hi" widens the seed sweep (used by the scheduled job).
+        let (lo, hi) = r.split_once('-').expect("DST_SEED_RANGE must be lo-hi");
+        lo.trim()
+            .parse::<u64>()
+            .expect("DST_SEED_RANGE lo must be an integer")
+            ..=hi
+                .trim()
+                .parse::<u64>()
+                .expect("DST_SEED_RANGE hi must be an integer")
     } else {
         default_lo..=default_hi
     }

@@ -1,0 +1,40 @@
+# System-level verification matrix (VERIFICATION_COVERAGE.md §8, ADR-0001).
+#
+# These are the end-to-end / scheduled checks that sit above unit + integration
+# tests. `level = "system"`; `schedule` is one of ci | weekly | manual.
+# `command` is run from the repo root.
+
+[[test]]
+id = "dst-soak"
+level = "system"
+schedule = "weekly"
+command = "DST_SEED_RANGE=1-2000 cargo test -p cpsim --test dst --release"
+invariants = [
+  "same seed => identical trace digest",
+  "clean network: no drops, zero decode errors",
+  "loss/dup/reorder/corruption accounting holds",
+  "zmq batch/heartbeat and VLAN-slice integrity",
+]
+requires = "none"
+owner = "core"
+
+[[test]]
+id = "live-capture"
+level = "system"
+schedule = "ci"
+command = "cargo test -p cpworker --test af_packet_live -- --ignored"
+invariants = [
+  "AF_PACKET delivers exactly N frames on a veth pair",
+  "loopback does not duplicate frames (PACKET_IGNORE_OUTGOING)",
+]
+requires = "CAP_NET_RAW"
+owner = "core"
+
+[[test]]
+id = "worker-supervision"
+level = "system"
+schedule = "ci"
+command = "cargo test -p cpdaemon --test worker_supervision -- --ignored"
+invariants = ["cpdaemon spawns and reaps the real cpworker binary"]
+requires = "CAP_NET_RAW"
+owner = "core"

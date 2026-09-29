@@ -39,6 +39,9 @@ Two conventions worth knowing before reading:
 - **mutation 缺口收敛**：`output::gre` 抽出 `Egress` 抽象后可单测，21 个新测试使其 mutation **50/50 caught**（原 76/76 存活）；
   `cpgolib::cpworker::stats` 补跨单位借位等测试达 **56/56**；`config` 访问器/反序列化补测后 **0 missed**。
   详见 [`verification/MUTATION_BASELINE.md`](verification/MUTATION_BASELINE.md)。
+- **Verification Coverage 阶段 4**：系统层矩阵 [`verification/system.toml`](verification/system.toml)；
+  weekly `verification.yml` 新增 `soak` job —— 用 `DST_SEED_RANGE` 在 `crates/sim` 的确定性仿真上扫 2000 个种子
+  （ChaCha8 + 虚拟时钟 + 丢包/重复/乱序/位翻转），失败可 `DST_SEED=<seed>` 精确重放。
 - `cpdaemon` now exposes a **library target** (`src/lib.rs`) and has end-to-end
   tests under `crates/cpdaemon/tests/`. This closes the largest remaining test
   gap in the port: `cpdaemon` previously had 14 unit tests and **no integration
