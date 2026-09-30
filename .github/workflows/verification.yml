@@ -92,15 +92,16 @@ jobs:
     # verification/MUTATION_BASELINE.md), so every shard must stay green. Sharded
     # so a weekly run is bounded.
     #
-    # The shards are listed as fractions because cargo-mutants shards are
-    # *0-based* (`--shard k/n` requires k < n), so the valid values are 0/4..3/4
-    # and `4/4` is rejected outright. (The first version of this job used 1..4,
-    # which failed one shard every run and silently never tested shard 0.)
-    # GitHub expressions have no arithmetic, so the fraction is spelled out.
+    # The shard list is 0-based integers because cargo-mutants shards are
+    # 0-based: `--shard k/n` requires k < n, so the values are 0/4..3/4 and
+    # `4/4` is rejected outright. The first version used 1..4, which failed one
+    # shard every run and silently never tested shard 0. Keep the integers so
+    # the uploaded artifact name stays filesystem-safe (`--shard k/n` is
+    # assembled in the run step).
     strategy:
       fail-fast: false
       matrix:
-        shard: ["0/4", "1/4", "2/4", "3/4"]
+        shard: [0, 1, 2, 3]
     steps:
       - uses: actions/checkout@v7
       - name: System dependencies
@@ -113,7 +114,7 @@ jobs:
         with:
           tool: cargo-mutants
       - name: Run mutation testing
-        run: ./verify_mutation.sh --shard "${{ matrix.shard }}"
+        run: ./verify_mutation.sh --shard "${{ matrix.shard }}/4"
       - name: Upload mutation report
         if: always()
         uses: actions/upload-artifact@v4
