@@ -317,6 +317,13 @@ impl TaskManager {
         self.started_at
     }
 
+    /// Override the creation timestamp. Port of the RPC test seam
+    /// `unix_rpc_basic_set_started_at`: the `info` command reports uptime
+    /// relative to this value (0 means "unset", i.e. uptime 0).
+    pub fn set_started_at(&mut self, t: i64) {
+        self.started_at = t;
+    }
+
     /// The configured task execution model.
     #[must_use]
     pub fn execution_model(&self) -> ExecutionModel {

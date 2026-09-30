@@ -140,7 +140,9 @@ impl BatchBuilder {
             return false;
         }
 
-        // VLAN walk.
+        // VLAN walk, bounded by the *captured* payload (`data_len`), not the
+        // on-wire `length` which already includes the MPLS header (#231 fix).
+        let data_len = length_usize.saturating_sub(MPLS_HDR_SIZE);
         let mut ether_type = be16(&pkt_data[12..14]);
         let mut vlan_total_size = 0usize;
         while matches!(
@@ -148,8 +150,7 @@ impl BatchBuilder {
             ETHERTYPE_VLAN | ETHERTYPE_DOT1AD | ETHERTYPE_VLAN_9100 | ETHERTYPE_VLAN_9200
         ) {
             let vlan_offset = ETH_HDR_LEN + vlan_total_size;
-            if vlan_offset + VLAN_HDR_LEN > length_usize
-                || pkt_data.len() < vlan_offset + VLAN_HDR_LEN
+            if vlan_offset + VLAN_HDR_LEN > data_len || pkt_data.len() < vlan_offset + VLAN_HDR_LEN
             {
                 break;
             }
@@ -158,12 +159,9 @@ impl BatchBuilder {
         }
         let has_vlan = vlan_total_size > 0;
 
-        // Safety guard: the C VLAN walk can over-count (its bound is
-        // `caplen + MPLS_HDR_SIZE`, one tag past the captured data). When
-        // `slice` truncates a VLAN frame this makes the C subtraction
-        // `length - 14 - 4 - vlan_total_size` underflow to ~2^64 and perform a
-        // wild out-of-bounds memcpy. That is undefined behaviour; drop the
-        // packet instead (safe divergence from the original).
+        // Safety guard: never let the (correctly bounded) walk produce a
+        // negative payload length; drop rather than perform C's old
+        // out-of-bounds `memcpy` (safe divergence, PARITY.md §2.2).
         if ETH_HDR_LEN + MPLS_HDR_SIZE + vlan_total_size > length_usize {
             return false;
         }
@@ -266,8 +264,13 @@ impl ZmqOutput {
     /// Returns an error if the uuid is invalid or the ZMQ socket cannot be
     /// created or connected.
     pub fn new(cfg: &ZmqConfig, out: &OutputConfig, stats: Arc<OutputStats>) -> Result<Self> {
-        let uuid = uuid_to_bytes(&cfg.uuid)
-            .ok_or_else(|| Error::new(format!("invalid uuid: {}", cfg.uuid)))?;
+        let uuid = if cfg.uuid.is_empty() {
+            // uuid is optional (#249): when unset it stays all-zero on the wire.
+            [0u8; 16]
+        } else {
+            uuid_to_bytes(&cfg.uuid)
+                .ok_or_else(|| Error::new(format!("invalid uuid: {}", cfg.uuid)))?
+        };
 
         let address = format!("tcp://{}:{}", cfg.host, cfg.port);
         let connector = zmtp::tcp_connector(&cfg.host, cfg.port)
@@ -496,7 +499,11 @@ impl Output for ZmqOutput {
     }
 
     fn destroy(&mut self) {
-        // Linger: best-effort flush of queued batches (mirrors ZMQ_LINGER=5s).
+        // Send the pending batch first (#253); ZMQ_LINGER then keeps the
+        // transport drain waiting until it is delivered.
+        if self.builder.num() > 0 {
+            self.flush_packet();
+        }
         self.zmtp.drain_for(Duration::from_secs(5));
         self.publish_queue_gauges();
     }
