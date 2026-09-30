@@ -148,4 +148,16 @@ mod tests {
         let e = enter_netns_by_path("bad\0path").unwrap_err();
         assert!(e.to_string().contains("invalid netns path"), "{e}");
     }
+
+    #[test]
+    fn a_non_netns_fd_is_a_setns_error() {
+        // A regular file fd is not a namespace handle, so `setns(CLONE_NEWNET)`
+        // fails with EINVAL even for an unprivileged process (no root needed).
+        use std::os::fd::OwnedFd;
+        let fd: OwnedFd = std::fs::File::open("/dev/null")
+            .expect("open /dev/null")
+            .into();
+        let e = enter_netns_by_fd(&fd).unwrap_err();
+        assert!(e.to_string().contains("setns error"), "{e}");
+    }
 }

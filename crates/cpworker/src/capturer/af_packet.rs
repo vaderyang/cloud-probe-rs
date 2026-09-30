@@ -486,12 +486,32 @@ pub struct AfPacketCapturer {
     last_error_log: i64,
 }
 
+/// Combine the capturer-open result with the netns-restore result.
+///
+/// A failed restore is always surfaced: the calling thread would otherwise
+/// stay in the capture namespace, and the worker must abort rather than run
+/// against the wrong interfaces (upstream #285). When opening also failed,
+/// both messages are kept so the operator still sees the root cause.
+fn finish_open<T>(open: Result<T>, restore: Result<()>) -> Result<T> {
+    match restore {
+        Ok(()) => open,
+        Err(restore_err) => match open {
+            Ok(_) => Err(Error::new(format!("restore netns fail: {restore_err}"))),
+            Err(open_err) => Err(Error::new(format!(
+                "{open_err}; restore netns fail: {restore_err}"
+            ))),
+        },
+    }
+}
+
 impl AfPacketCapturer {
     /// Open the capture interface (optionally inside a netns).
     ///
     /// # Errors
     /// Returns an error if the netns cannot be entered, the socket cannot be
-    /// opened/bound, or the BPF filter fails to compile or attach.
+    /// opened/bound, the BPF filter fails to compile or attach, or the
+    /// original namespace cannot be restored (the worker must not continue in
+    /// the capture namespace).
     pub fn new(
         tasks: &[TaskConfig],
         task: &TaskConfig,
@@ -510,12 +530,14 @@ impl AfPacketCapturer {
 
         let result = Self::open(tasks, task, cfg, stats);
 
-        if let Some(ns) = self_netns.as_ref() {
-            if let Err(e) = netns::enter_netns_by_fd(ns) {
-                crate::log_error!("restore netns fail: {e}");
-            }
-        }
-        result
+        // Restoring the original namespace must not be silently ignored: if it
+        // fails, the calling thread stays in the capture namespace, so fail the
+        // open and let the caller abort the worker (upstream #285).
+        let restore = match self_netns.as_ref() {
+            Some(ns) => netns::enter_netns_by_fd(ns),
+            None => Ok(()),
+        };
+        finish_open(result, restore)
     }
 
     fn open(
@@ -1069,5 +1091,55 @@ mod tests {
         let v = vlan.expect("vlan tag");
         assert_eq!(v.tci, 0x0164);
         assert_eq!(v.tpid, 0x88a8);
+    }
+
+    /// Upstream #285: a failed restore of the original netns must fail the
+    /// open, not merely log. Uses a regular-file fd as the "netns" handle so
+    /// the unprivileged test job gets a `setns` error (EINVAL) and no root is
+    /// required.
+    #[test]
+    fn a_failed_netns_restore_fails_the_open() {
+        use std::os::fd::OwnedFd;
+        let bad: OwnedFd = std::fs::File::open("/dev/null")
+            .expect("open /dev/null")
+            .into();
+        let restore = netns::enter_netns_by_fd(&bad);
+        assert!(
+            restore.is_err(),
+            "a non-netns fd must not be accepted as a restore handle"
+        );
+
+        let err = finish_open::<()>(Ok(()), restore).unwrap_err();
+        assert!(
+            err.to_string().contains("restore netns fail"),
+            "restore failure must surface: {err}"
+        );
+        assert!(
+            err.to_string().contains("setns error"),
+            "must keep the underlying cause: {err}"
+        );
+    }
+
+    #[test]
+    fn a_failed_netns_restore_preserves_the_open_error() {
+        let err = finish_open::<()>(
+            Err(Error::new("socket(AF_PACKET) error: 1")),
+            Err(Error::new("setns error: 1")),
+        )
+        .unwrap_err();
+        assert!(
+            err.to_string().contains("socket(AF_PACKET) error"),
+            "must keep the open error: {err}"
+        );
+        assert!(
+            err.to_string().contains("restore netns fail"),
+            "must keep the restore error: {err}"
+        );
+    }
+
+    #[test]
+    fn a_successful_netns_restore_returns_the_open_result() {
+        assert!(matches!(finish_open::<u8>(Ok(7), Ok(())), Ok(7)));
+        assert!(finish_open::<u8>(Err(Error::new("boom")), Ok(())).is_err());
     }
 }
