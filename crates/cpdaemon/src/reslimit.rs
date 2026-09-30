@@ -8,6 +8,25 @@ use std::path::PathBuf;
 
 use crate::error::{Error, Result};
 
+/// CFS scheduling period written to `cpu.max` (100ms), matching upstream.
+pub(crate) const CFS_PERIOD_US: u64 = 100_000;
+
+/// Minimum CFS CPU quota accepted by the kernel (microseconds). The kernel
+/// rejects `cpu.max` quotas below this value with `EINVAL`; upstream #284 adds
+/// this floor.
+pub(crate) const CFS_MIN_QUOTA_US: u64 = 1_000;
+
+/// Compute the `cpu.max` quota (microseconds) for a fractional CPU limit.
+///
+/// `quota = round(cpu * period)`, clamped to `[CFS_MIN_QUOTA_US, period]` so a
+/// tiny CPU share never yields a kernel-invalid quota and a share above one
+/// full CPU never exceeds the period. `cpu` is expected to be finite and
+/// positive; callers filter non-positive values before calling.
+pub(crate) fn cpu_quota_us(cpu: f64, period_us: u64) -> u64 {
+    let quota = (cpu * period_us as f64).round() as u64;
+    quota.clamp(CFS_MIN_QUOTA_US, period_us)
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct CgroupCfg {
     pub version: String,
@@ -76,9 +95,9 @@ pub fn create_process_limit(
     std::fs::create_dir_all(&dir)
         .map_err(|e| Error::new(format!("create cgroup {}: {e}", dir.display())))?;
 
-    // period = 100ms, quota = cpu * period
-    let period: u64 = 100_000;
-    let quota = (cpu * period as f64).round() as u64;
+    // period = 100ms, quota = cpu * period clamped to the kernel minimum
+    let period = CFS_PERIOD_US;
+    let quota = cpu_quota_us(cpu, period);
     std::fs::write(dir.join("cpu.max"), format!("{quota} {period}"))
         .map_err(|e| Error::new(format!("write cpu.max: {e}")))?;
 
@@ -104,7 +123,7 @@ fn add_process(dir: &std::path::Path, pid: i32) -> Result<()> {
 impl ProcessLimit {
     /// Remove the cpu limit without deleting the cgroup (worker still attached).
     pub fn reset(&self) -> Result<()> {
-        std::fs::write(self.path.join("cpu.max"), "max 100000")
+        std::fs::write(self.path.join("cpu.max"), format!("max {CFS_PERIOD_US}"))
             .map_err(|e| Error::new(format!("reset cpu.max: {e}")))
     }
 
@@ -120,5 +139,48 @@ impl ProcessLimit {
             )));
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{cpu_quota_us, CFS_MIN_QUOTA_US, CFS_PERIOD_US};
+
+    #[test]
+    fn quota_is_clamped_to_kernel_minimum_and_period() {
+        for cpu in [0.001_f64, 0.005, 0.01, 0.5, 1.0] {
+            let quota = cpu_quota_us(cpu, CFS_PERIOD_US);
+            assert!(
+                (CFS_MIN_QUOTA_US..=CFS_PERIOD_US).contains(&quota),
+                "cpu={cpu}: quota={quota} out of [{CFS_MIN_QUOTA_US}, {CFS_PERIOD_US}]"
+            );
+        }
+    }
+
+    #[test]
+    fn sub_millisecond_share_is_floored() {
+        // 0.5% of 100ms is 500us, below the kernel minimum of 1000us.
+        assert_eq!(cpu_quota_us(0.005, CFS_PERIOD_US), CFS_MIN_QUOTA_US);
+        assert_eq!(cpu_quota_us(0.001, CFS_PERIOD_US), CFS_MIN_QUOTA_US);
+    }
+
+    #[test]
+    fn full_and_oversized_shares_are_capped_at_period() {
+        assert_eq!(cpu_quota_us(1.0, CFS_PERIOD_US), CFS_PERIOD_US);
+        assert_eq!(cpu_quota_us(2.0, CFS_PERIOD_US), CFS_PERIOD_US);
+        assert_eq!(cpu_quota_us(f64::INFINITY, CFS_PERIOD_US), CFS_PERIOD_US);
+    }
+
+    #[test]
+    fn ordinary_shares_round_to_expected_quota() {
+        assert_eq!(cpu_quota_us(0.01, CFS_PERIOD_US), 1_000);
+        assert_eq!(cpu_quota_us(0.25, CFS_PERIOD_US), 25_000);
+        assert_eq!(cpu_quota_us(0.5, CFS_PERIOD_US), 50_000);
+    }
+
+    #[test]
+    fn period_constant_is_100ms() {
+        assert_eq!(CFS_PERIOD_US, 100_000);
+        const { assert!(CFS_MIN_QUOTA_US < CFS_PERIOD_US) };
     }
 }
