@@ -319,6 +319,13 @@ UP"的反应**不是一回事**。独占 veth 对（`p2spin0/p2spin1`，实验�
   `cap_bytes`/`cap_packets`/`drop_packets`/`ifdrop_packets`；把"读失败"记成"丢包"会破坏 §2.4 已声明的对外
   口径并让运维把观测错误当成本征损失。原计划 P5-12 的这句话已按 C 的 schema 在 `IMPROVEMENT_PLAN_AUDIT4.md`
   中改写并说明理由。
+* **netns 恢复失败 → 终止 worker（上游 #285）**：进入目标 netns 抓包前会先保存当前线程的
+  netns fd；抓包器创建结束后必须切回原 netns。旧实现恢复失败时只 `log_error!` 后继续，调用线程
+  （即抓包 worker）会**停留在目标 netns 里**：其后所有依赖“原命名空间”的操作（重新打开接口、
+  其它 task、诊断路径）都会在错误的名字空间里静默执行。上游 #285 把该失败提升为不可忽略的错误；
+  Rust 侧现在把它并入 `AfPacketCapturer::new` 的返回：`Ok` 的抓包器被丢弃（RAII 关闭 fd），
+  worker 按既有的“创建失败”路径终止。代价是偶发的 `setns` 失败会让该次 task 创建失败并等待重载，
+  而不是带病继续；收益是不再存在“worker 在错误命名空间继续跑”的静默错误。
 
 `drop_packets` 仍只来自 `getsockopt(PACKET_STATISTICS)` 的 `tp_drops`（§4 采集面语义），退避与空闲等待不改变
 任何计数口径。
