@@ -120,6 +120,12 @@ Two conventions worth knowing before reading:
 
 ### Changed
 
+- **`unix-manager` 的 `select()` 单线程语义**（bead 4mv.3）：`unix_manager.rs` 不再采用
+  “非阻塞 accept + 每客户端一个线程”，改为单线程 `poll()` 事件循环，把监听 socket 与所有客户端
+  放在同一线程内多路复用，并先处理客户端再 accept（对齐 `unix_manager_main` 的顺序）。保留 1.5s
+  不完整命令窗口、5s `SO_SNDTIMEO` 写预算和原有 JSON-RPC 分发；新增 5 个真实 `UnixStream` 测试
+  （并发客户端、分片命令、部分帧超时断开、空闲客户端不被误断、停止读取的客户端在写预算内被丢弃），
+  `parity/fuzz_rpc.sh` 继续与 C oracle **17/17 一致**。
 - Parity/oracle tooling moved out of `cpworker/src/bin` into a new
   `cpworker-parity` crate (P5-29): `cargo build -p cpworker` no longer compiles
   the differential harnesses, the seven `parity/*.sh` callers now use
@@ -444,9 +450,9 @@ The `0.9.x` feature set, plus four audit rounds (AUDIT.md → AUDIT4).
 ### Known limitations
 
 Unported modules and their triggers are tabulated in [PARITY.md §5](PARITY.md)
-(DPDK capturer, reload fingerprint reuse, `unix-manager` select semantics,
-lock-free ring buffer, cgroup v1; explicitly not planned: Wire DI, pprof, cJSON
-first-key semantics, C's VLAN out-of-bounds UB). Reduced-scope `cpdaemon` items
+(DPDK capturer, reload fingerprint reuse, lock-free ring buffer, cgroup v1;
+explicitly not planned: Wire DI, pprof, cJSON first-key semantics, C's VLAN
+out-of-bounds UB). Reduced-scope `cpdaemon` items
 and the CPM TLS gap are in README and [SECURITY.md](SECURITY.md). The
 `recvmsg`-vs-`TPACKET_V3` capture trade-off, and an unexplained capture-plane
 count difference the new live benchmark exposes, are in
