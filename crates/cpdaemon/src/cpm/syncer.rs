@@ -364,3 +364,126 @@ pub fn generate_uuid(uuid_file: &str, uuid_gen_type: &str, env_keys: &[String]) 
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::cpm::client::ClientConfig;
+    use crate::cpm::worker_mgr::{MemoryConfig, PipelineConfig, WorkerConfig};
+    use crate::reslimit::CgroupCfg;
+    use crate::worker_config::{ControlConfig, ControlUnixConfig};
+
+    fn dummy_syncer() -> Arc<Syncer> {
+        let client =
+            HttpClient::new("http://127.0.0.1:1/", ClientConfig::default()).expect("http client");
+        let wc = WorkerConfig {
+            pid_file: String::new(),
+            config_file: String::new(),
+            executable: String::new(),
+            env: Default::default(),
+            work_dir: None,
+            cgroup_cfg: CgroupCfg::default(),
+            cpu_affinity: String::new(),
+            log_level: "INFO".into(),
+            control: ControlConfig {
+                ty: "unix".into(),
+                unix: Some(ControlUnixConfig {
+                    path: "/tmp/cpdaemon-syncer-test.sock".into(),
+                }),
+            },
+            execution_model: "rtc".into(),
+            pipeline: PipelineConfig::default(),
+            update_policy: "restart".into(),
+            memory: MemoryConfig::default(),
+        };
+        let mgr = WorkerManager::new(wc, Tool::default());
+        Syncer::new(
+            client,
+            mgr,
+            Tool::default(),
+            RegConfig::default(),
+            SyncerConfig::default(),
+        )
+    }
+
+    #[test]
+    fn config_defaults_match_upstream() {
+        let c = SyncerConfig::default();
+        assert_eq!(c.reg_retry_interval, Duration::from_secs(5));
+        assert_eq!(c.sync_strategy_interval, Duration::from_secs(15));
+        assert_eq!(c.sync_metric_interval, Duration::from_secs(15));
+        assert_eq!(c.stop_worker_after_reg_fail_minutes, 30);
+    }
+
+    #[test]
+    fn sync_once_is_inert_before_registration() {
+        let s = dummy_syncer();
+        // daemon_id starts at 0, so neither sync may touch the network.
+        s.sync_strategy_once().expect("strategy before register");
+        s.sync_metrics_once().expect("metrics before register");
+    }
+
+    #[test]
+    fn sync_log_accessor_exposes_the_shared_buffer() {
+        let s = dummy_syncer();
+        let log = s.sync_log();
+        log.lock().write(1, 0, "INFO", "hello".into());
+        assert_eq!(log.lock().clear().len(), 1);
+    }
+
+    #[test]
+    fn uuid_env_requires_keys_and_non_empty_values() {
+        assert!(generate_uuid("", "env", &[]).is_err());
+
+        let key = format!("CPDAEMON_UUID_ENV_{}", std::process::id());
+        std::env::remove_var(&key);
+        assert!(generate_uuid("", "env", std::slice::from_ref(&key)).is_err());
+
+        std::env::set_var(&key, "value1");
+        let a = generate_uuid("", "env", std::slice::from_ref(&key)).expect("env uuid");
+        let b = generate_uuid("", "env", std::slice::from_ref(&key)).expect("env uuid");
+        assert_eq!(a, b, "env-derived uuid must be deterministic");
+        assert_eq!(a.len(), 36);
+
+        std::env::set_var(&key, "");
+        assert!(generate_uuid("", "env", std::slice::from_ref(&key)).is_err());
+        std::env::remove_var(&key);
+    }
+
+    #[test]
+    fn uuid_prefers_a_persisted_file_else_random() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("uuid");
+        std::fs::write(&path, "  persisted-uuid\n").expect("write uuid file");
+        assert_eq!(
+            generate_uuid(path.to_str().unwrap(), "random", &[]).unwrap(),
+            "persisted-uuid"
+        );
+
+        // A blank file falls back to a fresh random UUID.
+        std::fs::write(&path, "   \n").expect("write blank");
+        let random = generate_uuid(path.to_str().unwrap(), "random", &[]).unwrap();
+        assert_eq!(random.len(), 36);
+        assert_ne!(random, "persisted-uuid");
+
+        // A missing file falls back too.
+        let missing = generate_uuid("/nonexistent/uuid-file", "random", &[]).unwrap();
+        assert_eq!(missing.len(), 36);
+        assert_ne!(missing, random);
+    }
+
+    #[test]
+    fn enumerate_nics_filters_by_name_and_reports_inet_addresses() {
+        assert!(
+            enumerate_nics(&["definitely-not-an-interface-xyz".to_string()]).is_empty(),
+            "a non-matching filter must yield no interfaces"
+        );
+        let lo = enumerate_nics(&["lo".to_string()]);
+        assert_eq!(lo.len(), 1);
+        assert_eq!(lo[0].name, "lo");
+        assert!(
+            !lo[0].inet_addresses.is_empty(),
+            "loopback must report an inet address"
+        );
+    }
+}

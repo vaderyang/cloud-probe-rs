@@ -288,3 +288,212 @@ fn log_worker_config(cfg: &Config) {
         crate::log_info!("worker config config={s}")
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::os::unix::fs::PermissionsExt;
+
+    const TEST_BODY: &str = r#"{"log_level":"info","execution_model":"rtc","control":{"type":"unix","unix":{"path":"/tmp/x.sock"}},"tasks":[]}"#;
+
+    /// Write an executable shell script and return its path.
+    ///
+    /// `prewarm` makes the script exit immediately so the helper can force the
+    /// inode to be executable without starting the long-lived process it is
+    /// really meant to launch. This avoids the `ETXTBSY` race with forks from
+    /// other tests while the freshly written descriptor is still held.
+    fn script(dir: &std::path::Path, name: &str, body: &str) -> String {
+        let p = dir.join(name);
+        std::fs::write(
+            &p,
+            format!("#!/bin/sh\n[ \"$1\" = prewarm ] && exit 0\n{body}\n"),
+        )
+        .expect("write script");
+        let mut perms = std::fs::metadata(&p).expect("stat script").permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(&p, perms).expect("chmod script");
+        let deadline = std::time::Instant::now() + Duration::from_secs(2);
+        loop {
+            match std::process::Command::new(&p).arg("prewarm").output() {
+                Ok(_) => break,
+                Err(_) if std::time::Instant::now() < deadline => {
+                    std::thread::sleep(Duration::from_millis(5));
+                }
+                Err(e) => panic!("script {} not executable: {e}", p.display()),
+            }
+        }
+        p.to_string_lossy().into_owned()
+    }
+
+    fn config() -> Config {
+        serde_json::from_str(TEST_BODY).expect("parse config")
+    }
+
+    fn exec(dir: &std::path::Path, executable: String) -> ExecConfig {
+        ExecConfig {
+            pid_file: dir.join("worker.pid").to_string_lossy().into_owned(),
+            executable,
+            env: HashMap::new(),
+            work_dir: None,
+            config_file: dir.join("worker.json").to_string_lossy().into_owned(),
+            cgroup_cfg: CgroupCfg::default(),
+        }
+    }
+
+    #[test]
+    fn accessors_report_initial_state() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let w = Worker::new("n", exec(dir.path(), "/bin/true".into()));
+        assert_eq!(w.name(), "n");
+        assert_eq!(
+            w.config_file(),
+            dir.path().join("worker.json").to_str().unwrap()
+        );
+        assert_eq!(w.pid(), 0);
+        assert!(w.start_time().is_none());
+        // pid <= 0 is reported dead without probing the OS.
+        assert!(!w.is_alive());
+        // A SIGHUP without a worker is a no-op, not an error.
+        w.reload_config().expect("reload without pid");
+        // A cpu request without a running process is a no-op too.
+        w.update_res_limit(ResLimit {
+            cpu: Some(1.0),
+            mem: Some(128),
+        })
+        .expect("limit without pid");
+        w.update_res_limit(ResLimit {
+            cpu: None,
+            mem: None,
+        })
+        .expect("clear limit without pid");
+    }
+
+    #[test]
+    fn start_fails_when_config_path_is_a_directory() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let as_dir = dir.path().join("config-dir");
+        std::fs::create_dir(&as_dir).expect("mkdir");
+        let mut e = exec(dir.path(), "/bin/true".into());
+        e.config_file = as_dir.to_string_lossy().into_owned();
+        let w = Worker::new("n", e);
+        let err = w.start(&config()).expect_err("write must fail");
+        assert!(
+            err.to_string().contains("create worker config file"),
+            "unexpected error: {err}"
+        );
+        assert_eq!(w.pid(), 0, "a failed start must not record a pid");
+    }
+
+    #[test]
+    fn start_records_process_and_stop_terminates_it() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        // Ignore SIGHUP so the reload probe cannot kill our stand-in worker.
+        let exe = script(dir.path(), "fake.sh", "trap '' HUP\nexec sleep 30");
+        let pid_path = dir.path().join("worker.pid");
+        let mut e = exec(dir.path(), exe);
+        e.pid_file = pid_path.to_string_lossy().into_owned();
+        e.env = HashMap::from([("FAKE_ENV".to_string(), "1".to_string())]);
+        e.work_dir = Some(dir.path().to_string_lossy().into_owned());
+        let w = Worker::new("sup", e);
+
+        w.start(&config()).expect("start");
+        let pid = w.pid();
+        assert!(pid > 0, "pid must be recorded");
+        assert!(w.is_alive(), "the stand-in process must be alive");
+        assert!(w.start_time().is_some(), "start time must be recorded");
+        assert_eq!(
+            std::fs::read_to_string(&pid_path)
+                .expect("pid file")
+                .trim()
+                .parse::<i32>()
+                .expect("pid int"),
+            pid
+        );
+
+        // A second start is rejected rather than leaking a process.
+        let err = w.start(&config()).expect_err("double start");
+        assert!(
+            err.to_string().contains("already running"),
+            "unexpected error: {err}"
+        );
+
+        // Reload sends SIGHUP; the script ignores it, so the process survives.
+        w.reload_config().expect("reload");
+        assert!(w.is_alive(), "reload must not kill the worker");
+        w.update_config(&config()).expect("rewrite config");
+
+        w.stop();
+        assert_eq!(w.pid(), 0);
+        assert!(w.start_time().is_none());
+        assert!(!pid_path.exists(), "pid file must be removed on stop");
+    }
+
+    #[test]
+    fn start_survives_an_unwritable_pid_file() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let exe = script(dir.path(), "fake.sh", "exec sleep 30");
+        let mut e = exec(dir.path(), exe);
+        // Parent directory does not exist: the pid-file write fails but the
+        // worker must still start (upstream logs and continues).
+        e.pid_file = dir
+            .path()
+            .join("missing")
+            .join("worker.pid")
+            .to_string_lossy()
+            .into_owned();
+        let w = Worker::new("nopid", e);
+        w.start(&config()).expect("start despite pid file error");
+        assert!(w.pid() > 0);
+        w.stop();
+    }
+
+    #[test]
+    fn is_alive_reports_dead_after_the_process_exits() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        // `true` exits immediately; the waiter thread reaps it, then is_alive()
+        // must observe the ESRCH from the OS.
+        let w = Worker::new("short", exec(dir.path(), "/bin/true".into()));
+        w.start(&config()).expect("start");
+        assert!(w.pid() > 0);
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while w.is_alive() && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert!(
+            !w.is_alive(),
+            "an exited process must not be reported alive"
+        );
+        w.stop();
+    }
+
+    #[test]
+    fn shared_wait_timeout_blocks_until_done() {
+        let s = Shared::new();
+        let began = Instant::now();
+        assert!(!s.wait_timeout(Duration::from_millis(200)));
+        assert!(began.elapsed() >= Duration::from_millis(150));
+        s.mark_done();
+        assert!(s.wait_timeout(Duration::from_millis(200)));
+    }
+
+    #[test]
+    fn stop_force_kills_a_process_that_ignores_sigint() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        // No `exec`: the shell keeps ignoring SIGINT and stays alive until the
+        // SIGKILL fallback fires after the 10s grace period.
+        let exe = script(dir.path(), "stubborn.sh", "trap '' INT\nexec sleep 30");
+        let w = Worker::new("stubborn", exec(dir.path(), exe));
+        w.start(&config()).expect("start");
+        assert!(w.is_alive());
+        // Give the shell a moment to install its SIGINT trap before probing the
+        // grace-period path; otherwise the default disposition would kill it.
+        std::thread::sleep(Duration::from_millis(200));
+        let began = Instant::now();
+        w.stop();
+        assert!(
+            began.elapsed() >= Duration::from_secs(10),
+            "stop must wait out the SIGINT grace period before SIGKILL"
+        );
+        assert_eq!(w.pid(), 0);
+    }
+}

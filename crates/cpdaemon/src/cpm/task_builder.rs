@@ -700,7 +700,38 @@ pub fn parse_startup(startup: &str, ignore_unknown: bool) -> Result<StartupArgs>
 mod tests {
     use super::*;
     use crate::tool::Tool;
-    use crate::worker_config::CAPTURER_TYPE_LIBPCAP;
+    use crate::worker_config::{CAPTURER_TYPE_LIBPCAP, OUTPUT_TYPE_VXLAN};
+    use serde_json::json;
+
+    /// Parse a partial strategy JSON into a `StrategyEntry`.
+    fn strategy(v: serde_json::Value) -> StrategyEntry {
+        serde_json::from_value(v).expect("strategy json")
+    }
+
+    /// Write an executable shell script and return its path.
+    ///
+    /// Executing a freshly written script races with the forks other test
+    /// threads perform: the kernel returns `ETXTBSY` while a forked child still
+    /// holds the write descriptor. Pre-warm the inode until it is executable.
+    fn script(dir: &std::path::Path, name: &str, body: &str) -> String {
+        use std::os::unix::fs::PermissionsExt;
+        let p = dir.join(name);
+        std::fs::write(&p, body).expect("write script");
+        let mut perms = std::fs::metadata(&p).expect("stat").permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(&p, perms).expect("chmod");
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        loop {
+            match std::process::Command::new(&p).arg("prewarm").output() {
+                Ok(_) => break,
+                Err(_) if std::time::Instant::now() < deadline => {
+                    std::thread::sleep(std::time::Duration::from_millis(5));
+                }
+                Err(e) => panic!("script {} not executable: {e}", p.display()),
+            }
+        }
+        p.to_string_lossy().into_owned()
+    }
 
     const STRATEGY1: &str = r#"{
         "id":3541,"daemonId":3277,"strategy":[{"sliceLen":0,"startup":"-s 65535 -t 0 --zmq_hwm 2000",
@@ -900,5 +931,373 @@ mod tests {
             assert_eq!(id, want_id);
             assert_eq!(nics, want_nics);
         }
+    }
+
+    #[test]
+    fn decode_container_id_empty_input() {
+        assert_eq!(decode_container_id("_"), (String::new(), Vec::new()));
+        assert_eq!(decode_container_id(""), (String::new(), Vec::new()));
+    }
+
+    #[test]
+    fn add_strategy_rejects_unsupported_packet_channel() {
+        let mut tb = WorkerTaskBuilder::new(Tool::default(), "u".into(), vec![], 256);
+        tb.add_strategy(&strategy(json!({
+            "packetChannelType": "BOGUS",
+            "interfaceNames": ["eth0"]
+        })));
+        let (tasks, warnings) = tb.build();
+        assert!(tasks.is_empty());
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0]
+            .to_string()
+            .contains("packet channel type not supported: BOGUS"));
+    }
+
+    #[test]
+    fn add_strategy_container_resolves_host_pid_and_netns() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let tool = Tool {
+            get_container_host_pid_script: script(dir.path(), "pid.sh", "#!/bin/sh\nprintf 4242\n"),
+            ..Default::default()
+        };
+        let mut tb = WorkerTaskBuilder::new(tool, "u".into(), vec![], 256);
+        tb.add_strategy(&strategy(json!({
+            "packetChannelType": "ZMQ",
+            "address": "127.0.0.1",
+            "port": 5555,
+            "startup": "-s 1024",
+            "containerIds": ["abc123_eth1", "docker://def456_eth2_eth3"]
+        })));
+        let (tasks, warnings) = tb.build();
+        assert!(warnings.is_empty(), "{warnings:?}");
+        assert_eq!(tasks.len(), 3);
+        for t in &tasks {
+            let lp = t.capturer.libpcap.as_ref().unwrap();
+            assert_eq!(lp.netns.as_deref(), Some("/proc/4242/ns/net"));
+            assert_eq!(lp.snaplen, Some(1024));
+        }
+        let ifaces: Vec<&str> = tasks
+            .iter()
+            .map(|t| t.capturer.libpcap.as_ref().unwrap().interface.as_str())
+            .collect();
+        assert_eq!(ifaces, vec!["eth1", "eth2", "eth3"]);
+    }
+
+    #[test]
+    fn add_strategy_container_warns_on_empty_id_and_pid_failure() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let tool = Tool {
+            get_container_host_pid_script: script(
+                dir.path(),
+                "bad-pid.sh",
+                "#!/bin/sh\nprintf not-a-pid\n",
+            ),
+            ..Default::default()
+        };
+        let mut tb = WorkerTaskBuilder::new(tool, "u".into(), vec![], 256);
+        tb.add_strategy(&strategy(json!({
+            "packetChannelType": "ZMQ",
+            "address": "127.0.0.1",
+            "port": 5555,
+            "containerIds": ["_", "abc123_eth1"]
+        })));
+        let (tasks, warnings) = tb.build();
+        assert!(tasks.is_empty());
+        assert_eq!(warnings.len(), 2);
+        assert!(warnings[0].to_string().contains("invalid container id"));
+        assert!(warnings[1].to_string().contains("host process id failed"));
+    }
+
+    #[test]
+    fn add_strategy_instance_uses_first_active_instance_nic() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let tool = Tool {
+            get_kvm_instance_nics_script: script(
+                dir.path(),
+                "nics.sh",
+                "#!/bin/sh\nprintf 'vnet0\\nvnet1\\n'\n",
+            ),
+            ..Default::default()
+        };
+        let mut tb = WorkerTaskBuilder::new(tool, "u".into(), vec!["vm1".into()], 256);
+        tb.add_strategy(&strategy(json!({
+            "packetChannelType": "ZMQ",
+            "address": "127.0.0.1",
+            "port": 5555,
+            "instanceNames": ["vm1"]
+        })));
+        let (tasks, warnings) = tb.build();
+        assert!(warnings.is_empty(), "{warnings:?}");
+        assert_eq!(tasks.len(), 1);
+        let lp = tasks[0].capturer.libpcap.as_ref().unwrap();
+        assert_eq!(lp.interface, "vnet0", "only the first NIC is bound");
+        assert!(lp.netns.is_none(), "KVM tasks run in the host netns");
+    }
+
+    #[test]
+    fn add_strategy_instance_warns_for_missing_empty_or_failing_lookups() {
+        let unknown = strategy(json!({
+            "packetChannelType": "ZMQ",
+            "address": "a",
+            "port": 1,
+            "instanceNames": ["ghost"]
+        }));
+        let mut tb = WorkerTaskBuilder::new(Tool::default(), "u".into(), vec![], 256);
+        tb.add_strategy(&unknown);
+        let (tasks, warnings) = tb.build();
+        assert!(tasks.is_empty());
+        assert!(warnings[0]
+            .to_string()
+            .contains("instance name not found: ghost"));
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let empty_tool = Tool {
+            get_kvm_instance_nics_script: script(dir.path(), "empty.sh", "#!/bin/sh\nexit 0\n"),
+            ..Default::default()
+        };
+        let mut tb = WorkerTaskBuilder::new(empty_tool, "u".into(), vec!["vm2".into()], 256);
+        tb.add_strategy(&strategy(json!({
+            "packetChannelType": "ZMQ",
+            "address": "a",
+            "port": 1,
+            "instanceNames": ["vm2"]
+        })));
+        let (tasks, warnings) = tb.build();
+        assert!(tasks.is_empty());
+        assert!(warnings[0]
+            .to_string()
+            .contains("instance vm2 has no interfaces"));
+
+        let fail_tool = Tool {
+            get_kvm_instance_nics_script: script(
+                dir.path(),
+                "fail.sh",
+                "#!/bin/sh\necho boom >&2\nexit 1\n",
+            ),
+            ..Default::default()
+        };
+        let mut tb = WorkerTaskBuilder::new(fail_tool, "u".into(), vec!["vm3".into()], 256);
+        tb.add_strategy(&strategy(json!({
+            "packetChannelType": "ZMQ",
+            "address": "a",
+            "port": 1,
+            "instanceNames": ["vm3"]
+        })));
+        let (tasks, warnings) = tb.build();
+        assert!(tasks.is_empty());
+        assert!(warnings[0].to_string().contains("failed"));
+    }
+
+    #[test]
+    fn nofilter_validation_depends_on_channel_and_bind_device() {
+        // Containers are exempt: the capture happens in the container netns.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let tool = Tool {
+            get_container_host_pid_script: script(dir.path(), "pid.sh", "#!/bin/sh\nprintf 7\n"),
+            ..Default::default()
+        };
+        let mut tb = WorkerTaskBuilder::new(tool, "u".into(), vec![], 256);
+        tb.add_strategy(&strategy(json!({
+            "packetChannelType": "GRE",
+            "address": "1.1.1.1",
+            "containerIds": ["c1_eth1"],
+            "startup": "--bind_device=eth1 --nofilter"
+        })));
+        let (tasks, warnings) = tb.build();
+        assert!(warnings.is_empty(), "{warnings:?}");
+        assert_eq!(
+            tasks[0]
+                .capturer
+                .libpcap
+                .as_ref()
+                .unwrap()
+                .not_filter_output_hosts,
+            Some(true)
+        );
+
+        // ZMQ is not a tunnel channel, so `nofilter` is rejected for interfaces.
+        let mut tb = WorkerTaskBuilder::new(Tool::default(), "u".into(), vec![], 256);
+        tb.add_strategy(&strategy(json!({
+            "packetChannelType": "ZMQ",
+            "address": "1.1.1.1",
+            "port": 1,
+            "interfaceNames": ["eth0"],
+            "startup": "--nofilter"
+        })));
+        let (_, warnings) = tb.build();
+        assert!(warnings[0].to_string().contains("nofilter only allowed"));
+
+        // GRE with bind_device equal to the snoop interface is also rejected.
+        let mut tb = WorkerTaskBuilder::new(Tool::default(), "u".into(), vec![], 256);
+        tb.add_strategy(&strategy(json!({
+            "packetChannelType": "GRE",
+            "address": "1.1.1.1",
+            "interfaceNames": ["eth0"],
+            "startup": "--bind_device=eth0 --nofilter"
+        })));
+        let (_, warnings) = tb.build();
+        assert!(warnings[0].to_string().contains("nofilter only allowed"));
+    }
+
+    #[test]
+    fn req_pattern_auto_and_positive_slice_len_are_applied() {
+        let mut tb = WorkerTaskBuilder::new(Tool::default(), "u".into(), vec![], 256);
+        tb.add_strategy(&strategy(json!({
+            "packetChannelType": "ZMQ",
+            "address": "1.1.1.1",
+            "port": 1,
+            "interfaceNames": ["eth0"],
+            "reqPatternType": "AUTO",
+            "sliceLen": 100
+        })));
+        let (tasks, warnings) = tb.build();
+        assert!(warnings.is_empty(), "{warnings:?}");
+        let rp = tasks[0].req_pattern.as_ref().unwrap();
+        assert_eq!(rp.ty, REQ_PATTERN_TYPE_AUTO);
+        assert!(rp.custom.is_none(), "AUTO carries no custom pattern");
+        assert_eq!(tasks[0].outputs[0].slice, Some(100));
+    }
+
+    #[test]
+    fn vxlan_v1_vni1_and_packet_split() {
+        let mut tb = WorkerTaskBuilder::new(Tool::default(), "u".into(), vec![], 256);
+        tb.add_strategy(&strategy(json!({
+            "packetChannelType": "VXLAN",
+            "address": "10.0.0.1",
+            "port": 4789,
+            "capTime": 1,
+            "apiVersion": "v1",
+            "hasServiceTag": true,
+            "serviceTag": 321,
+            "hasPacketSplit": true,
+            "packetSplitBytes": 1500,
+            "recalculateChecksum": true,
+            "interfaceNames": ["eth0"]
+        })));
+        tb.add_strategy(&strategy(json!({
+            "packetChannelType": "VXLAN",
+            "address": "10.0.0.2",
+            "interfaceNames": ["eth1"]
+        })));
+        let (tasks, warnings) = tb.build();
+        assert!(warnings.is_empty(), "{warnings:?}");
+        assert_eq!(tasks.len(), 2);
+        assert_eq!(tasks[0].outputs[0].ty, OUTPUT_TYPE_VXLAN);
+        let vx = tasks[0].outputs[0].vxlan.as_ref().unwrap();
+        assert_eq!(vx.vni1, Some(321), "v1 encodes the service tag in VNI1");
+        assert_eq!(vx.capture_time, Some(true));
+        let split = vx.split.as_ref().unwrap();
+        assert_eq!(split.max_payload_size, Some(1500));
+        assert_eq!(split.recalculate_checksum, Some(true));
+        // No service tag / no split -> the reserved VNI1 and no split config.
+        let vx2 = tasks[1].outputs[0].vxlan.as_ref().unwrap();
+        assert_eq!(vx2.vni1, Some(0xffffff));
+        assert!(vx2.split.is_none());
+    }
+
+    #[test]
+    fn vxlan_v2_vni2_observation_and_extension_tag() {
+        let mut tb = WorkerTaskBuilder::new(Tool::default(), "u".into(), vec![], 256);
+        tb.add_strategy(&strategy(json!({
+            "packetChannelType": "VXLAN",
+            "address": "10.0.0.1",
+            "apiVersion": "v2",
+            "hasObservationTag": true,
+            "observationDomainIds": [23],
+            "observationPointIds": [6],
+            "hasExtensionFlag": true,
+            "extensionFlag": 1,
+            "interfaceNames": ["eth0"]
+        })));
+        tb.add_strategy(&strategy(json!({
+            "packetChannelType": "VXLAN",
+            "address": "10.0.0.2",
+            "apiVersion": "v2",
+            "interfaceNames": ["eth1"]
+        })));
+        let (tasks, warnings) = tb.build();
+        assert!(warnings.is_empty(), "{warnings:?}");
+        let v1 = tasks[0].outputs[0].vxlan.as_ref().unwrap();
+        assert_eq!(v1.vni1, None, "v2 uses VNI2, not VNI1");
+        let want = Vni2Tag {
+            resource_point_direction: 0,
+            observation_point_id: 6,
+            extension_flag: 1,
+            observation_domain_id: 23,
+        }
+        .encode();
+        assert_eq!(v1.vni2, Some(want));
+        // Without tags the observation id/point default to 1.
+        let v2 = tasks[1].outputs[0].vxlan.as_ref().unwrap();
+        let default = Vni2Tag {
+            resource_point_direction: 0,
+            observation_point_id: 1,
+            extension_flag: 0,
+            observation_domain_id: 1,
+        }
+        .encode();
+        assert_eq!(v2.vni2, Some(default));
+    }
+
+    #[test]
+    fn new_task_config_surfaces_missing_required_output_fields() {
+        let mut tb = WorkerTaskBuilder::new(Tool::default(), "u".into(), vec![], 256);
+        tb.add_strategy(&strategy(json!({
+            "packetChannelType": "ZMQ",
+            "address": "a"
+        })));
+        let (tasks, warnings) = tb.build();
+        assert!(tasks.is_empty());
+        assert!(warnings[0].to_string().contains("missing zmq.port"));
+
+        let mut tb = WorkerTaskBuilder::new(Tool::default(), "u".into(), vec![], 256);
+        tb.add_strategy(&strategy(json!({
+            "packetChannelType": "FILE",
+            "interfaceNames": ["eth0"]
+        })));
+        let (tasks, warnings) = tb.build();
+        assert!(tasks.is_empty());
+        assert!(warnings[0].to_string().contains("missing dumpDir"));
+    }
+
+    #[test]
+    fn file_channel_reports_a_dump_dir_creation_failure() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let not_a_dir = dir.path().join("file");
+        std::fs::write(&not_a_dir, b"x").expect("write file");
+        let mut tb = WorkerTaskBuilder::new(Tool::default(), "u".into(), vec![], 256);
+        tb.add_strategy(&strategy(json!({
+            "packetChannelType": "FILE",
+            "interfaceNames": ["eth0"],
+            "dumpDir": not_a_dir.to_string_lossy()
+        })));
+        let (tasks, warnings) = tb.build();
+        assert!(tasks.is_empty());
+        assert!(warnings[0].to_string().contains("create dump dir failed"));
+    }
+
+    #[test]
+    fn parse_startup_edge_cases() {
+        // Explicit bool values and short inline values.
+        let a = parse_startup("--priority=false --nofilter=true -s=65535", false).unwrap();
+        assert_eq!(a.priority, Some(false));
+        assert_eq!(a.nofilter, Some(true));
+        assert_eq!(a.snaplen, Some(65535));
+
+        // Missing arguments are errors, not silent defaults.
+        assert!(parse_startup("--snaplen", false).is_err());
+        assert!(parse_startup("--bind_device", false).is_err());
+        assert!(parse_startup("--snaplen not-an-int", false).is_err());
+
+        // Unknown shorthand fails unless the caller asks to stop early.
+        assert!(parse_startup("-z", false).is_err());
+        let a = parse_startup("-s 10 -z --cpu 2", true).unwrap();
+        assert_eq!(a.snaplen, Some(10));
+        assert!(a.cpu.is_none(), "parsing stops at the first unknown flag");
+
+        // Positional arguments are skipped.
+        let a = parse_startup("eth0 --snaplen 10", false).unwrap();
+        assert_eq!(a.snaplen, Some(10));
     }
 }
