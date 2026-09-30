@@ -173,11 +173,24 @@ impl Default for CpmClient {
     }
 }
 
+/// `cpm.client.tls`. Port of the PKCS#12 key set in
+/// `cpdaemon/cmd/internal/asm/key.go`, plus the safe-by-default
+/// `insecure_skip_verify` switch (upstream #232; the Go daemon hard-codes
+/// `InsecureSkipVerify: true` and has no such key).
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(default)]
 pub struct CpmClientTls {
     pub pkcs12_cert_file: String,
     pub pkcs12_cert_password: String,
+    /// Skip verifying the CPM server's TLS certificate.
+    ///
+    /// Defaults to `false`: the daemon verifies the server certificate, so a
+    /// man-in-the-middle on the CPM channel cannot impersonate the control
+    /// plane with a self-signed certificate. This deliberately diverges from
+    /// the Go oracle, which always skips verification (see `PARITY.md` §2.7).
+    /// Set it to `true` only for test/legacy deployments that cannot present a
+    /// trusted certificate.
+    pub insecure_skip_verify: bool,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -412,6 +425,34 @@ mod tests {
             ""
         );
         assert_eq!(http_port(r#"{"listen":{"http":{"port":""}}}"#).unwrap(), "");
+    }
+
+    /// Upstream #232: server-certificate verification must be the default, and
+    /// the `insecure_skip_verify` switch must be what turns it off.
+    #[test]
+    fn cpm_client_tls_verification_is_on_by_default() {
+        let cfg: DaemonConfig = serde_json::from_str("{\"cpm\":{\"base_url\":\"https://cpm\"}}")
+            .expect("parse minimal config");
+        assert!(
+            !cfg.cpm.client.tls.insecure_skip_verify,
+            "default must verify the CPM server certificate"
+        );
+
+        let cfg: DaemonConfig = serde_json::from_str(
+            "{\"cpm\":{\"client\":{\"tls\":{\"insecure_skip_verify\":true}}}}",
+        )
+        .expect("parse explicit skip");
+        assert!(cfg.cpm.client.tls.insecure_skip_verify);
+
+        // The existing PKCS#12 fields must keep parsing alongside the new key.
+        let cfg: DaemonConfig = serde_json::from_str(
+            "{\"cpm\":{\"client\":{\"tls\":{\"pkcs12_cert_file\":\"/c.p12\",\
+             \"pkcs12_cert_password\":\"s3cret\",\"insecure_skip_verify\":false}}}}",
+        )
+        .expect("parse pkcs12 + skip");
+        assert_eq!(cfg.cpm.client.tls.pkcs12_cert_file, "/c.p12");
+        assert_eq!(cfg.cpm.client.tls.pkcs12_cert_password, "s3cret");
+        assert!(!cfg.cpm.client.tls.insecure_skip_verify);
     }
 
     #[test]

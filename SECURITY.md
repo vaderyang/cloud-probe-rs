@@ -103,15 +103,23 @@ surface, not as tuning advice:
   over TCP; do not export it with a socket proxy.
 * `cpdaemon`'s health endpoint binds `0.0.0.0:<listen.http.port>` (default 9022)
   when `listen.http.address` is empty. Set it to a loopback or management address.
-* **Known gap:** the CPM HTTP client sets `danger_accept_invalid_certs(true)`
-  unconditionally (`crates/cpdaemon/src/main.rs`, `cpm/client.rs`), and the
-  daemon's PKCS#12 client-certificate support is **not ported**. This mirrors the
-  Go daemon, which builds `tls.Config{InsecureSkipVerify: true}`
-  (`cmd/internal/asm/provider.go`). Until mutual TLS is implemented, restrict the
-  CPM channel at the network layer: a dedicated management network/VLAN, or a
-  local reverse proxy that validates the upstream certificate. Treat the CPM as an
-  input source in your own threat model - its responses drive task creation and
-  BPF expressions on the probe.
+* **CPM server-certificate verification is on by default (upstream #232).**
+  `cpdaemon` verifies the certificate the CPM presents, so a man-in-the-middle
+  cannot impersonate the control plane with a self-signed certificate. The Go
+  oracle hard-codes `tls.Config{InsecureSkipVerify: true}` and has no switch; this
+  port deliberately diverges and verifies by default (see `PARITY.md` §2.7).
+  Point `ca-certificates` at your CA (or set `SSL_CERT_FILE`) so the CPM's
+  certificate chains to a trusted root. Only if that is impossible should you set
+  `cpm.client.tls.insecure_skip_verify: true`, which restores the MITM risk and is
+  intended for test/legacy deployments.
+* **Known gap: mutual TLS (PKCS#12 client certificates) is not ported.** The keys
+  `cpm.client.tls.pkcs12_cert_file` / `pkcs12_cert_password` parse but are not yet
+  wired to reqwest/rustls (no built-in PKCS#12 decoder). Until then the CPM cannot
+  authenticate the probe with a client certificate; tracked as bead
+  `cloud-probe-rs-ryg.2`. Network-layer restrictions (dedicated management
+  network/VLAN, or a local reverse proxy that validates the upstream certificate)
+  still apply. Treat the CPM as an input source in your own threat model - its
+  responses drive task creation and BPF expressions on the probe.
 * `dockerpid`/`cripid` are invoked as helpers and parse container runtime state;
   they need read access to the Docker socket / CRI endpoint and nothing else.
 

@@ -304,6 +304,21 @@ Two conventions worth knowing before reading:
   this repository; `crates/cpworker/examples/live_null.json` and
   `pcap_file_replay.json` are now committed and were run.
 
+### Security
+
+- **CPM server-certificate verification is now on by default** (upstream
+  [#232](https://github.com/Netis/cloud-probe/issues/232)). The Go daemon builds
+  `tls.Config{InsecureSkipVerify: true}` unconditionally, so any MITM on the CPM
+  channel could impersonate the control plane and drive task creation / BPF
+  expressions. `cpdaemon` now verifies by default and only skips verification
+  when `cpm.client.tls.insecure_skip_verify: true` is set explicitly
+  (`config -> ClientConfig::from_cpm_client -> reqwest danger_accept_invalid_certs`).
+  This is a deliberate divergence from the oracle, recorded in `PARITY.md` §2.7
+  and `SECURITY.md`. Proven by `crates/cpdaemon/tests/cpm_tls_verify.rs`, which
+  drives a real self-signed TLS server and asserts the default client fails the
+  handshake while the opt-out succeeds. PKCS#12/mTLS remains a separate
+  follow-up (`cloud-probe-rs-ryg.2`).
+
 ## [0.9.0] - 2026-09-27
 
 The `0.9.x` feature set, plus four audit rounds (AUDIT.md → AUDIT4).

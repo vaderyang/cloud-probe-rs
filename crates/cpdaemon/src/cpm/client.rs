@@ -1,13 +1,16 @@
 //! HTTP client for the CPM API. Port of `cpdaemon/pkg/cpm/client.go`.
 //!
 //! Note: PKCS#12 client-certificate loading is not ported (reqwest/rustls has
-//! no built-in PKCS#12 decoder without extra crates). Server TLS verification
-//! can be disabled via configuration, matching the Go default.
+//! no built-in PKCS#12 decoder without extra crates); that is tracked as a
+//! separate follow-up (bead `cloud-probe-rs-ryg.2`). Server TLS verification is
+//! **on by default** and can only be disabled explicitly via
+//! `cpm.client.tls.insecure_skip_verify` (upstream #232).
 
 use reqwest::Url;
 use serde::Deserialize;
 
 use super::models::*;
+use crate::config::{CpmClient, DaemonConfig};
 use crate::error::{Error, Result};
 
 #[derive(Debug, Clone)]
@@ -20,7 +23,24 @@ impl Default for ClientConfig {
     fn default() -> Self {
         ClientConfig {
             timeout: std::time::Duration::from_secs(15),
-            insecure_skip_verify: true,
+            // Safe by default: verify the server certificate. The Go oracle
+            // hard-codes `InsecureSkipVerify: true`; that is upstream #232.
+            insecure_skip_verify: false,
+        }
+    }
+}
+
+impl ClientConfig {
+    /// Map the parsed `cpm.client` configuration onto the HTTP client's config.
+    ///
+    /// This is the single place where
+    /// `cpm.client.tls.insecure_skip_verify` reaches the client, so the
+    /// security decision is a pure function that can be tested without a
+    /// network (and it keeps `main.rs` from re-deriving it).
+    pub fn from_cpm_client(c: &CpmClient) -> Self {
+        ClientConfig {
+            timeout: DaemonConfig::parse_duration(&c.timeout, std::time::Duration::from_secs(15)),
+            insecure_skip_verify: c.tls.insecure_skip_verify,
         }
     }
 }
@@ -154,4 +174,40 @@ fn check_body_error(status_code: u16, body: &[u8]) -> Result<()> {
         )));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn cpm_client(json: &str) -> CpmClient {
+        serde_json::from_str(json).expect("parse cpm.client")
+    }
+
+    /// Upstream #232: the default client config must verify certificates.
+    #[test]
+    fn default_client_config_verifies_certificates() {
+        assert!(!ClientConfig::default().insecure_skip_verify);
+    }
+
+    /// The config -> ClientConfig mapping is a pure function; pin its decision
+    /// on both the default and the explicit opt-out.
+    #[test]
+    fn cpm_client_tls_switch_maps_to_client_config() {
+        let cfg = ClientConfig::from_cpm_client(&cpm_client("{\"timeout\":\"7s\"}"));
+        assert!(
+            !cfg.insecure_skip_verify,
+            "absent switch must verify the server certificate"
+        );
+        assert_eq!(cfg.timeout, std::time::Duration::from_secs(7));
+
+        let cfg = ClientConfig::from_cpm_client(&cpm_client(
+            "{\"timeout\":\"7s\",\"tls\":{\"insecure_skip_verify\":true}}",
+        ));
+        assert!(
+            cfg.insecure_skip_verify,
+            "explicit opt-out must be honoured"
+        );
+        assert_eq!(cfg.timeout, std::time::Duration::from_secs(7));
+    }
 }
