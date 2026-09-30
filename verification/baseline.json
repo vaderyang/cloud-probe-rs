@@ -1,4 +1,27 @@
 {
+  "branch_tiers": {
+    "0": {
+      "branch": 79.58579881656804,
+      "function": 98.15864022662889,
+      "line": 95.24248358484046
+    },
+    "1": {
+      "branch": 72.79411764705883,
+      "function": 93.44660194174757,
+      "line": 91.46902004044861
+    },
+    "2": {
+      "branch": 88.35616438356165,
+      "function": 94.67455621301775,
+      "line": 96.65249734325187
+    },
+    "3": {
+      "branch": 70.96774193548387,
+      "function": 84.0909090909091,
+      "line": 74.16552354823959
+    }
+  },
+  "note": "tiers = stable llvm-cov (line/function, PR gate); branch_tiers = nightly --branch collector (line/function/branch, nightly gate). coverage_gate.py selects branch_tiers when the lcov carries BRDA records, because the two collectors map lines differently.",
   "tiers": {
     "0": {
       "branch": 0.0,
@@ -21,5 +44,5 @@
       "line": 73.98119122257053
     }
   },
-  "version": 1
+  "version": 2
 }

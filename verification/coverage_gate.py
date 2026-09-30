@@ -4,14 +4,25 @@
 Reads an lcov report (from `cargo llvm-cov`), the tiered policy in
 verification/policy.toml and the ratchet baseline, and enforces:
 
-  1. per-tier line/function coverage never drops below the baseline (ratchet);
+  1. per-tier line/branch/function coverage never drops below the baseline
+     (ratchet); branch is only ratcheted when the report carries branch data;
   2. a tier that has already reached its target is held at the target;
   3. a tier below its target must have an unexpired waiver (owner+expiry);
   4. critical functions have 100% function coverage (no `FNDA:0`);
   5. changed-line diff coverage (default line>=90%, branch>=85%).
 
 See VERIFICATION_COVERAGE.md for the design. Exit code is non-zero on any
-failure. `--update-baseline` rewrites verification/baseline.json (only upward).
+failure. `--update-baseline` rewrites the selected baseline table (only upward).
+
+baseline.json holds two anchored tables because the two collectors map source
+lines differently and cannot share one ratchet:
+
+  * `tiers`        - the stable line/function collector (PR `verify-coverage`);
+  * `branch_tiers` - the nightly `--branch` collector (nightly branch job).
+
+The gate picks `branch_tiers` when the lcov carries `BRDA` branch records and
+`tiers` otherwise, so each job is ratcheted against the collector that produced
+the report.
 
 No third-party deps (tomllib is stdlib on 3.11+).
 """
@@ -19,13 +30,14 @@ No third-party deps (tomllib is stdlib on 3.11+).
 from __future__ import annotations
 
 import argparse
+import contextlib
 import datetime as _dt
 import fnmatch
 import json
 import subprocess
-import sys
-import tomllib
 from pathlib import Path
+
+import tomllib
 
 # --------------------------------------------------------------------------- #
 # lcov parsing
@@ -66,10 +78,8 @@ def parse_lcov(path: Path) -> dict[str, FileCov]:
                 continue
             elif ln.startswith("DA:"):
                 parts = ln[3:].split(",")
-                try:
+                with contextlib.suppress(ValueError, IndexError):
                     cur.lines[int(parts[0])] = int(parts[1])
-                except (ValueError, IndexError):
-                    pass
             elif ln.startswith("FNDA:"):
                 rest = ln[5:]
                 count_s, _, name = rest.partition(",")
@@ -153,7 +163,7 @@ def demangle(names: list[str]) -> dict[str, str]:
     out = proc.stdout.splitlines()
     if len(out) != len(names):  # fall back to mangled names
         return {n: n for n in names}
-    return dict(zip(names, out))
+    return dict(zip(names, out, strict=False))
 
 
 def normalize_demangled(s: str) -> str:
@@ -287,10 +297,18 @@ def main() -> int:
         }
 
     # --- baseline / ratchet ---------------------------------------------------
+    #
+    # The stable line/function collector and the nightly `--branch` collector map
+    # source lines differently, so each is anchored in its own table. Select on
+    # the report's own shape: a report with BRDA records gets `branch_tiers`.
+    has_branch_data = any(fc.branches for fc in files.values())
+    baseline_table = "branch_tiers" if has_branch_data else "tiers"
+    baseline_doc: dict = {}
     baseline: dict[str, dict[str, float]] = {}
     if baseline_path.exists():
         try:
-            baseline = json.loads(baseline_path.read_text()).get("tiers", {})
+            baseline_doc = json.loads(baseline_path.read_text())
+            baseline = baseline_doc.get(baseline_table, baseline_doc.get("tiers", {}))
         except (OSError, json.JSONDecodeError) as e:
             print(f"!! cannot read baseline {baseline_path}: {e}")
             return 2
@@ -299,8 +317,10 @@ def main() -> int:
     waivers = {int(w["tier"]): w for w in policy.get("waiver", [])}
 
     failures: list[str] = []
+    collector = "branch (nightly llvm-cov)" if has_branch_data else "line/function (stable)"
     print("=" * 78)
     print(" verification coverage — tiered gate")
+    print(f" collector: {collector}; baseline table: {baseline_table}")
     print("=" * 78)
     print(f"{'tier':4} {'name':26} {'line':>16} {'branch':>8} {'function':>14}  verdict")
     for t in tiers:
@@ -319,9 +339,12 @@ def main() -> int:
             or (has_branch and base_br > 0.0 and c["branch"] < base_br - args.tolerance)
         ):
             verdict = "DECREASE"
+            parts = [f"line {c['line']:.1f} < {base_line:.1f}"] if c["line"] < base_line - args.tolerance else []
+            parts += [f"function {c['function']:.1f} < {base_fn:.1f}"] if c["function"] < base_fn - args.tolerance else []
+            if has_branch and base_br > 0.0 and c["branch"] < base_br - args.tolerance:
+                parts += [f"branch {c['branch']:.1f} < {base_br:.1f}"]
             failures.append(
-                f"tier {t.id} coverage decreased: line {c['line']:.1f} < {base_line:.1f} "
-                f"or function {c['function']:.1f} < {base_fn:.1f}"
+                f"tier {t.id} coverage decreased: " + " or ".join(parts)
             )
         # target: enforced once reached, else waiver required
         elif base_line >= t.line_target and c["line"] + args.tolerance < t.line_target:
@@ -346,13 +369,30 @@ def main() -> int:
             failures.append(
                 f"tier {t.id} branch {c['branch']:.1f} < target {t.branch_target:.0f}"
             )
-        elif not base or base_line < t.line_target:
+        elif (
+            not base
+            or base_line < t.line_target
+            or (t.function_target > 0.0 and base_fn < t.function_target)
+            # Branch is only a measured dimension when the report carries BRDA
+            # records; the stable PR job's lcov has none, so it must not demand a
+            # branch waiver. The nightly branch job does carry them.
+            or (has_branch and t.branch_target > 0.0 and base_br < t.branch_target)
+        ):
+            # A tier whose *baseline* is still below a target needs an unexpired
+            # waiver for the gap (line/function/branch all mirror each other).
+            gaps: list[str] = []
+            if base_line < t.line_target:
+                gaps.append(f"line {base_line:.1f} < {t.line_target:.0f}")
+            if t.function_target > 0.0 and base_fn < t.function_target:
+                gaps.append(f"function {base_fn:.1f} < {t.function_target:.0f}")
+            if has_branch and t.branch_target > 0.0 and base_br < t.branch_target:
+                gaps.append(f"branch {base_br:.1f} < {t.branch_target:.0f}")
+            gap_s = ", ".join(gaps) or "below target"
             w = waivers.get(t.id)
             if w is None:
                 verdict = "NO WAIVER"
                 failures.append(
-                    f"tier {t.id} line {c['line']:.1f} < target {t.line_target:.0f} "
-                    "and no [[waiver]] is registered"
+                    f"tier {t.id} below target ({gap_s}) and no [[waiver]] is registered"
                 )
             else:
                 expires = _dt.date.fromisoformat(w["expires"])
@@ -450,10 +490,12 @@ def main() -> int:
                 "function": max(c["function"], prev.get("function", 0.0)),
                 "branch": max(c["branch"], prev.get("branch", 0.0)),
             }
+        baseline_doc[baseline_table] = merged
+        baseline_doc["version"] = max(int(baseline_doc.get("version", 1)), 2)
         baseline_path.write_text(
-            json.dumps({"version": 1, "tiers": merged}, indent=2, sort_keys=True) + "\n"
+            json.dumps(baseline_doc, indent=2, sort_keys=True) + "\n"
         )
-        print(f"\nbaseline updated: {baseline_path}")
+        print(f"\nbaseline updated ({baseline_table}): {baseline_path}")
 
     print("=" * 78)
     if failures:

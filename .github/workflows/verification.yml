@@ -1,10 +1,12 @@
 name: verification (nightly)
 
 # The blocking gates (line/function, critical functions, no-decrease, diff) run
-# on every PR/push in ci.yml. This workflow adds the expensive dimensions that do
-# not belong on the critical path: branch coverage (needs nightly llvm-cov),
-# mutation testing and the soaks. Mutation and the soaks are blocking (ADR-0001
-# stage 3/4); branch coverage stays advisory while its baseline is established.
+# on every PR/push in ci.yml. This workflow adds the expensive dimensions that
+# do not belong on the critical path: branch coverage (needs nightly llvm-cov),
+# mutation testing and the soaks. All four are blocking (ADR-0001 stage 3/4);
+# branch coverage is anchored in verification/baseline.json's `branch_tiers`
+# table (the nightly --branch collector maps lines differently from the stable
+# one, so the two ratchets are kept separate).
 
 on:
   schedule:
@@ -21,7 +23,8 @@ jobs:
   branch-coverage:
     name: branch coverage (nightly llvm-cov)
     runs-on: ubuntu-latest
-    continue-on-error: true
+    # Blocking (ADR-0001 stage 2): the per-tier branch ratchet/target/waiver is
+    # enforced below, against the `branch_tiers` baseline this job produces.
     steps:
       - uses: actions/checkout@v7
       - name: System dependencies
@@ -43,7 +46,10 @@ jobs:
         run: |
           mkdir -p target/llvm-cov
           cargo +nightly llvm-cov --workspace --locked --branch --no-report
-          BIN=$(find target/llvm-cov-target/debug/deps -maxdepth 1 -type f \
+          # Search the whole coverage target dir: newer nightlies place the
+          # integration-test binary under build/<crate>/<hash>/out/ instead of
+          # debug/deps/ (the layout moved between cargo versions).
+          BIN=$(find target/llvm-cov-target -type f \
             -name 'af_packet_live-*' ! -name '*.d' | head -n1)
           if [ -z "$BIN" ]; then
             echo "::error::no instrumented af_packet_live binary"
@@ -53,18 +59,24 @@ jobs:
           sudo -E env "LLVM_PROFILE_FILE=$PROFILE" "$BIN" --ignored
           cargo +nightly llvm-cov report --branch \
             --lcov --output-path target/llvm-cov/lcov.info
-      - name: Report per tier (advisory until branch baselines land)
+      - name: Tiered coverage gate (branch, no-decrease, waivers)
+        # Blocking: consumes the --branch lcov collected above. The gate selects
+        # the `branch_tiers` baseline because this report carries BRDA records.
+        # Tier 0/1 are below their branch targets and carry explicit, unexpired
+        # [[waiver]]s in policy.toml; Tier 2 is held at its 75% branch target;
+        # line/function are ratcheted on the nightly collector's own baseline.
         run: |
-          cargo +nightly llvm-cov report --summary-only
-          python3 verification/coverage_gate.py --lcov target/llvm-cov/lcov.info || true
+          python3 verification/coverage_gate.py \
+            --lcov target/llvm-cov/lcov.info --tolerance 0.5
 
   soak:
     name: DST soak (20000 seeds) + fd soak
     runs-on: ubuntu-latest
     timeout-minutes: 60
-    # Blocking (ADR-0001 stage 4): the harness is deterministic, so a red soak is
-    # always a real regression, and 20000 seeds costs ~3 min. The fd soak guards
-    # the long-lived-daemon invariant (no leaked socket per reconnect).
+    # Blocking (ADR-0001 stage 4): the harness is deterministic, so a red
+    # soak is always a real regression, and 20000 seeds costs ~3 min. The
+    # fd soak guards the long-lived-daemon invariant (no leaked socket per
+    # reconnect).
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
@@ -102,8 +114,8 @@ jobs:
       SKIP_MUTATION_CONFIG_GATE: "1"
     # Blocking (ADR-0001 stage 4): the full Tier 0/1 scope is clean (0 surviving
     # mutants outside the documented `exclude_re` entries; see
-    # verification/MUTATION_BASELINE.md), so every shard must stay green. Sharded
-    # so a weekly run is bounded.
+    # verification/MUTATION_BASELINE.md), so every shard must stay green. The
+    # run is sharded so a weekly run is bounded.
     #
     # The shard list is 0-based integers because cargo-mutants shards are
     # 0-based: `--shard k/n` requires k < n, so the values are 0/4..3/4 and
