@@ -513,12 +513,14 @@ impl TaskManager {
     pub fn collect_stats_summary(&self) -> serde_json::Value {
         let (sec, nsec) = monotonic_now();
         let (ring_total, ring_used, mem_total, mem_used) = match &self.pipeline {
-            Some(p) => (
-                p.ring.lock().size() as u64,
-                p.ring.lock().used() as u64,
-                p.alloc.capacity(),
-                p.alloc.used(),
-            ),
+            Some(p) => {
+                // Lock the ring twice but in separate statements: a single
+                // expression would keep the first guard's temporary alive until
+                // the end of the `let`, so the second `lock()` would deadlock.
+                let ring_total = p.ring.lock().size() as u64;
+                let ring_used = p.ring.lock().used() as u64;
+                (ring_total, ring_used, p.alloc.capacity(), p.alloc.used())
+            }
             None => (0, 0, 0, 0),
         };
 
@@ -1281,15 +1283,9 @@ mod tests {
         assert_eq!(mgr.execution_model(), ExecutionModel::Rtc);
     }
 
-    /// `collect_stats_summary` must report the pipeline's ring/allocator sizes.
-    ///
-    /// NOT IMPLEMENTED as a test: exercising the `Some(pipeline)` arm deadlocks,
-    /// because the match arm locks the same `parking_lot::Mutex` twice in one
-    /// statement (`p.ring.lock().size()` and `p.ring.lock().used()`, with the
-    /// first guard's temporary alive until the `let` ends). That is a production
-    /// bug in `collect_stats_summary` (Pipeline mode hangs `cpctl stats` / the
-    /// stats RPC); it is reported, not papered over. The RTC arm is asserted
-    /// below (it reports zeroes) and the accessors are covered separately.
+    /// `collect_stats_summary` must report the pipeline's ring/allocator sizes
+    /// without deadlocking (the Pipeline arm used to lock the same
+    /// `parking_lot::Mutex` twice in one statement).
     #[test]
     fn stats_summary_reports_zeroes_for_rtc() {
         let dir = tempfile::tempdir().unwrap();
@@ -1298,6 +1294,26 @@ mod tests {
         let summary = mgr.collect_stats_summary();
         assert_eq!(summary["pipeline_buffer"]["ring_total"], 0);
         assert_eq!(summary["pipeline_buffer"]["mem_total"], 0);
+        assert_eq!(summary["pipeline_buffer"]["ring_used"], 0);
+        assert_eq!(summary["pipeline_buffer"]["mem_used"], 0);
+    }
+
+    /// The Pipeline arm must report the real ring/allocator sizes and, crucially,
+    /// must not deadlock (regression for the double-lock bug).
+    #[test]
+    fn stats_summary_reports_pipeline_ring_and_alloc() {
+        let dir = tempfile::tempdir().unwrap();
+        let mgr = pipeline_manager(dir.path());
+        assert_eq!(mgr.execution_model(), ExecutionModel::Pipeline);
+        let summary = mgr.collect_stats_summary();
+        assert!(
+            summary["pipeline_buffer"]["ring_total"].as_u64().unwrap() > 0,
+            "pipeline ring size must be reported"
+        );
+        assert!(
+            summary["pipeline_buffer"]["mem_total"].as_u64().unwrap() > 0,
+            "pipeline allocator capacity must be reported"
+        );
         assert_eq!(summary["pipeline_buffer"]["ring_used"], 0);
         assert_eq!(summary["pipeline_buffer"]["mem_used"], 0);
     }
