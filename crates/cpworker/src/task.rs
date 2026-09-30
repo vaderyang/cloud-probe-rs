@@ -1311,7 +1311,10 @@ mod tests {
         let mem_total: u64 =
             serde_json::from_value(summary["pipeline_buffer"]["mem_total"].clone()).unwrap();
         assert!(ring_total > 0, "pipeline ring size must be reported");
-        assert!(mem_total > 0, "pipeline allocator capacity must be reported");
+        assert!(
+            mem_total > 0,
+            "pipeline allocator capacity must be reported"
+        );
         assert_eq!(summary["pipeline_buffer"]["ring_used"], 0);
         assert_eq!(summary["pipeline_buffer"]["mem_used"], 0);
     }
