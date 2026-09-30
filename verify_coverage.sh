@@ -2,6 +2,7 @@
 # Verification-coverage entry point (see VERIFICATION_COVERAGE.md).
 #
 #   ./verify_coverage.sh                 # run the test suite under llvm-cov, then gate
+#   ./verify_coverage.sh --collect-only  # export lcov only (CI collect step), no gate
 #   ./verify_coverage.sh --no-run        # re-export lcov from existing profdata (fast)
 #   ./verify_coverage.sh --diff          # also enforce changed-line coverage
 #   ./verify_coverage.sh --update-baseline
@@ -14,10 +15,12 @@ LCOV="target/llvm-cov/lcov.info"
 mkdir -p target/llvm-cov
 
 run=1
+collect_only=0
 args=()
 for a in "$@"; do
     case "$a" in
         --no-run) run=0 ;;
+        --collect-only) collect_only=1 ;;
         *) args+=("$a") ;;
     esac
 done
@@ -27,6 +30,10 @@ if [ "$run" = 1 ]; then
 else
     # Re-export from the last run's profdata without executing the tests again.
     cargo llvm-cov report --lcov --output-path "$LCOV"
+fi
+
+if [ "$collect_only" = 1 ]; then
+    exit 0
 fi
 
 exec python3 verification/coverage_gate.py --lcov "$LCOV" ${args+"${args[@]}"}

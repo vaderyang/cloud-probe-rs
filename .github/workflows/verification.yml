@@ -37,6 +37,7 @@ jobs:
           tool: cargo-llvm-cov
       - name: Collect branch coverage
         run: |
+          mkdir -p target/llvm-cov
           cargo +nightly llvm-cov --workspace --locked --branch \
             --lcov --output-path target/llvm-cov/lcov.info
       - name: Report per tier (advisory until branch baselines land)

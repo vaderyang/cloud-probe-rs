@@ -210,7 +210,10 @@ jobs:
         with:
           tool: cargo-llvm-cov
       - name: Collect coverage
-        run: cargo llvm-cov --workspace --locked --lcov --output-path target/llvm-cov/lcov.info
+        # Goes through the script so the output directory is created the same way
+        # locally and here; calling cargo-llvm-cov directly used to fail with
+        # `failed to create file target/llvm-cov/lcov.info` on a clean checkout.
+        run: ./verify_coverage.sh --collect-only
       - name: Summary
         run: cargo llvm-cov report --summary-only
       - name: Tiered coverage gate (line/function, critical functions, no-decrease, diff)
