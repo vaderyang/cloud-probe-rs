@@ -490,7 +490,7 @@ mod tests {
         assert_eq!(recs[3]["kind"], "summary");
         assert_eq!(recs[3]["sent"], 3);
         assert_eq!(recs[3]["received"], 2);
-        let loss = recs[3]["loss_pct"].as_f64().expect("loss");
+        let loss: f64 = serde_json::from_value(recs[3]["loss_pct"].clone()).expect("loss");
         assert!((loss - 100.0 / 3.0).abs() < 1e-9, "loss={loss}");
     }
 
