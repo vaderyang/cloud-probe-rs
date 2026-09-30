@@ -85,6 +85,18 @@ PR 里若新增测试却无法指向其规范来源，视为不合格（见 §9 
 > 整个套件用 root 跑会改变很多断言 EPERM 的用例）。函数覆盖按归一化 demangled 名去重并排除
 > `::{closure#N}`（否则同源函数的多个 crate 实例与错误处理闭包会把分母抬高、把数字压低）。
 
+> **MC/DC（condition）状态（2026-09，阻塞项已登记为 BLOCKED）**：当前 nightly
+> （1.101.0-nightly，2026-09-29）**无法产出 MC/DC**。上游已在
+> [rust-lang/rust#144999](https://github.com/rust-lang/rust/pull/144999)（2025-08-08 合入）
+> 中移除全部 unstable MC/DC instrumentation；`-Zcoverage-options` 现在只接受
+> `block | branch | condition`，其中 `condition` 的文档明确写着它只是“迈向完整 MC/DC 的
+> stepping-stone”（只对部分布尔表达式补分支，不是 MC/DC），LLVM 侧 `mcdc_records` 为空。
+> 因此本仓库暂不落地 MC/DC 门禁：`verification/policy.toml` 的 `mcdc` 阈值保留为目标，
+> 但门禁不消费；待上游重新引入且能稳定产出 MC/DC 记录后再按 §2/§10 接入。
+> 备注：即使回退到仍支持 `--mcdc` 的 nightly（如 nightly-2025-07-15，本地已验证可产出
+> `mcdc_records`），llvm-cov 的 **lcov 导出也不携带 MC/DC 记录**（只有 `BRDA`），
+> 必须解析 JSON `mcdc_records`，与 §9 的 lcov 门禁链路不同。
+
 ## 3. 关键功能（100% function coverage）
 
 以下功能一旦有函数从未被执行（`FNDA:0`）即门禁失败。清单在
@@ -219,7 +231,10 @@ CI 门禁（`.github/workflows/ci.yml`）：
   需 `owner+plan+expiry` 的 `[[waiver]]`；因为 stable 与 nightly `--branch` 两套采集器行映射不同，
   基线分表存于 `baseline.json` 的 `tiers`/`branch_tiers`，门禁按报告是否带 `BRDA` 自动选表。
   Tier 2 已越过 75% branch target（ratchet 永久强制），Tier 0/1 目前低于 90%/85%，登记了到
-  2026-12-31 的 `[[waiver]]`。待办：`--mcdc`（condition 门禁）。
+  2026-12-31 的 `[[waiver]]`。**BLOCKED：`--mcdc`/condition 门禁未落地**——上游
+  [rust-lang/rust#144999](https://github.com/rust-lang/rust/pull/144999) 已移除 MC/DC，
+  当前 nightly 跑 `cargo +nightly llvm-cov --mcdc` 直接编译失败，且 `condition` 不再产出
+  `mcdc_records`；详见 §2 的 MC/DC 状态说明。`[[waiver]]` 不因该阻塞项新增。
 - **阶段 3 ✅ 已完成（mutation 已阻塞）**：`cargo-mutants` 配置 + `verify_mutation.sh`；
   已关闭 gre/vxlan/stats/config/packet/packet_split/zmtp-codec 及本轮 bpf parser·compiler·interp、
   zmtp client、cpgolib、bpf codes/resolvers/mod 的缺口（见 `verification/MUTATION_BASELINE.md`），
