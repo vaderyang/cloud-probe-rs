@@ -129,7 +129,9 @@ Go oracle 由 `difffuzz.sh` 现场用临时 module（`replace` 到参考仓库�
 已知的有意分歧（§2.2 的 IPv4/TCP 严格校验；§2.3 的 JSON 解码宽容度）在 target 内被分类过滤，
 以便继续搜索**新**分歧。**本框架已发现并修复**：
 
-1. `req_pattern` 对 `port -0` 的负零解析不兼容（C `strtol` 接受，Rust `u16` 拒绝）。
+1. `req_pattern` 的端口解析。C 早期用 `strtol(..., 10)`，接受 `-0`/`+80`，Rust 用 `u16`
+   拒绝；对齐后上游又把规则收紧为**纯十进制**（`req_pattern.c` 的 `plain_decimal` 守卫：
+   无符号、无前导零 —— BPF 会把 `010` 读作八进制），两侧现已一致。
 2. `TaskConfig` 指纹：Go 的 `CustomReqPatternConfig.Pattern` 是非指针 string（始终参与指纹，
    即使为空），Rust 曾用 `Option` 跳过——已修正并对齐 Go 向量。
 
@@ -199,9 +201,14 @@ parity/run.sh 5000 42     # packet_split: C vs Rust
 
 以上三类输入在生成器中已规避，以保证差分对拍比较的是**有定义的行为**；其余全部输入逐字节一致。
 
-> **由差分 fuzzing 发现并修复**：`req_pattern` 的端口解析曾用 `u16::parse`，拒绝 C 用
-> `strtol` 接受的负零（`port -0` / `port -000`）；已改为 `i64` 解析 + `0..=65535` 范围校验。
-> 见 `parity/difffuzz.sh req_pattern` 与 `req_pattern.rs` 的回归测试。
+> **由差分 fuzzing 发现并修复（同一处两次）**：`req_pattern` 的端口解析先是补齐了 C 的
+> `strtol(..., 10)` 语义（接受 `-0`、`+80`）；上游随后把规则收紧为**纯十进制**
+> （`req_pattern.c` 的 `plain_decimal` 守卫，因为 BPF 把 `010` 当八进制），Rust 未同步，
+> 差分 fuzzer 立刻以 `port-0` 报出（C `INIT_FAIL` / Rust `0`）。现在两侧一致：端口必须是
+> `0`–`65535` 的纯十进制，`-0`/`+80`/`010`/`00` 等一律 `INIT_FAIL`。见
+> `parity/difffuzz.sh req_pattern` 与 `req_pattern.rs::tests::port_parsing_requires_plain_decimal`。
+> 注意 CI 的 C oracle 按上游浮动分支 `0.9.x` 现场编译，因此上游收紧一次规则，这里就会
+> 由 fuzz job 报红一次。
 
 ## 2.3 已知的良性分歧
 

@@ -337,17 +337,22 @@ impl<'a> Parser<'a> {
                     _ => return Err(Error::new("expected port value")),
                 };
                 self.advance();
-                // Match C's `strtol(value, &endptr, 10)` + `0..=65535` range
-                // check: this accepts a leading `+` and a negative zero like
-                // `-0`/`-000` (which `u16::parse` rejects), while still
-                // rejecting other negatives and out-of-range values.
-                let port: i64 = value
-                    .parse()
-                    .map_err(|_| Error::new(format!("invalid port: {value}")))?;
-                if !(0..=65535).contains(&port) {
+                // Upstream requires a *plain decimal* port: no sign and no
+                // leading zero, because BPF would read `010` as octal, then the
+                // usual `0..=65535` range. (`strtol(..., 10)` alone accepted `-0`
+                // and `+80`; the guard in req_pattern.c rejects both now.)
+                let bytes = value.as_bytes();
+                let plain_decimal = !bytes.is_empty()
+                    && bytes[0].is_ascii_digit()
+                    && !(bytes[0] == b'0' && bytes.len() > 1);
+                let port: u16 = if plain_decimal {
+                    value
+                        .parse()
+                        .map_err(|_| Error::new(format!("invalid port: {value}")))?
+                } else {
                     return Err(Error::new(format!("invalid port: {value}")));
-                }
-                Ok(Node::Port(port as u16))
+                };
+                Ok(Node::Port(port))
             }
             _ => Err(Error::new("expected condition")),
         }
@@ -400,18 +405,27 @@ mod tests {
     }
 
     #[test]
-    fn port_parsing_matches_c_strtol() {
-        // C parses with `strtol(..., 10)` then checks `0..=65535`, so a
-        // negative zero (`-0`, `-000`) and a leading `+` are accepted, while
-        // other negatives and out-of-range values are rejected. Found by
-        // parity/difffuzz.sh (differential fuzzing).
-        assert!(parse_pattern("port -0").is_ok());
-        assert!(parse_pattern("port -000").is_ok());
-        assert!(parse_pattern("port +80").is_ok());
+    fn port_parsing_requires_plain_decimal() {
+        // Upstream `req_pattern.c` rejects anything that is not a plain decimal
+        // (no sign, no leading zero - BPF reads `010` as octal), then range
+        // checks `0..=65535`. Found by parity/difffuzz.sh (differential fuzzing),
+        // which caught `port-0`: the C oracle returns INIT_FAIL while this side
+        // used to accept it.
+        assert!(parse_pattern("port 0").is_ok());
+        assert!(parse_pattern("port 80").is_ok());
         assert!(parse_pattern("port 65535").is_ok());
+        assert!(parse_pattern("port -0").is_err());
+        assert!(parse_pattern("port -000").is_err());
+        assert!(parse_pattern("port +80").is_err());
+        assert!(parse_pattern("port 010").is_err());
+        assert!(parse_pattern("port 00").is_err());
         assert!(parse_pattern("port -12").is_err());
         assert!(parse_pattern("port 65536").is_err());
         assert!(parse_pattern("port 0x50").is_err());
+        assert!(parse_pattern("port 12x").is_err());
+        // The exact input the differential fuzzer reported (mode=req_pattern):
+        // C returns INIT_FAIL, so the harness must too.
+        assert_eq!(canonical_eval(" port-0 ", "127.0.0.1", 32), "INIT_FAIL");
     }
 
     #[test]
