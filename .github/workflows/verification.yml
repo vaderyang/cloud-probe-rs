@@ -36,9 +36,22 @@ jobs:
         with:
           tool: cargo-llvm-cov
       - name: Collect branch coverage
+        # Fold the #[ignore]d AF_PACKET live tests in (as verify_coverage.sh
+        # --privileged-live does) so the advisory report matches the blocking
+        # gate's Tier 0 line floor; the root-only capturer path is not reachable
+        # from the ordinary suite.
         run: |
           mkdir -p target/llvm-cov
-          cargo +nightly llvm-cov --workspace --locked --branch \
+          cargo +nightly llvm-cov --workspace --locked --branch --no-report
+          BIN=$(find target/llvm-cov-target/debug/deps -maxdepth 1 -type f \
+            -name 'af_packet_live-*' ! -name '*.d' | head -n1)
+          if [ -z "$BIN" ]; then
+            echo "::error::no instrumented af_packet_live binary"
+            exit 1
+          fi
+          PROFILE="$PWD/target/llvm-cov-target/af_live-%p.profraw"
+          sudo -E env "LLVM_PROFILE_FILE=$PROFILE" "$BIN" --ignored
+          cargo +nightly llvm-cov report --branch \
             --lcov --output-path target/llvm-cov/lcov.info
       - name: Report per tier (advisory until branch baselines land)
         run: |

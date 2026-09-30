@@ -62,9 +62,13 @@ PR 里若新增测试却无法指向其规范来源，视为不合格（见 §9 
 - 当前低于 target 的档位，必须在 `verification/policy.toml` 的 `[[waiver]]` 里登记 **owner + 计划 + 到期**；
   到期未达标 = 门禁失败。这样"目标"是硬约束，但给出可执行的收敛路径。
 
-> 现状（2025-09，Regions）：Tier0 75.8% / Tier1 72.6% / Tier2 53.7% / Tier3 49.9%，
-> 均在 target 之下 → 机制启动后立即生效的是 **no-decrease + 关键函数 100% + 变更行 90/85**，
-> 绝对目标由 waiver 收敛。
+> **现状（2026-09，llvm-cov lines）**：**Tier 0 行 95.2% / 函数 98.1% — 已达 target 且绝对强制**
+> （baseline 已抬到 target，waiver 移除，`AfPacketCapturer::open` 纳入 100% 关键函数）；
+> Tier1 73.6% / Tier2 61.1% / Tier3 52.9%，仍低于 target → 继续 no-decrease + waiver 收敛。
+> Tier 0 的 AF_PACKET 采集器覆盖来自 `verify_coverage.sh --privileged-live`：普通测试套件跑完后，
+> 以 root 运行 `#[ignore]` 的 live 测试并把 profraw 合并进同一报告（仅有这条 root-only 路径需要提权；
+> 整个套件用 root 跑会改变很多断言 EPERM 的用例）。函数覆盖按归一化 demangled 名去重并排除
+> `::{closure#N}`（否则同源函数的多个 crate 实例与错误处理闭包会把分母抬高、把数字压低）。
 
 ## 3. 关键功能（100% function coverage）
 
@@ -77,7 +81,8 @@ PR 里若新增测试却无法指向其规范来源，视为不合格（见 §9 
 - `cpworker::bpf::compiler`：`compile` / `Builder::finish`（跳转中继）/ `attach`
 - `cpworker::bpf::interp`：`run`（cBPF 解释器，越界即终止）
 - `cpworker::bpf::parser`：`parse`
-- `cpworker::capturer::af_packet`：`new`（socket/BPF/bind 顺序）、ring 解析、方向过滤
+- `cpworker::capturer::af_packet`：`open`（socket/BPF/bind 顺序，由 `--privileged-live` 合并覆盖）、
+  ring 解析、方向过滤（`new`/内部函数随普通套件覆盖）
 - `cpworker::packet::parse_packet`、`cpworker::packet_split::build_fragment`
 - `cpworker::zmtp::codec`：帧解析/序列化；`cpworker::zmtp::client`：握手状态机
 - `cpworker::output::vxlan::vxlan_encapsulate`、`output::gre::gre_header`（线上字节）
@@ -202,6 +207,10 @@ CI 门禁（`.github/workflows/ci.yml`）：
   新增句柄 soak `crates/cpgolib/tests/fd_soak.rs`（重连/失败握手/失败 dial 三类路径上 socket 集合不变，
   并对注入的 `mem::forget(conn)` 泄漏会失败），随 `cargo test -p cpgolib` 进 CI。
   待办：需 root/veth 的现场长时 soak（属 U3：只能按需触发，不进 PR 门禁）。
+- **Tier 0 行覆盖收敛 ✅**：`verify_coverage.sh --privileged-live` 把 AF_PACKET live 测试（root）
+  合并进 lcov，Tier 0 行 95.2% / 函数 98.1%，baseline 抬到 target、移除 Tier 0 waiver，
+  `AfPacketCapturer::open` 从 critical_waiver 提升为 100% 强制关键函数。
+  函数覆盖指标同时修正为「归一化去重 + 排除 `::{closure#N}`」（原指标把同源函数按 crate 实例重复计数）。
 
 ---
 

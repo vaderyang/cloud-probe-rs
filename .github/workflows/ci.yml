@@ -213,7 +213,10 @@ jobs:
         # Goes through the script so the output directory is created the same way
         # locally and here; calling cargo-llvm-cov directly used to fail with
         # `failed to create file target/llvm-cov/lcov.info` on a clean checkout.
-        run: ./verify_coverage.sh --collect-only
+        # `--privileged-live` also folds the #[ignore]d AF_PACKET live tests
+        # (run under sudo) into the report. That root-only capturer path is what
+        # lifts Tier 0's line coverage past its 95% target.
+        run: ./verify_coverage.sh --privileged-live
       - name: Summary
         run: cargo llvm-cov report --summary-only
       - name: Tiered coverage gate (line/function, critical functions, no-decrease, diff)

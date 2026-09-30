@@ -48,6 +48,12 @@
 **关键功能（Tier 0 安全/完整性边界）必须 100% function coverage**（`FNDA:0` 即失败），
 清单见 `policy.toml` 的 `critical_functions`。
 
+函数覆盖按**归一化（去 crate hash）后的 demangled 名**统计并取各实例最大值，且**排除编译器生成的
+`::{closure#N}`**：同一个源函数会因被编译进多个 crate 实例而重复计数，而错误处理闭包（
+`.map_err(|e| ...)`）只在 OS/IO 失败时才可达，并非独立设计的函数。AF_PACKET 采集器的 Tier 0
+覆盖由 `verify_coverage.sh --privileged-live` 将 `#[ignore]` 的 live 测试（`sudo`）合并进报告，
+`AfPacketCapturer::open` 因此纳入 100% 关键函数清单。
+
 ### 2.3 变更覆盖与防退化（棘轮）
 - **changed-code coverage**：变更行 line ≥ **90%**、branch ≥ **85**%（Tier 3 除外）。
 - **coverage must not decrease**：每档 line/function 不得低于 `verification/baseline.json`；只升不降。
@@ -87,10 +93,11 @@
 ### 代价 / 负面
 - **CI 时间与成本上升**：mutation 与 soak/chaos 显著增加机时（用定时 job + PR `--in-diff` 限量缓解）。
 - **维护成本**：`policy.toml`/`baseline.json`/`requirements.toml` 需随代码演进而维护。
-- **初期常红风险**：当前 Tier0 75.8% / Tier1 72.6% / Tier2 53.7% / Tier3 49.9%（Regions）**均低于 target**；
-  因此首轮只强制 **no-decrease + 关键函数 100% + 变更行 90/85**，绝对目标由 waiver 收敛（见 §5）。
-- **function coverage 噪声**：闭包/泛型实例化会拉低"函数覆盖"数字；故函数阈值主要作为趋势，
-  硬约束放在**关键函数**与 **line/branch**。
+- **初期状态**：首轮落地时 Tier0/1/2/3 均低于 target，故先只强制 **no-decrease + 关键函数 100%
+  + 变更行 90/85**，绝对目标由 waiver 收敛。**Tier 0 已完成收敛**：`--privileged-live` 合并
+  AF_PACKET live 覆盖后行 95.2% / 函数 98.1%，baseline 抬到 target，waiver 移除，目标改为绝对强制。
+- **function coverage 噪声**：已由指标定义处理——归一化去重 + 排除 `::{closure#N}`（见 §2.2）；
+  硬约束仍放在**关键函数**与 **line/branch**。
 
 ### 风险与缓解
 | 风险 | 缓解 |

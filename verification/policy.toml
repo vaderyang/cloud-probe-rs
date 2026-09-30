@@ -122,27 +122,18 @@ patterns = [
   "cpworker::output::gre::gre_header",
   "cpworker::zmtp::codec::parse_frame",
   "cpworker::capturer::pcap_file::PcapFileCapturer::new",
+  "cpworker::capturer::af_packet::AfPacketCapturer::open",
   "cpgolib::cpworker::client::UnixClient::run_command",
 ]
 
-# Boundary functions exercised only by the privileged `live-capture` job
-# (CAP_NET_RAW). Tracked here so they are not silently dropped; stage 2 folds
-# the live job's coverage into this gate.
-[[critical_waiver]]
-pattern = "cpworker::capturer::af_packet::AfPacketCapturer::open"
-reason = "root-only AF_PACKET path; exercised by the live-capture CI job, not cargo test"
-covered_by = "live-capture"
+# The AF_PACKET capturer is exercised by the #[ignore]d live tests, which
+# verify_coverage.sh --privileged-live folds into the report; `open` is now a
+# full critical function, so no critical waiver remains.
 
 # ---------------------------------------------------------------------------
 # Ratchet waivers: tiers below their target must name an owner + plan + expiry.
 # An expired waiver fails the gate. Update as the gap closes.
 # ---------------------------------------------------------------------------
-
-[[waiver]]
-tier = 0
-owner = "core"
-reason = "Tier 0 below the 95% line target (regions 75.8%); root-only paths and error arms outstanding"
-expires = "2026-12-31"
 
 [[waiver]]
 tier = 1
