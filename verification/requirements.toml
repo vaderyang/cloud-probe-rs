@@ -20,7 +20,7 @@ tests = [
   "matches_ip_host_and_port",
   "long_port_or_chain_compiles",
   "long_not_host_chain_uses_trampolines_and_matches",
-  "port_parsing_matches_c_strtol",
+  "port_parsing_requires_plain_decimal",
 ]
 
 [[requirement]]
@@ -162,7 +162,7 @@ priority = "P0"
 source = "AUDIT4 P5-11"
 scenario = "bounded queue by hwm and bytes, with published gauges"
 tests = [
-  "zmq_hwm_is_range_checked",
+  "zmq_hwm_follows_libzmq",
   "queue_is_bounded_in_bytes",
   "queue_budget_is_bounded_by_hwm_and_bytes",
   "queued_bytes_tracks_the_queue",
@@ -198,10 +198,10 @@ tests = [
 id = "REQ-CONFIG-VALIDATION"
 priority = "P0"
 source = "AUDIT4 P5-15 / PARITY.md §2.3"
-scenario = "numeric config is range-checked, never silently truncated"
+scenario = "numeric config is validated: sign/range rules are enforced, out-of-range values normalise like C, and nothing is silently truncated"
 tests = [
-  "numeric_fields_are_range_checked_not_truncated",
-  "zmq_hwm_is_range_checked_by_a_single_wellformed_gate",
+  "numeric_fields_normalise_out_of_range_values",
+  "integral_floats_are_accepted_like_cjson",
   "snaplen_falls_back_to_the_traditional_default",
 ]
 

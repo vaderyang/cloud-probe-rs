@@ -21,9 +21,10 @@ priority = "P0"
 source = "AUDIT4 P5-15 / PARITY.md §2.3"
 description = "Untrusted/CPM-supplied config or BPF could truncate values or exhaust/abort the worker"
 evidence = [
-  "test:numeric_fields_are_range_checked_not_truncated",
+  "test:numeric_fields_normalise_out_of_range_values",
   "test:rejects_over_long_or_deep",
-  "test:zmq_hwm_is_range_checked",
+  "test:an_over_long_pattern_is_rejected_not_a_stack_overflow",
+  "test:zmq_hwm_follows_libzmq",
 ]
 
 [[risk]]
