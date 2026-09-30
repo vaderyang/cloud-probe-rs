@@ -120,6 +120,16 @@ Two conventions worth knowing before reading:
 
 ### Changed
 
+- **无锁 SPSC ring buffer（bead 4mv.4，PARITY.md §5.1）**：`cpworker::ring_buffer::SpscRing`
+  从内部 `Mutex<VecDeque>` 换成无锁单生产者/单消费者环（原子 `head`/`tail` + 显式
+  `Acquire`/`Release`，对应 C `spsc_ring_push`/`spsc_ring_pop`）。公开语义不变：容量 `size` 但
+  最多存 `size-1` 条、满时 `push` 返回 `Err`（消息原样退回）、`used`/`pop` FIFO，`SimpleAllocator`
+  的预算记账不变。新增 `SpscRing::split` 返回一对 `RingProducer`/`RingConsumer` 句柄（`&mut self`
+  借用期间不可能再构造第二个生产者），从而在安全 Rust 中表达“单生产/单消费”契约。验证：小环穷举
+  交错对拍 `VecDeque` 参考模型（`bounded_interleavings_match_reference_model`）+ 200 万条单生产/
+  单消费 FIFO 压力（`spsc_stress_producer_consumer_fifo`，无丢包/重复/乱序），并在 Miri
+  `-Zmiri-many-seeds=0..32` 数据竞争检测下通过（把 `head` 的 `Release`/`Acquire` 改成 `Relaxed`
+  时 Miri 会报数据竞争）。`verification/risk.toml` 的 `RISK-RING-CONCURRENCY` 证据同步登记。
 - Parity/oracle tooling moved out of `cpworker/src/bin` into a new
   `cpworker-parity` crate (P5-29): `cargo build -p cpworker` no longer compiles
   the differential harnesses, the seven `parity/*.sh` callers now use

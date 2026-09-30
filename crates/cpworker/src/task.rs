@@ -4,8 +4,10 @@
 //! * Reload rebuilds every task from the new config instead of matching
 //!   fingerprints and reusing unchanged tasks. Behaviour is equivalent
 //!   (config becomes live without restart) but less efficient.
-//! * The pipeline output thread and ring are safe abstractions, not the
-//!   original lock-free SPSC structures.
+//! * The pipeline output thread and the ring are safe abstractions. The ring
+//!   itself is the lock-free SPSC structure from `ring_buffer`; the pipeline
+//!   shares it through a mutex because a single `SpscRing` is not `Sync` and
+//!   callers hold it by reference.
 
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
