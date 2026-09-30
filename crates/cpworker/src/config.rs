@@ -935,13 +935,17 @@ impl RawOutput {
                     ));
                 }
                 let (vni_version, vni) = if let Some(v1) = v.vni1 {
-                    let v1 = u32_in("vxlan.vni1", v1, 0, i64::from(u32::MAX))?;
+                    let mut v1 = u32_in("vxlan.vni1", v1, 0, i64::from(u32::MAX))?;
                     // The wire carries `vni1 << 8`, so only the low 24 bits reach
-                    // the VNI field; C keeps the full value and warns.
+                    // the VNI field. C keeps the full value only to warn, then
+                    // masks it; cpdaemon may send uint32(serviceTag) beyond that
+                    // (upstream #279).
                     if v1 > 0x00ff_ffff {
                         crate::log_warn!(
-                            "vxlan.vni1 {v1} exceeds 24 bits and overlaps the reserved bits of the VXLAN header"
+                            "vxlan.vni1 {v1} exceeds 24 bits and overlaps the reserved bits of the VXLAN header; using low 24 bits {low}",
+                            low = v1 & 0x00ff_ffff
                         );
+                        v1 &= 0x00ff_ffff;
                     }
                     (1u8, v1)
                 } else if let Some(v2) = v.vni2 {
@@ -1280,6 +1284,53 @@ mod tests {
             }
             _ => panic!("expected vxlan"),
         }
+    }
+
+    /// Upstream #279: `vxlan.vni1` above 24 bits is warned about and masked to
+    /// its low 24 bits before being stored (the wire already shifted out the
+    /// high bits). `vni2` is not masked. Mirrors
+    /// `cpworker/tests/unit/config_validation.c`.
+    #[test]
+    fn vxlan_vni1_masked_to_low_24_bits() {
+        let parse_vni =
+            |json: &str| match &Config::parse_str(json).unwrap().tasks[0].outputs[0].kind {
+                OutputKind::Vxlan(v) => (v.vni_version, v.vni),
+                other => panic!("expected vxlan, got {other:?}"),
+            };
+
+        // in range: kept verbatim
+        assert_eq!(
+            parse_vni(
+                r#"{"tasks":[{"req_pattern":{"type":"auto"},"capturer":{"type":"libpcap","libpcap":{"interface":"eth0"}},"outputs":[{"type":"vxlan","vxlan":{"host":"10.0.0.9","vni1":16777215}}]}]}"#
+            ),
+            (1, 0x00ff_ffff)
+        );
+        // above 24 bits: masked (0x1000000 -> 0)
+        assert_eq!(
+            parse_vni(
+                r#"{"tasks":[{"req_pattern":{"type":"auto"},"capturer":{"type":"libpcap","libpcap":{"interface":"eth0"}},"outputs":[{"type":"vxlan","vxlan":{"host":"10.0.0.9","vni1":16777216}}]}]}"#
+            ),
+            (1, 0)
+        );
+        assert_eq!(
+            parse_vni(
+                r#"{"tasks":[{"req_pattern":{"type":"auto"},"capturer":{"type":"libpcap","libpcap":{"interface":"eth0"}},"outputs":[{"type":"vxlan","vxlan":{"host":"10.0.0.9","vni1":28036591}}]}]}"#
+            ),
+            (1, 0x00ab_cdef)
+        );
+        assert_eq!(
+            parse_vni(
+                r#"{"tasks":[{"req_pattern":{"type":"auto"},"capturer":{"type":"libpcap","libpcap":{"interface":"eth0"}},"outputs":[{"type":"vxlan","vxlan":{"host":"10.0.0.9","vni1":4294967295}}]}]}"#
+            ),
+            (1, 0x00ff_ffff)
+        );
+        // vni2 keeps the full u32 (no masking upstream)
+        assert_eq!(
+            parse_vni(
+                r#"{"tasks":[{"req_pattern":{"type":"auto"},"capturer":{"type":"libpcap","libpcap":{"interface":"eth0"}},"outputs":[{"type":"vxlan","vxlan":{"host":"10.0.0.9","vni2":4294967295}}]}]}"#
+            ),
+            (2, u32::MAX)
+        );
     }
 
     /// `libpcap.effective_bpf()` is what the capturer compiles, and it is now also

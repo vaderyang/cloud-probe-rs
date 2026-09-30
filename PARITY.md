@@ -284,7 +284,8 @@ M4 的问题大多不是"移植错了"，而是"移植得比原实现更宽松�
 > Rust 已 1:1 移植：`libpcap.snaplen` 越界归一化到 262144（`<=0` 也等价最大值、打 info 日志）、
 > `dpdk_pdump.snaplen` `<=0` 报错、越界归一化，`libpcap.buffer_size_mb` `>2047` 归一化、`<=0`
 > 报错，`timeout_ms`/`slice`/`rate_limit_mbps`/`hwm`/`max_file_interval` 负值报错、超过
-> `INT_MAX` 钳位，端口类字段拒绝 `[1,65535]` 之外，`service_tag`/`vni` 保留完整值并告警，
+> `INT_MAX` 钳位，端口类字段拒绝 `[1,65535]` 之外，`service_tag`/`vni2` 保留完整值并告警、
+> `vni1` 超过 24 位时按 oracle 掩码到低 24 位（`value &= 0xFFFFFF`），
 > `pipeline.buffer_size_mb` 在 pipeline 模型下必填且上界为 `SIZE_MAX/1MiB`；且**所有整数字段都
 > 接受整值浮点**（`2048.0`、`1e3`，与 cJSON 的 `floor(v)==v` 一致）。对拍由
 > `parity/verify_config.sh` 的 46 条边界向量（C/Rust 逐字节比较）与 5000 条随机配置覆盖。

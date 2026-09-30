@@ -19,7 +19,7 @@ use cpworker::req_pattern::{custom_match_by_ipport, parse_pattern};
 
 const CONFIG_LIBPCAP_GRE: &str = r#"{"tasks": [{"req_pattern": {"type": "auto"}, "capturer": {"type": "libpcap", "libpcap": {"interface": "eth0", "snaplen": 2048, "buffer_size_mb": 256}}, "outputs": [{"type": "gre", "rate_limit_mbps": 10, "gre": {"host": "172.16.1.201", "bind_device": "eth1"}}]}]}"#;
 
-const CONFIG_LIBPCAP_GRE_VXLAN: &str = r#"{"tasks": [{"req_pattern": {"type": "auto"}, "capturer": {"type": "libpcap", "libpcap": {"interface": "eth0", "snaplen": 2048, "buffer_size_mb": 256}}, "outputs": [{"type": "gre", "rate_limit_mbps": 10, "gre": {"host": "172.16.1.201", "bind_device": "eth1"}}, {"type": "vxlan", "rate_limit_mbps": 10, "vxlan": {"host": "172.16.1.202", "port": 4789, "vni1": 2147483648, "bind_device": "eth1"}}]}]}"#;
+const CONFIG_LIBPCAP_GRE_VXLAN: &str = r#"{"tasks": [{"req_pattern": {"type": "auto"}, "capturer": {"type": "libpcap", "libpcap": {"interface": "eth0", "snaplen": 2048, "buffer_size_mb": 256}}, "outputs": [{"type": "gre", "rate_limit_mbps": 10, "gre": {"host": "172.16.1.201", "bind_device": "eth1"}}, {"type": "vxlan", "rate_limit_mbps": 10, "vxlan": {"host": "172.16.1.202", "port": 4789, "vni1": 11259375, "bind_device": "eth1"}}]}]}"#;
 
 const CONFIG_TWO_TASKS_VXLAN: &str = r#"{"tasks": [{"req_pattern": {"type": "auto"}, "capturer": {"type": "libpcap", "libpcap": {"interface": "ens192", "snaplen": 65535, "buffer_size_mb": 256}}, "outputs": [{"type": "vxlan", "vxlan": {"host": "172.16.206.40", "port": 4788, "vni1": 123}}]},{"req_pattern": {"type": "auto"}, "capturer": {"type": "libpcap", "libpcap": {"interface": "ens192", "snaplen": 65535, "buffer_size_mb": 256}}, "outputs": [{"type": "vxlan", "vxlan": {"host": "172.16.206.24", "port": 4788, "vni1": 234}}]}]}"#;
 
@@ -54,7 +54,7 @@ fn matches(pattern: &str, ip: &IpAddr, port: u16) -> bool {
 fn test_parse_config_data_for_libpcap_gre_vxlan() {
     let c = parse(CONFIG_LIBPCAP_GRE_VXLAN);
     match &c.tasks[0].outputs[1].kind {
-        OutputKind::Vxlan(v) => assert_eq!(v.vni, 2147483648),
+        OutputKind::Vxlan(v) => assert_eq!(v.vni, 0xAB_CDEF),
         _ => panic!("expected vxlan"),
     }
 }
