@@ -928,6 +928,12 @@ mod tests {
         /// closes (`usize::MAX` = unlimited). Draining it makes writes return
         /// `WouldBlock`, i.e. a real socket send buffer that filled up.
         write_budget: Arc<AtomicUsize>,
+        /// Number of upcoming `write`/`read` calls to fail with `Interrupted`
+        /// (EINTR) before proceeding normally.
+        interrupt_writes: Arc<AtomicUsize>,
+        interrupt_reads: Arc<AtomicUsize>,
+        /// When set, `read` fails with a hard (non-`WouldBlock`) error.
+        fail_read: Arc<AtomicBool>,
     }
 
     struct MockTransport {
@@ -936,6 +942,10 @@ mod tests {
 
     impl Transport for MockTransport {
         fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+            if self.h.interrupt_writes.load(Ordering::Relaxed) > 0 {
+                self.h.interrupt_writes.fetch_sub(1, Ordering::Relaxed);
+                return Err(io::Error::from(io::ErrorKind::Interrupted));
+            }
             if self.h.fail_write.load(Ordering::Relaxed) {
                 return Err(io::Error::from(io::ErrorKind::BrokenPipe));
             }
@@ -949,6 +959,13 @@ mod tests {
             Ok(n)
         }
         fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+            if self.h.fail_read.load(Ordering::Relaxed) {
+                return Err(io::Error::from(io::ErrorKind::BrokenPipe));
+            }
+            if self.h.interrupt_reads.load(Ordering::Relaxed) > 0 {
+                self.h.interrupt_reads.fetch_sub(1, Ordering::Relaxed);
+                return Err(io::Error::from(io::ErrorKind::Interrupted));
+            }
             let mut peer = self.h.peer.lock().unwrap();
             if !peer.is_empty() {
                 let n = peer.len().min(buf.len());
@@ -1331,6 +1348,262 @@ mod tests {
         z.poll();
         assert!(z.queued() >= 1);
     }
+
+    /// Build an `ERROR` command frame (name + one length-prefixed reason byte).
+    fn error_command(reason: &str) -> Vec<u8> {
+        let mut body = vec![5];
+        body.extend_from_slice(b"ERROR");
+        body.push(reason.len() as u8);
+        body.extend_from_slice(reason.as_bytes());
+        codec::frame(codec::FLAG_COMMAND, &body)
+    }
+
+    #[test]
+    fn accessors_report_the_configured_limits() {
+        let (z, _h) = setup(valid_peer(), 5);
+        assert_eq!(z.hwm(), 5);
+        assert_eq!(z.max_queued_bytes(), DEFAULT_MAX_QUEUED_BYTES);
+        assert_eq!(z.handshakes_given_up(), 0);
+        let z = z.with_queue_limits(7, 12_345);
+        assert_eq!(z.hwm(), 7);
+        assert_eq!(z.max_queued_bytes(), 12_345);
+    }
+
+    /// The byte budget must use the *short* header for bodies up to 255 bytes:
+    /// a tight budget that fits the 2-byte frame must accept it.
+    #[test]
+    fn send_framing_at_the_255_byte_boundary() {
+        let (mut z, h) = setup(valid_peer(), 10);
+        drive_until_open(&mut z);
+        h.fail_write.store(true, Ordering::Relaxed);
+        let mut z = z.with_queue_limits(10, 2);
+        assert_eq!(z.send(b""), SendOutcome::Queued);
+        assert_eq!(z.queued_bytes(), 2);
+        assert_eq!(z.send(b""), SendOutcome::Dropped);
+
+        let (mut z, h2) = setup(valid_peer(), 10);
+        drive_until_open(&mut z);
+        h2.fail_write.store(true, Ordering::Relaxed);
+        let mut z = z.with_queue_limits(10, 257);
+        assert_eq!(z.send(&[0u8; 255]), SendOutcome::Queued);
+        assert_eq!(z.queued_bytes(), 257);
+    }
+
+    #[test]
+    fn backoff_doubles_and_resets_after_a_successful_handshake() {
+        let h = Handles::default();
+        h.eof.store(true, Ordering::Relaxed); // no peer bytes: immediate EOF
+        let mut z = ZmtpPush::new(Box::new(MockConnector { h: h.clone() }), 10);
+        z.poll();
+        assert!(
+            z.conn.is_none(),
+            "a failed handshake must drop the connection"
+        );
+        assert_eq!(z.backoff, INITIAL_BACKOFF * 2, "backoff must double");
+        assert!(
+            z.next_attempt > Instant::now(),
+            "reconnect must be deferred"
+        );
+
+        h.eof.store(false, Ordering::Relaxed);
+        *h.peer.lock().unwrap() = valid_peer();
+        let deadline = Instant::now() + Duration::from_secs(3);
+        while !z.is_connected() && Instant::now() < deadline {
+            z.poll();
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert!(z.is_connected(), "client must reconnect");
+        assert_eq!(
+            z.backoff, INITIAL_BACKOFF,
+            "a completed handshake must reset the backoff"
+        );
+    }
+
+    /// `backoff` is reset only on the transition into `Phase::Open`, and only when
+    /// the handshake really completed. Resetting it on every drive - or on a
+    /// connection that is still greeting - would let a flapping collector be
+    /// re-dialled with no delay at all.
+    #[test]
+    fn backoff_is_reset_only_on_the_transition_into_open() {
+        // Already open and staying open: driving it must not reset the backoff.
+        let (mut z, _h) = setup(valid_peer(), 10);
+        drive_until_open(&mut z);
+        z.backoff = MAX_BACKOFF;
+        z.poll();
+        assert!(z.is_connected(), "the connection must still be open");
+        assert_eq!(
+            z.backoff, MAX_BACKOFF,
+            "an open connection must not reset the backoff on every drive"
+        );
+
+        // Not open, and this drive makes no progress: no reset either.
+        let h = Handles::default();
+        let mut z = ZmtpPush::new(Box::new(MockConnector { h: h.clone() }), 10);
+        z.poll(); // starts the connect and the greeting, then WouldBlock
+        assert!(z.conn.is_some(), "still handshaking");
+        assert!(!z.is_connected());
+        z.backoff = MAX_BACKOFF;
+        z.poll();
+        assert_eq!(
+            z.backoff, MAX_BACKOFF,
+            "a partial handshake must not reset the backoff"
+        );
+    }
+
+    #[test]
+    fn interrupted_writes_and_reads_are_retried() {
+        let (mut z, h) = setup(valid_peer(), 10);
+        h.interrupt_writes.store(3, Ordering::Relaxed);
+        h.interrupt_reads.store(3, Ordering::Relaxed);
+        drive_until_open(&mut z);
+        assert!(h
+            .written
+            .lock()
+            .unwrap()
+            .starts_with(&codec::greeting()[..]));
+    }
+
+    /// A real write error (not `WouldBlock`) during the handshake or while
+    /// flushing a business frame must tear the connection down.
+    #[test]
+    fn a_hard_write_error_disconnects() {
+        let (mut z, h) = setup(valid_peer(), 10);
+        h.fail_write.store(true, Ordering::Relaxed);
+        for _ in 0..5 {
+            z.poll();
+        }
+        assert!(!z.is_connected(), "handshake write error must disconnect");
+
+        let (mut z, h2) = setup(valid_peer(), 10);
+        drive_until_open(&mut z);
+        h2.fail_write.store(true, Ordering::Relaxed);
+        assert_eq!(z.send(b"payload"), SendOutcome::Queued);
+        z.poll();
+        assert!(!z.is_connected(), "flush write error must disconnect");
+        assert_eq!(z.queued_bytes(), 2 + 7, "the undelivered frame is retained");
+    }
+
+    #[test]
+    fn error_command_before_ready_disconnects() {
+        let mut peer = codec::greeting().to_vec();
+        peer.extend_from_slice(&error_command("bad socket type"));
+        peer.extend_from_slice(&codec::ready_command("PULL"));
+        let (mut z, _h) = setup(peer, 10);
+        for _ in 0..5 {
+            z.poll();
+        }
+        assert!(
+            !z.is_connected(),
+            "an ERROR command must abort the handshake even if READY follows"
+        );
+    }
+
+    #[test]
+    fn exact_length_greeting_is_processed_immediately() {
+        let (mut z, h) = setup(codec::greeting().to_vec(), 10);
+        z.poll();
+        let w = h.written.lock().unwrap();
+        assert!(w.starts_with(&codec::greeting()[..]));
+        assert!(
+            w.len() > codec::GREETING_LEN,
+            "READY must follow an exact-length greeting (wrote {} bytes)",
+            w.len()
+        );
+    }
+
+    #[test]
+    fn backoff_suppresses_reconnect_attempts() {
+        struct FailingConnector {
+            calls: Arc<AtomicU32>,
+        }
+        impl Connector for FailingConnector {
+            fn start(&mut self) -> io::Result<Box<dyn Transport>> {
+                self.calls.fetch_add(1, Ordering::Relaxed);
+                Err(io::Error::other("refused"))
+            }
+        }
+        let calls = Arc::new(AtomicU32::new(0));
+        let mut z = ZmtpPush::new(
+            Box::new(FailingConnector {
+                calls: calls.clone(),
+            }),
+            10,
+        );
+        z.poll();
+        assert_eq!(calls.load(Ordering::Relaxed), 1, "one connect attempt");
+        for _ in 0..10 {
+            z.poll();
+        }
+        assert_eq!(
+            calls.load(Ordering::Relaxed),
+            1,
+            "the backoff window must suppress further attempts"
+        );
+    }
+
+    #[test]
+    fn error_command_after_open_disconnects() {
+        let (mut z, h) = setup(valid_peer(), 10);
+        drive_until_open(&mut z);
+        h.peer
+            .lock()
+            .unwrap()
+            .extend_from_slice(&error_command("go away"));
+        for _ in 0..5 {
+            z.poll();
+        }
+        assert!(
+            !z.is_connected(),
+            "an ERROR after the handshake must tear the connection down"
+        );
+    }
+
+    #[test]
+    fn a_hard_read_error_disconnects() {
+        let (mut z, h) = setup(valid_peer(), 10);
+        h.fail_read.store(true, Ordering::Relaxed);
+        z.poll();
+        assert!(
+            z.conn.is_none(),
+            "a non-WouldBlock read error must drop the connection"
+        );
+    }
+
+    /// A `WouldBlock` in the middle of a business frame must requeue the frame
+    /// with the bytes already written accounted for.
+    #[test]
+    fn would_block_while_flushing_requeues_the_frame() {
+        let (mut z, h) = setup(valid_peer(), 10);
+        drive_until_open(&mut z);
+        // Let only 3 of the 12 frame bytes through.
+        h.write_budget.store(3, Ordering::Relaxed);
+        assert_eq!(z.send(b"1234567890"), SendOutcome::Queued);
+        z.poll();
+        assert!(z.is_connected(), "WouldBlock must not drop the connection");
+        assert_eq!(
+            z.queued_bytes(),
+            9,
+            "12 frame bytes minus the 3 already written"
+        );
+    }
+
+    /// EINTR while flushing a business frame must be retried, not treated as a
+    /// disconnect.
+    #[test]
+    fn interrupted_writes_while_flushing_are_retried() {
+        let (mut z, h) = setup(valid_peer(), 10);
+        drive_until_open(&mut z);
+        let base = h.connects.load(Ordering::Relaxed);
+        h.interrupt_writes.store(2, Ordering::Relaxed);
+        assert_eq!(z.send(b"hello"), SendOutcome::Queued);
+        z.poll();
+        assert_eq!(
+            h.connects.load(Ordering::Relaxed),
+            base,
+            "EINTR must not force a reconnect"
+        );
+        assert_eq!(z.queued(), 0, "the frame must be flushed after the retry");
+    }
 }
 
 #[cfg(test)]
@@ -1341,7 +1614,7 @@ mod robustness_tests {
     use crate::zmtp::client::connect_stream;
     use std::net::TcpListener;
     use std::os::fd::AsRawFd;
-    use std::sync::atomic::{AtomicU32, Ordering};
+    use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
     use std::sync::{Arc, Mutex};
 
     /// A resolver whose answers can be swapped while the client runs, standing
@@ -1576,5 +1849,219 @@ mod robustness_tests {
         // Release the worker so it does not stay blocked.
         *gate.0.lock().unwrap() = true;
         gate.1.notify_all();
+    }
+
+    /// An address that fails synchronously (`ENETUNREACH`), unlike a closed
+    /// loopback port which only fails after the non-blocking connect settles.
+    fn unreachable(port: u16) -> SocketAddr {
+        SocketAddr::from(([255, 255, 255, 255], port))
+    }
+
+    #[test]
+    fn connector_skips_a_dead_address_and_advances_after_all_fail() {
+        let listener = TcpListener::bind(SocketAddr::from(([127, 0, 0, 1], 0))).unwrap();
+        let good = listener.local_addr().unwrap();
+
+        // [dead, good]: the dead address is stepped past, and `next` points back
+        // at the address that worked.
+        let r = ScriptedResolver::new(vec![vec![unreachable(good.port()), good]]);
+        let mut c = TcpConnector {
+            host: "collector.example".into(),
+            port: good.port(),
+            resolver: Box::new(r),
+            addrs: Vec::new(),
+            next: 0,
+            last_resolve: None,
+        };
+        let t = c.start().expect("second address is live");
+        drop(t);
+        assert_eq!(c.next, 0, "next must follow the address that worked");
+
+        // [dead, dead]: every answer fails, so the starting index must still move
+        // on for the next attempt.
+        let r = ScriptedResolver::new(vec![vec![
+            unreachable(good.port()),
+            unreachable(good.port()),
+        ]]);
+        let mut c = TcpConnector {
+            host: "collector.example".into(),
+            port: good.port(),
+            resolver: Box::new(r),
+            addrs: Vec::new(),
+            next: 0,
+            last_resolve: None,
+        };
+        assert!(c.start().is_err(), "all addresses failed");
+        assert_eq!(c.next, 1, "a fully failed attempt must advance the index");
+        drop(listener);
+    }
+
+    #[test]
+    fn refresh_keeps_the_previous_answer_when_the_resolver_returns_empty() {
+        let good: SocketAddr = "127.0.0.1:5555".parse().unwrap();
+        let r = ScriptedResolver::new(vec![vec![good], Vec::new()]);
+        let mut c = TcpConnector {
+            host: "collector.example".into(),
+            port: 5555,
+            resolver: Box::new(r),
+            addrs: Vec::new(),
+            next: 0,
+            last_resolve: None,
+        };
+        c.refresh_addresses();
+        assert_eq!(c.addrs, vec![good]);
+        std::thread::sleep(RESOLVE_TTL + Duration::from_millis(50));
+        c.refresh_addresses();
+        assert_eq!(
+            c.addrs,
+            vec![good],
+            "a transient empty answer must not drop the last known address"
+        );
+    }
+
+    #[test]
+    fn background_resolver_refreshes_only_after_the_ttl() {
+        struct Counting {
+            calls: Arc<AtomicUsize>,
+            addr: SocketAddr,
+        }
+        impl Resolver for Counting {
+            fn resolve(&mut self, _h: &str, _p: u16) -> io::Result<Vec<SocketAddr>> {
+                self.calls.fetch_add(1, Ordering::SeqCst);
+                Ok(vec![self.addr])
+            }
+        }
+        let addr: SocketAddr = "127.0.0.1:5556".parse().unwrap();
+        let calls = Arc::new(AtomicUsize::new(0));
+        let mut r = BackgroundResolver::with_worker_resolver(
+            "collector.invalid",
+            5556,
+            Box::new(Counting {
+                calls: calls.clone(),
+                addr,
+            }),
+        )
+        .unwrap();
+        assert_eq!(calls.load(Ordering::SeqCst), 1, "initial resolve");
+        // A fresh cache must not ask the worker to resolve again.
+        r.resolve("collector.invalid", 5556).unwrap();
+        std::thread::sleep(Duration::from_millis(80));
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            1,
+            "a fresh answer must not trigger a refresh"
+        );
+        // Past the TTL a refresh is requested and the worker performs it.
+        std::thread::sleep(RESOLVE_TTL + Duration::from_millis(50));
+        r.resolve("collector.invalid", 5556).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while calls.load(Ordering::SeqCst) < 2 && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert!(
+            calls.load(Ordering::SeqCst) >= 2,
+            "stale cache must refresh"
+        );
+    }
+
+    #[test]
+    fn tcp_transport_reports_a_refused_connect() {
+        let listener = TcpListener::bind(SocketAddr::from(([127, 0, 0, 1], 0))).unwrap();
+        let addr = listener.local_addr().unwrap();
+        drop(listener); // nothing is listening now
+        let stream = connect_stream(addr).expect("non-blocking connect starts");
+        let mut t = TcpTransport {
+            stream,
+            connecting: true,
+        };
+        let deadline = Instant::now() + Duration::from_secs(3);
+        loop {
+            match t.check_connected() {
+                Err(_) => return, // the refusal surfaced, as required
+                Ok(true) => panic!("a refused connect must not report connected"),
+                Ok(false) => {
+                    assert!(
+                        Instant::now() < deadline,
+                        "the refused connect was never reported"
+                    );
+                    std::thread::sleep(Duration::from_millis(5));
+                }
+            }
+        }
+    }
+
+    /// A non-blocking connect that has actually completed must report *connected*
+    /// on the first poll, not "still connecting". `check_connected` is what turns
+    /// a `Phase::Connecting` transport into a greeting one, so inverting it stalls
+    /// every connection until the handshake deadline expires.
+    #[test]
+    fn tcp_transport_marks_a_completed_connect_as_connected() {
+        let listener = TcpListener::bind(SocketAddr::from(([127, 0, 0, 1], 0))).unwrap();
+        let addr = listener.local_addr().unwrap();
+        let stream = TcpStream::connect(addr).expect("blocking connect");
+        let (server, _) = listener.accept().expect("accept");
+        stream.set_nonblocking(true).expect("nonblocking");
+        let mut t = TcpTransport {
+            stream,
+            connecting: true,
+        };
+        assert!(
+            t.check_connected().expect("poll a live socket"),
+            "a completed connect is connected"
+        );
+        assert!(
+            t.check_connected().expect("second poll"),
+            "and it stays connected"
+        );
+        drop(server);
+    }
+
+    /// A transient DNS failure that comes back as an empty answer (rather than an
+    /// error) must keep the last working address: dropping it would make the
+    /// client unable to reconnect until DNS recovers.
+    #[test]
+    fn an_empty_refresh_result_keeps_the_previous_addresses() {
+        struct Emptying {
+            calls: Arc<AtomicUsize>,
+            addr: SocketAddr,
+        }
+        impl Resolver for Emptying {
+            fn resolve(&mut self, _h: &str, _p: u16) -> io::Result<Vec<SocketAddr>> {
+                if self.calls.fetch_add(1, Ordering::SeqCst) == 0 {
+                    Ok(vec![self.addr])
+                } else {
+                    Ok(Vec::new())
+                }
+            }
+        }
+        let addr: SocketAddr = "127.0.0.1:5557".parse().unwrap();
+        let calls = Arc::new(AtomicUsize::new(0));
+        let mut r = BackgroundResolver::with_worker_resolver(
+            "collector.invalid",
+            5557,
+            Box::new(Emptying {
+                calls: calls.clone(),
+                addr,
+            }),
+        )
+        .unwrap();
+        assert_eq!(r.resolve("collector.invalid", 5557).unwrap(), vec![addr]);
+
+        std::thread::sleep(RESOLVE_TTL + Duration::from_millis(50));
+        r.resolve("collector.invalid", 5557).unwrap(); // asks for a refresh
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while calls.load(Ordering::SeqCst) < 2 && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert!(
+            calls.load(Ordering::SeqCst) >= 2,
+            "the worker must have run"
+        );
+        std::thread::sleep(Duration::from_millis(100)); // let it publish the answer
+        assert_eq!(
+            r.resolve("collector.invalid", 5557).unwrap(),
+            vec![addr],
+            "an empty answer must not wipe the working address"
+        );
     }
 }

@@ -197,4 +197,102 @@ mod tests {
         );
         assert_eq!(task_fingerprint(&t), "38336539-3738-6433-6133-326337343139");
     }
+
+    /// Every `opt_*` helper and every output/capturer branch must contribute its
+    /// label; a dropped helper (or a whole dropped `output_labels`) would leave
+    /// the fingerprint blind to that field.
+    #[test]
+    fn every_field_contributes_a_label() {
+        let j = r#"{
+          "req_pattern":{"type":"custom","custom":{"pattern":"GET /"}},
+          "capturer":{"type":"libpcap","libpcap":{
+            "interface":"eth0","snaplen":128,"netns":"ns1","bpf":"tcp",
+            "buffer_size_mb":4,"timeout_ms":100,"not_filter_output_hosts":true}},
+          "outputs":[
+            {"type":"vxlan","rate_limit_mbps":10,"slice":2,"vxlan":{
+              "host":"h1","port":4789,"capture_time":true,"vni1":1,"vni2":2,
+              "bind_device":"eth0","pmtudisc":"do",
+              "split":{"max_payload_size":1400,"recalculate_checksum":false}}},
+            {"type":"gre","gre":{"host":"h2","service_tag":7,
+              "bind_device":"eth1","pmtudisc":"dont"}},
+            {"type":"zmq","zmq":{"host":"h3","port":5555,"hwm":1000,
+              "service_tag":9,"uuid":"u","heartbeat_ms":500}},
+            {"type":"file","file":{"name":"out.pcap"}},
+            {"type":"rotating_file","rotating_file":{"file_root":"/root","max_file_interval":60}}
+          ]
+        }"#;
+        let t: TaskConfig = serde_json::from_str(j).unwrap();
+        let l = task_fingerprint_labels(&t);
+        let get = |k: &str| l.get(k).map(String::as_str);
+
+        assert_eq!(get("req_pattern.type"), Some("custom"));
+        assert_eq!(get("req_pattern.custom.pattern"), Some("GET /"));
+        assert_eq!(get("capturer.type"), Some("libpcap"));
+        assert_eq!(get("capturer.libpcap.interface"), Some("eth0"));
+        // opt_i64
+        assert_eq!(get("capturer.libpcap.snaplen"), Some("128"));
+        assert_eq!(get("capturer.libpcap.timeout_ms"), Some("100"));
+        // opt_str
+        assert_eq!(get("capturer.libpcap.netns"), Some("ns1"));
+        assert_eq!(get("capturer.libpcap.bpf"), Some("tcp"));
+        // opt_u64
+        assert_eq!(get("capturer.libpcap.buffer_size_mb"), Some("4"));
+        // opt_bool(true)
+        assert_eq!(
+            get("capturer.libpcap.not_filter_output_hosts"),
+            Some("true")
+        );
+
+        // Outputs: index prefix + per-type helpers.
+        assert_eq!(get("outputs.0.type"), Some("vxlan"));
+        assert_eq!(get("outputs.0.rate_limit_mbps"), Some("10"));
+        assert_eq!(get("outputs.0.slice"), Some("2"));
+        assert_eq!(get("outputs.0.vxlan.port"), Some("4789"));
+        assert_eq!(get("outputs.0.vxlan.capture_time"), Some("true"));
+        assert_eq!(get("outputs.0.vxlan.vni1"), Some("1"));
+        assert_eq!(get("outputs.0.vxlan.vni2"), Some("2"));
+        assert_eq!(get("outputs.0.vxlan.bind_device"), Some("eth0"));
+        assert_eq!(get("outputs.0.vxlan.pmtudisc"), Some("do"));
+        assert_eq!(get("outputs.0.vxlan.split.max_payload_size"), Some("1400"));
+        // opt_bool(false)
+        assert_eq!(
+            get("outputs.0.vxlan.split.recalculate_checksum"),
+            Some("false")
+        );
+
+        assert_eq!(get("outputs.1.gre.host"), Some("h2"));
+        assert_eq!(get("outputs.1.gre.service_tag"), Some("7"));
+        assert_eq!(get("outputs.1.gre.bind_device"), Some("eth1"));
+        assert_eq!(get("outputs.1.gre.pmtudisc"), Some("dont"));
+
+        assert_eq!(get("outputs.2.zmq.host"), Some("h3"));
+        assert_eq!(get("outputs.2.zmq.port"), Some("5555"));
+        assert_eq!(get("outputs.2.zmq.hwm"), Some("1000"));
+        assert_eq!(get("outputs.2.zmq.service_tag"), Some("9"));
+        assert_eq!(get("outputs.2.zmq.uuid"), Some("u"));
+        assert_eq!(get("outputs.2.zmq.heartbeat_ms"), Some("500"));
+
+        assert_eq!(get("outputs.3.file.name"), Some("out.pcap"));
+        assert_eq!(get("outputs.4.rotating_file.file_root"), Some("/root"));
+        assert_eq!(get("outputs.4.rotating_file.max_file_interval"), Some("60"));
+    }
+
+    /// `None` options must not produce labels (so an unset field does not change
+    /// the fingerprint), while non-pointer Go fields still do.
+    #[test]
+    fn absent_options_add_no_labels() {
+        let j = r#"{"capturer":{"type":"libpcap","libpcap":{"interface":"eth0"}},"outputs":[]}"#;
+        let t: TaskConfig = serde_json::from_str(j).unwrap();
+        let l = task_fingerprint_labels(&t);
+        assert!(!l.contains_key("capturer.libpcap.snaplen"));
+        assert!(!l.contains_key("capturer.libpcap.netns"));
+        assert!(
+            !l.contains_key("capturer.libpcap.not_filter_output_hosts"),
+            "an unset option must not contribute"
+        );
+        assert_eq!(
+            l.get("capturer.libpcap.interface").map(String::as_str),
+            Some("eth0")
+        );
+    }
 }

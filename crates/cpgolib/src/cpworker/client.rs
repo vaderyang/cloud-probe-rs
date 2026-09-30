@@ -375,4 +375,52 @@ mod tests {
         handle.join().unwrap();
         let _ = std::fs::remove_file(&path);
     }
+
+    #[test]
+    fn close_releases_the_connection() {
+        let path = temp_socket("close");
+        let handle = spawn_mock(&path, "{\"status\":\"OK\"}");
+        let mut client = UnixClient::new(&format!("unix://{}", path.display())).unwrap();
+        client.dial().expect("handshake");
+        assert!(client.conn.is_some());
+        client.close().expect("close");
+        assert!(client.conn.is_none(), "close must drop the stream");
+        handle.join().unwrap();
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn collect_stats_summary_parses_the_payload() {
+        let path = temp_socket("stats");
+        let handle = spawn_mock(&path, "{\"status\":\"OK\",\"time\":{\"sec\":1,\"nsec\":2}}");
+        let mut client = UnixClient::new(&format!("unix://{}", path.display())).unwrap();
+        let s = client
+            .collect_stats_summary(Duration::from_secs(2))
+            .expect("stats");
+        assert_eq!(s.time.sec, 1);
+        assert_eq!(s.time.nsec, 2);
+        let lines = handle.join().unwrap();
+        assert!(
+            lines[1].contains(r#""command":"collect_stats_summary""#),
+            "command frame: {}",
+            lines[1]
+        );
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn reload_config_requires_an_ok_reply() {
+        let path = temp_socket("reload");
+        let handle = spawn_mock(&path, "{\"status\":\"ERROR\",\"message\":\"nope\"}");
+        let mut client = UnixClient::new(&format!("unix://{}", path.display())).unwrap();
+        let err = client.reload_config(Duration::from_secs(2)).unwrap_err();
+        assert!(matches!(err, Error::NotOk(_)), "{err}");
+        let lines = handle.join().unwrap();
+        assert!(
+            lines[1].contains(r#""command":"reload_config""#),
+            "command frame: {}",
+            lines[1]
+        );
+        let _ = std::fs::remove_file(&path);
+    }
 }

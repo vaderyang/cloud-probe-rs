@@ -435,4 +435,37 @@ mod tests {
         assert_eq!(n, 2);
         assert_eq!(f.body, Vec::<u8>::new());
     }
+
+    /// The three truncation points in `parse_metadata` are distinguishable, and
+    /// which field is short is what the daemon logs; a collision between them
+    /// would silently mislabel a malformed peer.
+    #[test]
+    fn metadata_truncation_reports_which_field_is_short() {
+        // name-len = 5 but only one name byte follows.
+        assert_eq!(
+            parse_metadata(&[0x05, b'a']).unwrap_err(),
+            CodecError("metadata name truncated")
+        );
+        // The name fills the buffer exactly, so it is the 4-byte value length
+        // that is missing -- not the name.
+        assert_eq!(
+            parse_metadata(&[0x01, b'a']).unwrap_err(),
+            CodecError("metadata value length truncated")
+        );
+        // value-len says 4 bytes but only two follow.
+        assert_eq!(
+            parse_metadata(&[0x01, b'a', 0, 0, 0, 4, 0xAA, 0xBB]).unwrap_err(),
+            CodecError("metadata value truncated")
+        );
+    }
+
+    /// The long flag is a function of the body length, so a caller-supplied
+    /// `FLAG_LONG` must not be toggled away for a long body (nor kept for a
+    /// short one).
+    #[test]
+    fn frame_normalises_the_long_flag_from_the_body_length() {
+        assert_eq!(frame(FLAG_LONG, &[0u8; 256])[0] & FLAG_LONG, FLAG_LONG);
+        assert_eq!(frame(FLAG_LONG, &[0u8; 4])[0] & FLAG_LONG, 0);
+        assert_eq!(frame(FLAG_COMMAND, &[0u8; 256])[0] & FLAG_LONG, FLAG_LONG);
+    }
 }

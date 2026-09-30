@@ -51,3 +51,48 @@ pub const JMP_JSET_K: u16 = BPF_JMP | BPF_JSET | BPF_K;
 pub const JMP_JA: u16 = BPF_JMP | BPF_JA;
 /// `ret #k`.
 pub const RET_K: u16 = BPF_RET | BPF_K;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The exact numeric encodings from `linux/filter.h`. The compiler's golden
+    /// tests cannot catch a wrong constant because the emitter and the
+    /// disassembler share it; pinning the ABI values here does.
+    #[test]
+    fn opcodes_match_linux_filter_h() {
+        // Class / size / mode / alu / jmp / ret building blocks.
+        assert_eq!(BPF_LD, 0x00);
+        assert_eq!(BPF_LDX, 0x01);
+        assert_eq!(BPF_ALU, 0x04);
+        assert_eq!(BPF_JMP, 0x05);
+        assert_eq!(BPF_RET, 0x06);
+        assert_eq!(BPF_W, 0x00);
+        assert_eq!(BPF_H, 0x08);
+        assert_eq!(BPF_B, 0x10);
+        assert_eq!(BPF_ABS, 0x20);
+        assert_eq!(BPF_IND, 0x40);
+        assert_eq!(BPF_MSH, 0xa0);
+        assert_eq!(BPF_AND, 0x50);
+        assert_eq!(BPF_JA, 0x00);
+        assert_eq!(BPF_JEQ, 0x10);
+        assert_eq!(BPF_JGT, 0x20);
+        assert_eq!(BPF_JGE, 0x30);
+        assert_eq!(BPF_JSET, 0x40);
+        assert_eq!(BPF_K, 0x00);
+
+        // The opcodes actually emitted.
+        assert_eq!(LD_H_ABS, 0x28);
+        assert_eq!(LD_W_ABS, 0x20);
+        assert_eq!(LD_B_ABS, 0x30);
+        assert_eq!(LD_H_IND, 0x48);
+        assert_eq!(LDX_MSH, 0xb1);
+        assert_eq!(ALU_AND_K, 0x54);
+        assert_eq!(JMP_JEQ_K, 0x15);
+        assert_eq!(JMP_JGE_K, 0x35);
+        assert_eq!(JMP_JGT_K, 0x25);
+        assert_eq!(JMP_JSET_K, 0x45);
+        assert_eq!(JMP_JA, 0x05);
+        assert_eq!(RET_K, 0x06);
+    }
+}

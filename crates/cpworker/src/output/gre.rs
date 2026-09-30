@@ -314,6 +314,30 @@ mod tests {
         );
     }
 
+    /// The two socket-option wrappers must propagate the OS error, never swallow
+    /// it: `PARITY.md` has `new_gre_output` bail out when `SO_BINDTODEVICE` or
+    /// `IP_MTU_DISCOVER` fails. The real bind needs `CAP_NET_RAW`, but argument
+    /// validation and the kernel's own rejection of a bad mode do not, so this
+    /// runs unprivileged. An unprivileged socket also cannot be bound, so the
+    /// assertions below are limited to what the kernel guarantees either way.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn socket_option_wrappers_propagate_setsockopt_errors() {
+        let sock = Socket::new(Domain::IPV4, Type::DGRAM, None).unwrap();
+
+        // `bind_to_device` validates the name before the syscall, so this needs
+        // no privilege: a NUL inside the ifname is an input error.
+        let e = set_bind_device(&sock, "gre\0if").unwrap_err();
+        assert_eq!(e.kind(), std::io::ErrorKind::InvalidInput);
+
+        // The documented PMTUD modes are accepted; anything else is the kernel's
+        // EINVAL and must surface rather than be reported as success.
+        for mode in [IP_PMTUDISC_DONT, IP_PMTUDISC_WANT, IP_PMTUDISC_DO] {
+            set_pmtudisc(&sock, mode).unwrap();
+        }
+        assert!(set_pmtudisc(&sock, 12345).is_err());
+    }
+
     #[test]
     fn send_packet_forwards_header_and_payload() {
         let state = mock(vec![]);

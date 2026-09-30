@@ -835,4 +835,570 @@ mod tests {
         assert!(build("ip proto 6").apply(&pkt));
         assert!(!build("ip proto 17").apply(&pkt));
     }
+
+    // -----------------------------------------------------------------------
+    // Semantic matrix. Each `Test` variant the compiler can emit is matched
+    // against a packet built to the documented wire layout, in both the
+    // matching and non-matching direction, so a wrong load offset/constant or a
+    // wrong jump distance changes the verdict.
+    // -----------------------------------------------------------------------
+
+    fn eth(ethertype: u16) -> Vec<u8> {
+        let mut p = vec![0u8; 14];
+        p[12..14].copy_from_slice(&ethertype.to_be_bytes());
+        p
+    }
+
+    fn tcp_l4(sport: u16, dport: u16) -> Vec<u8> {
+        let mut l4 = vec![0u8; 20];
+        l4[0..2].copy_from_slice(&sport.to_be_bytes());
+        l4[2..4].copy_from_slice(&dport.to_be_bytes());
+        l4
+    }
+
+    fn udp_l4(sport: u16, dport: u16) -> Vec<u8> {
+        let mut l4 = vec![0u8; 8];
+        l4[0..2].copy_from_slice(&sport.to_be_bytes());
+        l4[2..4].copy_from_slice(&dport.to_be_bytes());
+        l4
+    }
+
+    fn ipv4(src: [u8; 4], dst: [u8; 4], proto: u8, l4: &[u8]) -> Vec<u8> {
+        let mut p = eth(0x0800);
+        let mut ip = [0u8; 20];
+        ip[0] = 0x45; // IHL=5
+        ip[2..4].copy_from_slice(&(20 + l4.len() as u16).to_be_bytes());
+        ip[9] = proto;
+        ip[12..16].copy_from_slice(&src);
+        ip[16..20].copy_from_slice(&dst);
+        p.extend_from_slice(&ip);
+        p.extend_from_slice(l4);
+        p
+    }
+
+    fn ipv6(src: [u8; 16], dst: [u8; 16], next: u8, l4: &[u8]) -> Vec<u8> {
+        let mut p = eth(0x86dd);
+        let mut ip = [0u8; 40];
+        ip[0] = 0x60;
+        ip[4..6].copy_from_slice(&(l4.len() as u16).to_be_bytes());
+        ip[6] = next;
+        ip[7] = 64; // hop limit
+        ip[8..24].copy_from_slice(&src);
+        ip[24..40].copy_from_slice(&dst);
+        p.extend_from_slice(&ip);
+        p.extend_from_slice(l4);
+        p
+    }
+
+    fn arp(ethertype: u16, oper: u16, spa: [u8; 4], tpa: [u8; 4]) -> Vec<u8> {
+        let mut p = eth(ethertype);
+        let mut a = [0u8; 28];
+        a[0..2].copy_from_slice(&1u16.to_be_bytes()); // htype
+        a[2..4].copy_from_slice(&0x0800u16.to_be_bytes()); // ptype
+        a[4] = 6; // hlen
+        a[5] = 4; // plen
+        a[6..8].copy_from_slice(&oper.to_be_bytes());
+        a[14..18].copy_from_slice(&spa);
+        a[24..28].copy_from_slice(&tpa);
+        p.extend_from_slice(&a);
+        p
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn v6(a: u16, b: u16, c: u16, d: u16, e: u16, f: u16, g: u16, h: u16) -> [u8; 16] {
+        let mut out = [0u8; 16];
+        for (i, w) in [a, b, c, d, e, f, g, h].iter().enumerate() {
+            out[2 * i..2 * i + 2].copy_from_slice(&w.to_be_bytes());
+        }
+        out
+    }
+
+    fn apply(expr: &str, pkt: &[u8]) -> bool {
+        build(expr).apply(pkt)
+    }
+
+    #[test]
+    fn protocol_keywords_match_their_family() {
+        let v4_tcp = ipv4([10, 0, 0, 1], [10, 0, 0, 2], 6, &tcp_l4(1, 2));
+        let v4_udp = ipv4([10, 0, 0, 1], [10, 0, 0, 2], 17, &udp_l4(1, 2));
+        let v4_icmp = ipv4([10, 0, 0, 1], [10, 0, 0, 2], 1, &[0u8; 8]);
+        let v6_tcp = ipv6(
+            v6(0xfe80, 0, 0, 0, 0, 0, 0, 1),
+            v6(0xfe80, 0, 0, 0, 0, 0, 0, 2),
+            6,
+            &tcp_l4(1, 2),
+        );
+        let v6_udp = ipv6(
+            v6(0xfe80, 0, 0, 0, 0, 0, 0, 1),
+            v6(0xfe80, 0, 0, 0, 0, 0, 0, 2),
+            17,
+            &udp_l4(1, 2),
+        );
+        let v6_icmp6 = ipv6(
+            v6(0xfe80, 0, 0, 0, 0, 0, 0, 1),
+            v6(0xfe80, 0, 0, 0, 0, 0, 0, 2),
+            58,
+            &[0u8; 8],
+        );
+        let a = arp(0x0806, 1, [192, 0, 2, 1], [192, 0, 2, 2]);
+        let r = arp(0x8035, 3, [192, 0, 2, 1], [192, 0, 2, 2]);
+
+        assert!(apply("ip", &v4_tcp));
+        assert!(!apply("ip", &v6_tcp));
+        assert!(apply("ip6", &v6_tcp));
+        assert!(!apply("ip6", &v4_tcp));
+        assert!(apply("arp", &a));
+        assert!(!apply("arp", &r));
+        assert!(apply("rarp", &r));
+        assert!(!apply("rarp", &a));
+
+        assert!(apply("tcp", &v4_tcp));
+        assert!(apply("tcp", &v6_tcp));
+        assert!(!apply("tcp", &v4_udp));
+        assert!(apply("udp", &v4_udp));
+        assert!(apply("udp", &v6_udp));
+        assert!(!apply("udp", &v4_tcp));
+        assert!(apply("icmp", &v4_icmp));
+        assert!(!apply("icmp", &v6_icmp6));
+        assert!(apply("icmp6", &v6_icmp6));
+        assert!(!apply("icmp6", &v4_icmp));
+
+        assert!(apply("ip proto 6", &v4_tcp));
+        assert!(!apply("ip proto 17", &v4_tcp));
+        assert!(apply("ip6 proto 17", &v6_udp));
+        assert!(!apply("ip6 proto 6", &v6_udp));
+    }
+
+    #[test]
+    fn host_matches_ip_arp_and_rarp_in_both_directions() {
+        let pkt = ipv4([10, 0, 0, 1], [10, 0, 0, 2], 6, &tcp_l4(1, 2));
+        assert!(apply("host 10.0.0.1", &pkt));
+        assert!(apply("host 10.0.0.2", &pkt));
+        assert!(!apply("host 10.0.0.3", &pkt));
+        assert!(apply("src host 10.0.0.1", &pkt));
+        assert!(!apply("src host 10.0.0.2", &pkt));
+        assert!(apply("dst host 10.0.0.2", &pkt));
+        assert!(!apply("dst host 10.0.0.1", &pkt));
+        assert!(apply("ip src host 10.0.0.1", &pkt));
+        assert!(!apply("arp host 10.0.0.1", &pkt));
+
+        let a = arp(0x0806, 1, [192, 0, 2, 1], [192, 0, 2, 2]);
+        assert!(apply("host 192.0.2.1", &a)); // sender protocol address
+        assert!(apply("host 192.0.2.2", &a)); // target protocol address
+        assert!(!apply("host 192.0.2.3", &a));
+        assert!(apply("src host 192.0.2.1", &a));
+        assert!(apply("dst host 192.0.2.2", &a));
+        assert!(apply("arp src host 192.0.2.1", &a));
+        assert!(apply("arp dst host 192.0.2.2", &a));
+        assert!(!apply("ip host 192.0.2.1", &a));
+
+        let r = arp(0x8035, 3, [198, 51, 100, 7], [198, 51, 100, 8]);
+        assert!(apply("host 198.51.100.7", &r));
+        assert!(apply("rarp src host 198.51.100.7", &r));
+        assert!(apply("rarp dst host 198.51.100.8", &r));
+    }
+
+    #[test]
+    fn ipv6_host_covers_every_32_bit_word() {
+        let src = v6(
+            0x2001, 0x0db8, 0x1111, 0x2222, 0x3333, 0x4444, 0x5555, 0x6666,
+        );
+        let dst = v6(0xfe80, 0, 0, 0, 0, 0, 0, 0x0001);
+        let pkt = ipv6(src, dst, 6, &tcp_l4(1, 2));
+        // Every word of a full-match address is checked, not just the first.
+        let a = v6(
+            0x2001, 0x0db8, 0x1111, 0x2222, 0x3333, 0x4444, 0x5555, 0x6666,
+        );
+        assert!(apply("host 2001:db8:1111:2222:3333:4444:5555:6666", &pkt));
+        let b = v6(
+            0x2001, 0x0db8, 0x1111, 0x2222, 0x3333, 0x4444, 0x5555, 0x6667,
+        );
+        assert!(!apply("host 2001:db8:1111:2222:3333:4444:5555:6667", &pkt));
+        assert_eq!(a, src);
+        assert_eq!(b[15], 0x67);
+        assert!(!apply("src host fe80::1", &pkt));
+        assert!(apply("dst host fe80::1", &pkt));
+        assert!(apply("ip6 dst host fe80::1", &pkt));
+        assert!(apply("host fe80::1", &pkt));
+    }
+
+    #[test]
+    fn net_matches_prefix_and_explicit_mask() {
+        let pkt = ipv4([10, 1, 2, 3], [192, 168, 1, 1], 6, &tcp_l4(1, 2));
+        assert!(apply("net 10.0.0.0/8", &pkt));
+        assert!(!apply("net 11.0.0.0/8", &pkt));
+        assert!(apply("net 192.168.0.0/16", &pkt));
+        assert!(!apply("net 192.169.0.0/16", &pkt));
+        assert!(apply("net 10.0.0.0 mask 255.0.0.0", &pkt));
+        assert!(!apply("net 10.2.0.0 mask 255.255.0.0", &pkt));
+        assert!(apply("ip src net 10.0.0.0/8", &pkt));
+        assert!(!apply("ip src net 192.168.0.0/16", &pkt));
+
+        let v6pkt = ipv6(
+            v6(0x2001, 0x0db8, 0x1234, 0, 0, 0, 0, 1),
+            v6(0x2001, 0x0db8, 0xabcd, 0, 0, 0, 0, 2),
+            6,
+            &tcp_l4(1, 2),
+        );
+        // /48 keeps the first three words under the mask and ignores the rest;
+        // a wrong `&`/`|` on the masked words would change the verdict.
+        assert!(apply("net 2001:db8:1234::/48", &v6pkt));
+        assert!(!apply("net 2001:db8:9999::/48", &v6pkt));
+        assert!(apply("net 2001:db8::/32", &v6pkt));
+        assert!(!apply("net 2001:db9::/32", &v6pkt));
+        assert!(apply("net 2001:db8:abcd::/48", &v6pkt));
+        assert!(apply("ip6 src net 2001:db8:1234::/48", &v6pkt));
+        assert!(!apply("ip6 dst net 2001:db8:1234::/48", &v6pkt));
+    }
+
+    #[test]
+    fn ether_host_matches_src_and_dst() {
+        let mut pkt = ipv4([10, 0, 0, 1], [10, 0, 0, 2], 6, &tcp_l4(1, 2));
+        pkt[0..6].copy_from_slice(&[0x00, 0x11, 0x22, 0x33, 0x44, 0x55]);
+        pkt[6..12].copy_from_slice(&[0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff]);
+        assert!(apply("ether host 00:11:22:33:44:55", &pkt));
+        assert!(apply("ether host aa:bb:cc:dd:ee:ff", &pkt));
+        assert!(!apply("ether host 00:11:22:33:44:56", &pkt));
+        assert!(apply("ether dst host 00:11:22:33:44:55", &pkt));
+        assert!(!apply("ether src host 00:11:22:33:44:55", &pkt));
+        assert!(apply("ether src host aa:bb:cc:dd:ee:ff", &pkt));
+        assert!(apply("ether host aa-bb-cc-dd-ee-ff", &pkt));
+    }
+
+    #[test]
+    fn ports_match_direction_protocol_and_range() {
+        let tcp = ipv4([1, 1, 1, 1], [2, 2, 2, 2], 6, &tcp_l4(1234, 80));
+        assert!(apply("port 80", &tcp));
+        assert!(apply("port 1234", &tcp));
+        assert!(!apply("port 81", &tcp));
+        assert!(apply("tcp port 80", &tcp));
+        assert!(!apply("udp port 80", &tcp));
+        assert!(apply("tcp src port 1234", &tcp));
+        assert!(!apply("tcp src port 80", &tcp));
+        assert!(apply("tcp dst port 80", &tcp));
+        assert!(apply("tcp dst portrange 70-90", &tcp));
+        assert!(!apply("tcp dst portrange 81-90", &tcp));
+        assert!(apply("portrange 1234-1234", &tcp));
+
+        let udp = ipv4([1, 1, 1, 1], [2, 2, 2, 2], 17, &udp_l4(53, 53));
+        assert!(apply("udp port 53", &udp));
+        assert!(apply("port 53", &udp));
+        assert!(!apply("tcp port 53", &udp));
+
+        // Bare `port` also covers SCTP (proto 132), like tcpdump.
+        let sctp = ipv4([1, 1, 1, 1], [2, 2, 2, 2], 132, &tcp_l4(1, 9999));
+        assert!(apply("port 9999", &sctp));
+        assert!(!apply("tcp port 9999", &sctp));
+        assert!(!apply("udp port 9999", &sctp));
+
+        let v6tcp = ipv6(
+            v6(0xfe80, 0, 0, 0, 0, 0, 0, 1),
+            v6(0xfe80, 0, 0, 0, 0, 0, 0, 2),
+            6,
+            &tcp_l4(1111, 2222),
+        );
+        assert!(apply("tcp dst port 2222", &v6tcp));
+        assert!(apply("tcp src port 1111", &v6tcp));
+        assert!(!apply("tcp src port 2222", &v6tcp));
+    }
+
+    #[test]
+    fn boolean_structure_and_fragment_header() {
+        let pkt = ipv4([10, 0, 0, 1], [10, 0, 0, 2], 6, &tcp_l4(1, 80));
+        assert!(apply("not host 10.0.0.9", &pkt));
+        assert!(!apply("not host 10.0.0.1", &pkt));
+        assert!(apply("ip and port 80", &pkt));
+        assert!(!apply("ip and port 81", &pkt));
+        assert!(apply("ip or port 81", &pkt));
+        assert!(!apply("ip6 or port 81", &pkt));
+        assert!(apply("host 10.0.0.1 and host 10.0.0.2", &pkt));
+        assert!(!apply("host 10.0.0.1 and host 10.0.0.3", &pkt));
+        assert!(apply("(port 80 or port 443) and tcp", &pkt));
+
+        // IPv6 fragment header: `tcp` must follow the next-header chain.
+        let mut frag = vec![0u8; 8];
+        frag[0] = 6; // next header inside the fragment header
+        let v6frag = ipv6(
+            v6(0xfe80, 0, 0, 0, 0, 0, 0, 1),
+            v6(0xfe80, 0, 0, 0, 0, 0, 0, 2),
+            44,
+            &frag,
+        );
+        assert!(apply("tcp", &v6frag));
+        assert!(!apply("udp", &v6frag));
+    }
+
+    // -----------------------------------------------------------------------
+    // Golden instruction sequences. These pin the exact wire encoding (load
+    // offsets, ethertype/address constants, jump distances) for the shapes the
+    // semantic matrix exercises only indirectly.
+    // -----------------------------------------------------------------------
+
+    fn opname(code: u16) -> &'static str {
+        match code {
+            LD_H_ABS => "ldh",
+            LD_W_ABS => "ldw",
+            LD_B_ABS => "ldb",
+            LD_H_IND => "ldh[x",
+            LDX_MSH => "ldxb4",
+            ALU_AND_K => "and",
+            JMP_JEQ_K => "jeq",
+            JMP_JGE_K => "jge",
+            JMP_JGT_K => "jgt",
+            JMP_JSET_K => "jset",
+            JMP_JA => "ja",
+            RET_K => "ret",
+            _ => "???",
+        }
+    }
+
+    fn disasm(p: &Program) -> String {
+        p.insns
+            .iter()
+            .map(|i| format!("{} {} {} {}", opname(i.code), i.jt, i.jf, i.k))
+            .collect::<Vec<_>>()
+            .join(" | ")
+    }
+
+    fn disasm_slice(insns: &[Insn]) -> String {
+        insns
+            .iter()
+            .map(|i| format!("{} {} {} {}", opname(i.code), i.jt, i.jf, i.k))
+            .collect::<Vec<_>>()
+            .join(" | ")
+    }
+
+    fn assert_disasm(expr: &str, expected: &str) {
+        let got = disasm(&build(expr));
+        assert_eq!(got, expected, "compiled cBPF for `{expr}`");
+    }
+
+    /// The reverse assembler inserts a `JA` trampoline when a conditional's
+    /// target is more than 255 instructions away. `not host` chains put the
+    /// success target at the far drop, so 11 of them are exactly enough to force
+    /// one; the resulting length, trampoline offsets and tail pin the arithmetic
+    /// that decides trampoline placement.
+    #[test]
+    fn golden_long_chain_places_trampolines() {
+        let expr = (0..11u8)
+            .map(|i| format!("not host 10.9.0.{i}"))
+            .collect::<Vec<_>>()
+            .join(" and ");
+        let p = build(&expr);
+        assert_eq!(p.insns.len(), 268, "program length");
+        assert_eq!(
+            disasm_slice(&p.insns[..12]),
+            "ldh 0 0 12 | jeq 0 3 2048 | ldw 0 0 26 | jeq 0 1 168361984 | \
+             ja 0 0 262 | ldh 0 0 12 | jeq 0 3 2048 | ldw 0 0 30 | \
+             jeq 0 1 168361984 | ja 0 0 257 | ldh 0 0 12 | jeq 0 2 2054"
+        );
+        let jas: Vec<(usize, u32)> = p
+            .insns
+            .iter()
+            .enumerate()
+            .filter(|(_, i)| i.code == JMP_JA)
+            .map(|(idx, i)| (idx, i.k))
+            .collect();
+        assert_eq!(jas, vec![(4, 262), (9, 257)], "trampoline offsets");
+        for (idx, k) in &jas {
+            assert_eq!(
+                idx + 1 + *k as usize,
+                p.insns.len() - 1,
+                "every trampoline must land on the drop RET"
+            );
+        }
+        let n = p.insns.len();
+        assert_eq!(p.insns[n - 3].k, 168361994);
+        assert_eq!(p.insns[n - 3].jt, 1);
+        assert_eq!(p.insns[n - 2].k, ACCEPT);
+        assert_eq!(p.insns[n - 1].k, 0);
+    }
+
+    fn fnv1a(s: &str) -> u64 {
+        let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+        for b in s.bytes() {
+            h ^= u64::from(b);
+            h = h.wrapping_mul(0x0000_0100_0000_01b3);
+        }
+        h
+    }
+
+    /// A 50-host chain forces 236 trampolines and exercises the refinement loop
+    /// (a branch whose two targets are both far). The whole encoding is pinned by
+    /// a stable fingerprint; see the n=11 test for a readable slice.
+    #[test]
+    fn golden_very_long_chain_is_stable() {
+        let expr = (0..50u8)
+            .map(|i| format!("not host 10.9.0.{i}"))
+            .collect::<Vec<_>>()
+            .join(" and ");
+        let p = build(&expr);
+        let jas = p.insns.iter().filter(|i| i.code == JMP_JA).count();
+        let d = disasm(&p);
+        assert_eq!(p.insns.len(), 1438, "len");
+        assert_eq!(jas, 236, "trampolines");
+        assert_eq!(
+            fnv1a(&d),
+            0xa4bd_a0e3_5b92_9989,
+            "len={} jas={jas}",
+            p.insns.len()
+        );
+    }
+
+    #[test]
+    fn golden_protocol_and_ethertype() {
+        assert_disasm(
+            "ip",
+            "ldh 0 0 12 | jeq 0 1 2048 | ret 0 0 262144 | ret 0 0 0",
+        );
+        assert_disasm(
+            "ip6",
+            "ldh 0 0 12 | jeq 0 1 34525 | ret 0 0 262144 | ret 0 0 0",
+        );
+        assert_disasm(
+            "arp",
+            "ldh 0 0 12 | jeq 0 1 2054 | ret 0 0 262144 | ret 0 0 0",
+        );
+        assert_disasm(
+            "rarp",
+            "ldh 0 0 12 | jeq 0 1 32821 | ret 0 0 262144 | ret 0 0 0",
+        );
+    }
+
+    #[test]
+    fn golden_ether_host_and_ipv4_host() {
+        assert_disasm(
+            "ether src host 00:11:22:33:44:55",
+            "ldh 0 0 6 | jeq 0 3 17 | ldw 0 0 8 | jeq 0 1 573785173 | ret 0 0 262144 | ret 0 0 0",
+        );
+        assert_disasm(
+            "ip host 10.0.0.1",
+            "ldh 0 0 12 | jeq 0 2 2048 | ldw 0 0 26 | jeq 4 0 167772161 | \
+             ldh 0 0 12 | jeq 0 3 2048 | ldw 0 0 30 | jeq 0 1 167772161 | \
+             ret 0 0 262144 | ret 0 0 0",
+        );
+    }
+
+    #[test]
+    fn golden_ipv6_and_masked_net() {
+        assert_disasm(
+            "ip6 dst host 2001:db8::1",
+            "ldh 0 0 12 | jeq 0 9 34525 | ldw 0 0 38 | jeq 0 7 536939960 | \
+             ldw 0 0 42 | jeq 0 5 0 | ldw 0 0 46 | jeq 0 3 0 | ldw 0 0 50 | jeq 0 1 1 | \
+             ret 0 0 262144 | ret 0 0 0",
+        );
+        // `net` uses ALU_AND_K before the compare, so the mask/address pair and
+        // the jump distances are part of the golden.
+        assert_disasm(
+            "ip src net 10.0.0.0/8",
+            "ldh 0 0 12 | jeq 0 4 2048 | ldw 0 0 26 | and 0 0 4278190080 | \
+             jeq 0 1 167772160 | ret 0 0 262144 | ret 0 0 0",
+        );
+    }
+
+    #[test]
+    fn golden_port_range() {
+        assert_disasm(
+            "tcp dst port 80",
+            "ldh 0 0 12 | jeq 0 7 2048 | ldb 0 0 23 | jeq 0 5 6 | ldh 0 0 20 | \
+             jset 3 0 8191 | ldxb4 0 0 14 | ldh[x 0 0 16 | jeq 6 0 80 | \
+             ldh 0 0 12 | jeq 0 5 34525 | ldb 0 0 20 | jeq 0 3 6 | ldh 0 0 56 | \
+             jeq 0 1 80 | ret 0 0 262144 | ret 0 0 0",
+        );
+    }
+
+    /// Build a program whose single conditional branch at index 1 has exact
+    /// jt/jf distances, so the reverse assembler's 255-instruction boundary and
+    /// trampoline refinement loop can be tested directly.
+    fn finish_branch(jt_d: usize, jf_d: usize) -> Program {
+        let mut b = Builder::default();
+        let m = b.new_label();
+        let n = b.new_label();
+        b.emit(LD_B_ABS, 0);
+        b.branch(JMP_JEQ_K, 1, m, n);
+        let m_at = jt_d + 2;
+        let n_at = jf_d + 2;
+        while b.insns.len() <= m_at.max(n_at) {
+            let i = b.insns.len();
+            if i == m_at {
+                b.bind(m);
+            }
+            if i == n_at {
+                b.bind(n);
+            }
+            b.emit(RET_K, 0xaa);
+        }
+        b.finish().expect("finish")
+    }
+
+    #[test]
+    fn finish_handles_the_branch_distance_boundary() {
+        // A distance of 255 is still direct (the test is `> 255`).
+        for (jt, jf) in [(0usize, 0usize), (254, 0), (255, 0), (0, 255)] {
+            let p = finish_branch(jt, jf);
+            assert_eq!(usize::from(p.insns[1].jt), jt, "jt for ({jt},{jf})");
+            assert_eq!(usize::from(p.insns[1].jf), jf, "jf for ({jt},{jf})");
+            assert!(
+                !p.insns.iter().any(|i| i.code == JMP_JA),
+                "no trampoline for ({jt},{jf})"
+            );
+        }
+        // 256 forces a trampoline; the branch points at it and the JA at the
+        // true target.
+        let p = finish_branch(256, 0);
+        assert_eq!((p.insns[1].jt, p.insns[1].jf), (0, 1));
+        assert_eq!(p.insns.len(), 260);
+        assert_eq!(p.insns[2].code, JMP_JA);
+        assert_eq!(p.insns[2].k, 256);
+
+        let p = finish_branch(0, 256);
+        assert_eq!((p.insns[1].jt, p.insns[1].jf), (1, 0));
+        assert_eq!(p.insns[2].code, JMP_JA);
+        assert_eq!(p.insns[2].k, 256);
+
+        // jt=255 fits on its own, but jf=256 needs a trampoline and inserting it
+        // pushes jt over the limit. The refinement loop must notice and insert a
+        // second trampoline instead of emitting an out-of-range jt.
+        let p = finish_branch(255, 256);
+        assert_eq!((p.insns[1].jt, p.insns[1].jf), (1, 0));
+        assert_eq!(p.insns.len(), 261);
+        let jas: Vec<(usize, u32)> = p
+            .insns
+            .iter()
+            .enumerate()
+            .filter(|(_, i)| i.code == JMP_JA)
+            .map(|(i, x)| (i, x.k))
+            .collect();
+        assert_eq!(jas, vec![(2, 257), (3, 255)]);
+
+        let p = finish_branch(256, 255);
+        assert_eq!((p.insns[1].jt, p.insns[1].jf), (1, 0));
+        assert_eq!(p.insns.len(), 261);
+        let jas: Vec<(usize, u32)> = p
+            .insns
+            .iter()
+            .enumerate()
+            .filter(|(_, i)| i.code == JMP_JA)
+            .map(|(i, x)| (i, x.k))
+            .collect();
+        assert_eq!(jas, vec![(2, 256), (3, 256)]);
+    }
+
+    /// The reverse assembler only supports forward jumps. A label bound *before*
+    /// the branch that uses it must be rejected: emitting a distance for it would
+    /// either produce a program the kernel refuses or silently jump into the
+    /// middle of an instruction.
+    #[test]
+    fn a_backward_branch_is_rejected() {
+        let mut b = Builder::default();
+        let back = b.new_label();
+        let fwd = b.new_label();
+        b.bind(back); // bound at index 0, i.e. behind the branch below
+        b.emit(RET_K, 0);
+        b.branch(JMP_JEQ_K, 1, back, fwd);
+        b.bind(fwd);
+        b.emit(RET_K, 0);
+        let err = b.finish().expect_err("a backward jump must be rejected");
+        assert!(err.to_string().contains("backward jump"), "{err}");
+    }
 }

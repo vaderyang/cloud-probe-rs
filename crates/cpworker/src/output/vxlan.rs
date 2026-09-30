@@ -712,6 +712,44 @@ mod tests {
     }
 
     #[test]
+    fn vxlan_checksum_covers_exactly_the_outer_header() {
+        // The v1 VNI stores a checksum of VXLAN(8) + Ethernet(14) + IPv4(20) = 42
+        // bytes in its last byte. Bytes past that must not contribute: callers
+        // reuse one large buffer, so the tail is stale data from a previous
+        // frame and folding it in would make the wire bytes depend on history.
+        let inner = [0xAAu8; 24];
+        let mut quiet = vec![0u8; 512];
+        let n = vxlan_encapsulate(&mut quiet, 7, 1, PKT_DIR_NONCHECK, false, 0, 0, &inner);
+        let mut noisy = vec![0u8; 512];
+        for b in noisy.iter_mut().skip(42) {
+            *b = 0xFF;
+        }
+        let m = vxlan_encapsulate(&mut noisy, 7, 1, PKT_DIR_NONCHECK, false, 0, 0, &inner);
+        assert_eq!(n, m);
+        assert_eq!(
+            noisy[7], quiet[7],
+            "the checksum must not read past byte 42"
+        );
+    }
+
+    /// `rte_raw_cksum` is a port of the DPDK one-`s-complement sum: native-endian
+    /// `u16` words, then at most one trailing odd byte, folded twice. The odd byte
+    /// is invisible in production (the checksummed header is 42 B, even), so this
+    /// exercises the function directly.
+    #[cfg(target_endian = "little")]
+    #[test]
+    fn rte_raw_cksum_includes_a_trailing_odd_byte() {
+        // 0x4a3b2d1c + 0x0100 = 0x4a3b2e1c -> 0x4a3b + 0x2e1c = 0x7857
+        assert_eq!(rte_raw_cksum(&[0x00, 0x01]), 0x7857);
+        // ... plus a trailing 0x00: no change.
+        assert_eq!(rte_raw_cksum(&[0x00, 0x01, 0x00]), 0x7857);
+        // ... plus a trailing 0x03: 0x4a3b2e1f -> 0x785a.
+        assert_eq!(rte_raw_cksum(&[0x00, 0x01, 0x03]), 0x785a);
+        // Two words: 0x0100 + 0x0302 -> 0x7b59.
+        assert_eq!(rte_raw_cksum(&[0x00, 0x01, 0x02, 0x03]), 0x7b59);
+    }
+
+    #[test]
     fn zero_max_payload_size_always_takes_the_fast_path() {
         let state = mock(vec![]);
         let mut f = fixture(state.clone(), 0, None, 0, false);
@@ -745,5 +783,25 @@ mod tests {
         let pkt = [0x22u8; 20];
         assert_eq!(f.out.send_packet(&hdr(1000, 20), &pkt, PKT_DIR_INCOMING), 0);
         assert_eq!(f.stats.ratelimit_drop_packets.load(), (0, 0));
+    }
+
+    /// Same contract as the GRE output: `new_vxlan_output` propagates a
+    /// `SO_BINDTODEVICE` / `IP_MTU_DISCOVER` failure instead of ignoring it
+    /// (`PARITY.md`). The privileged part of that path lives in the live-capture
+    /// job; argument validation and the kernel's rejection of a bad mode do not.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn socket_option_wrappers_propagate_setsockopt_errors() {
+        use crate::config::{IP_PMTUDISC_DO, IP_PMTUDISC_DONT, IP_PMTUDISC_WANT};
+
+        let sock = Socket::new(Domain::IPV4, Type::DGRAM, None).unwrap();
+
+        let e = set_bind_device(&sock, "vx\0lan").unwrap_err();
+        assert_eq!(e.kind(), std::io::ErrorKind::InvalidInput);
+
+        for mode in [IP_PMTUDISC_DONT, IP_PMTUDISC_WANT, IP_PMTUDISC_DO] {
+            set_pmtudisc(&sock, mode).unwrap();
+        }
+        assert!(set_pmtudisc(&sock, 12345).is_err());
     }
 }

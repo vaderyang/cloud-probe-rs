@@ -34,3 +34,14 @@ macro_rules! log_error_attr {
         log::error!("{}", $crate::slogx::error_attr(&$err))
     };
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn error_attr_formats_the_error() {
+        let err = std::io::Error::other("boom");
+        assert_eq!(error_attr(&err), "error=boom");
+    }
+}

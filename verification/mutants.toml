@@ -26,59 +26,185 @@ exclude_globs = [
   "crates/*/src/bin/**",
 ]
 
-# Mutating a Drop impl or a trivial main is noise here.
-exclude_re = [
-  "^impl .*Drop for",
-  "^fn main$",
-  # Equivalent or not-observable mutants, and root-only syscall wrappers:
-  "gre\\.rs:33:",   # RawSocketEgress::send_to, the real sendto (root; live-capture)
-  "gre\\.rs:70:",   # set_bind_device wrapper (root)
-  "gre\\.rs:74:",   # set_pmtudisc wrapper (root)
-  "gre\\.rs:133:",  # `> 0` vs `>= 0` only gates logging; the reset is idempotent
-  "gre\\.rs:154:",  # slice == caplen: both branches produce the same length
-  "gre\\.rs:205:",  # ENOBUFS backoff sleep duration is not observable behaviour
-  "gre\\.rs:207:",
-  "vxlan\\.rs:21:",  # set_bind_device wrapper (root)
-  "vxlan\\.rs:25:",  # set_pmtudisc wrapper (root)
-  "vxlan\\.rs:36:",  # odd-tail branch: the checksum region is always 42 bytes (even)
-  "vxlan\\.rs:81:",  # VXLAN+ETH+20 is even, so a zero-padded even extension is sum-invariant
-  "vxlan\\.rs:173:", # `> 0` vs `>= 0` only gates logging; the reset is idempotent
-  "vxlan\\.rs:222:", # ENOBUFS backoff sleep duration is not observable behaviour
-  "vxlan\\.rs:224:",
-  "vxlan\\.rs:247:", # slice == caplen: both branches produce the same length
-  "vxlan\\.rs:276:", # max_payload_size == 0 forces a fragment count of 1 either way
-  # These three behave as the tests expect but make the cargo-mutants runner
-  # hang (300s timeout); the behaviour is asserted by config::accessor_tests.
-  "config\\.rs:549:",
-  "config\\.rs:762:",
-  "config\\.rs:1060:",
-  # packet.rs: equivalent boundary guards. `<`/`<=`/`==` only differ at the exact
-  # length where the following header check rejects the frame anyway; the `+`/`-`
-  # offset mutants are masked by the payload_len clamp. See MUTATION_BASELINE.md.
-  "packet\\.rs:168:",
-  "packet\\.rs:180:",
-  "packet\\.rs:195:",
-  "packet\\.rs:201:",
-  "packet\\.rs:209:",
-  "packet\\.rs:214:",
-  "packet\\.rs:219:",
-  "packet\\.rs:235:",
-  "packet\\.rs:237:",
-  "packet\\.rs:247:",
-  "packet\\.rs:253:",
-  "packet\\.rs:268:",
-  "packet\\.rs:273:",
-  "packet\\.rs:278:",
-  "packet\\.rs:293:",
-  "packet\\.rs:303:",
-  "packet\\.rs:330:",
-  "packet\\.rs:340:",
-  "packet\\.rs:392:",
-  "packet\\.rs:422:",
-  "packet_split\\.rs:158:", # calculate_ip_checksum only reads ihl bytes, so a longer slice is equivalent
-  "codec\\.rs:159:",  # metadata name exactly fills the buffer, but the value length read still fails
-  "codec\\.rs:216:",  # FLAG_LONG is never set in `flags`, so | and ^ agree
-]
-
+# Timeout budget. An `exclude_re` entry marked "runner timeout" means "this mutant
+# makes the tests hang for at least this long", so the budget is part of the
+# exclusion contract and must match the no-exclude sweep that produced the list
+# (verification/MUTATION_BASELINE.md). cargo-mutants' default minimum (20 s) is
+# tight enough that a slow-but-detected state-machine mutant is reported as a
+# Timeout - a gate failure - depending on machine load, which is exactly what
+# happened before this was pinned.
 timeout_multiplier = 3.0
-minimum_test_timeout = 60.0
+minimum_test_timeout = 120.0
+# `exclude_re` is the *measured* list of mutants the test suite does not kill.
+#
+# It is regenerated from a full run of this configuration with `exclude_re`
+# removed ("no-exclude sweep"), not written by hand, and every entry is pinned to
+# the exact `file:line:col` that the sweep found. When a line holds both survivors
+# and mutants the tests do kill, the entry carries the mutated operation as well,
+# so an exclusion can never swallow real coverage.
+#
+# Each entry states why it is tolerable:
+#   * "runner timeout": the mutation makes the code loop or sleep forever, so no
+#     finite test can report a failure (cargo-mutants reports Timeout, which the
+#     blocking gate treats as a failure so it must be listed here);
+#   * an arithmetic identity (disjoint-bit `|` vs `^`, a clamp at equality, ...);
+#   * an unobservable difference (a log line, a timing constant, a measure-zero
+#     `Instant` boundary, a best-effort syscall on a socket that is closing).
+#
+# Re-baseline procedure (see verification/MUTATION_BASELINE.md):
+#   1. strip `exclude_re` into a scratch config and run the full sweep;
+#   2. `verification/mutation_config_gate.py --outcomes <that run>/mutants.out/outcomes.json`
+#      -- it fails if an entry matches no candidate (line drift), if an entry
+#      also matches a mutant the tests kill (over-broad), if a surviving mutant
+#      is not covered (incomplete), or if an entry lacks a reason;
+#   3. refresh this list from the sweep.
+#
+# A pinned entry goes stale when the file is edited. The gate above fails on the
+# first stale entry, which is what keeps this list from silently rotting (the
+# previous revision of this file pinned `gre.rs` by line and rotted away).
+
+exclude_re = [
+  # cpgolib/src/cpworker/client.rs
+  "cpgolib/src/cpworker/client\\.rs:127:9:",  # runner timeout: mutation loops forever, no finite test can report it
+  "cpgolib/src/cpworker/client\\.rs:223:9:",  # runner timeout: mutation loops forever, no finite test can report it
+
+  # cpgolib/src/slogx/mod.rs
+  "cpgolib/src/slogx/mod\\.rs:11:5:",  # process-wide init, no observable result
+
+  # cpworker/src/bpf/codes.rs
+  "cpworker/src/bpf/codes\\.rs:31:34: replace \\| with \\^",  # | of disjoint constants == ^
+  "cpworker/src/bpf/codes\\.rs:31:42: replace \\| with \\^",  # | of disjoint constants == ^
+  "cpworker/src/bpf/codes\\.rs:33:34:",  # | of disjoint constants == ^
+  "cpworker/src/bpf/codes\\.rs:33:42: replace \\| with \\^",  # | of disjoint constants == ^
+  "cpworker/src/bpf/codes\\.rs:35:34: replace \\| with \\^",  # | of disjoint constants == ^
+  "cpworker/src/bpf/codes\\.rs:35:42: replace \\| with \\^",  # | of disjoint constants == ^
+  "cpworker/src/bpf/codes\\.rs:37:34: replace \\| with \\^",  # | of disjoint constants == ^
+  "cpworker/src/bpf/codes\\.rs:37:42: replace \\| with \\^",  # | of disjoint constants == ^
+  "cpworker/src/bpf/codes\\.rs:39:34: replace \\| with \\^",  # | of disjoint constants == ^
+  "cpworker/src/bpf/codes\\.rs:39:42: replace \\| with \\^",  # | of disjoint constants == ^
+  "cpworker/src/bpf/codes\\.rs:41:36: replace \\| with \\^",  # | of disjoint constants == ^
+  "cpworker/src/bpf/codes\\.rs:41:46: replace \\| with \\^",  # | of disjoint constants == ^
+  "cpworker/src/bpf/codes\\.rs:43:36: replace \\| with \\^",  # | of disjoint constants == ^
+  "cpworker/src/bpf/codes\\.rs:43:46: replace \\| with \\^",  # | of disjoint constants == ^
+  "cpworker/src/bpf/codes\\.rs:45:36: replace \\| with \\^",  # | of disjoint constants == ^
+  "cpworker/src/bpf/codes\\.rs:45:46: replace \\| with \\^",  # | of disjoint constants == ^
+  "cpworker/src/bpf/codes\\.rs:47:36: replace \\| with \\^",  # | of disjoint constants == ^
+  "cpworker/src/bpf/codes\\.rs:47:46: replace \\| with \\^",  # | of disjoint constants == ^
+  "cpworker/src/bpf/codes\\.rs:49:37: replace \\| with \\^",  # | of disjoint constants == ^
+  "cpworker/src/bpf/codes\\.rs:49:48: replace \\| with \\^",  # | of disjoint constants == ^
+  "cpworker/src/bpf/codes\\.rs:51:33: replace \\| with \\^",  # | of disjoint constants == ^
+  "cpworker/src/bpf/codes\\.rs:53:32: replace \\| with \\^",  # | of disjoint constants == ^
+
+  # cpworker/src/bpf/compiler.rs
+  "cpworker/src/bpf/compiler\\.rs:435:9:",  # runner timeout: mutation loops forever, no finite test can report it
+  "cpworker/src/bpf/compiler\\.rs:436:27:",  # runner timeout: mutation loops forever, no finite test can report it
+  "cpworker/src/bpf/compiler\\.rs:444:9:",  # runner timeout: mutation loops forever, no finite test can report it
+  "cpworker/src/bpf/compiler\\.rs:451:26:",  # emit() return value is unused
+  "cpworker/src/bpf/compiler\\.rs:563:24:",  # only built with frag == v6
+  "cpworker/src/bpf/compiler\\.rs:639:24:",  # -1 sentinel is never read
+  "cpworker/src/bpf/compiler\\.rs:655:30: replace - with / in Builder::finish",  # runner timeout: mutation loops forever, no finite test can report it
+  "cpworker/src/bpf/compiler\\.rs:656:28:",  # defensive re-check, always non-negative here
+  "cpworker/src/bpf/compiler\\.rs:666:37:",  # runner timeout: mutation loops forever, no finite test can report it
+  "cpworker/src/bpf/compiler\\.rs:667:37:",  # runner timeout: mutation loops forever, no finite test can report it
+  "cpworker/src/bpf/compiler\\.rs:671:20:",  # runner timeout: mutation loops forever, no finite test can report it
+  "cpworker/src/bpf/compiler\\.rs:674:20:",  # runner timeout: mutation loops forever, no finite test can report it
+  "cpworker/src/bpf/compiler\\.rs:714:31: replace - with / in Builder::finish",  # trampoline distance is 0; p/tp - 1 == 0
+  "cpworker/src/bpf/compiler\\.rs:715:27: replace - with / in Builder::finish",  # runner timeout: mutation loops forever, no finite test can report it
+
+  # cpworker/src/bpf/interp.rs
+  "cpworker/src/bpf/interp\\.rs:15:22: replace \\| with \\^ in load_be",  # runner timeout: mutation loops forever, no finite test can report it
+  "cpworker/src/bpf/interp\\.rs:61:20:",  # runner timeout: mutation loops forever, no finite test can report it
+  "cpworker/src/bpf/interp\\.rs:61:25:",  # runner timeout: mutation loops forever, no finite test can report it
+  "cpworker/src/bpf/interp\\.rs:65:20:",  # runner timeout: mutation loops forever, no finite test can report it
+  "cpworker/src/bpf/interp\\.rs:65:25:",  # runner timeout: mutation loops forever, no finite test can report it
+  "cpworker/src/bpf/interp\\.rs:69:25: replace \\+ with \\* in run",  # runner timeout: mutation loops forever, no finite test can report it
+  "cpworker/src/bpf/interp\\.rs:73:20:",  # runner timeout: mutation loops forever, no finite test can report it
+  "cpworker/src/bpf/interp\\.rs:73:25:",  # runner timeout: mutation loops forever, no finite test can report it
+  "cpworker/src/bpf/interp\\.rs:79:12: replace \\+= with \\*= in run",  # runner timeout: mutation loops forever, no finite test can report it
+
+  # cpworker/src/bpf/mod.rs
+  "cpworker/src/bpf/mod\\.rs:125:5:",  # non-Linux stub, unreachable here
+
+  # cpworker/src/bpf/parser.rs
+  "cpworker/src/bpf/parser\\.rs:206:14:",  # runner timeout: mutation loops forever, no finite test can report it
+  "cpworker/src/bpf/parser\\.rs:272:9:",  # runner timeout: mutation loops forever, no finite test can report it
+  "cpworker/src/bpf/parser\\.rs:272:20:",  # runner timeout: mutation loops forever, no finite test can report it
+  "cpworker/src/bpf/parser\\.rs:283:20: replace \\+= with -= in Parser<'a>::bump",  # runner timeout: mutation loops forever, no finite test can report it
+  "cpworker/src/bpf/parser\\.rs:306:22: replace \\+= with -= in Parser<'a>::eat",  # runner timeout: mutation loops forever, no finite test can report it
+
+  # cpworker/src/bpf/resolvers.rs
+  "cpworker/src/bpf/resolvers\\.rs:142:44: replace < with <= in <impl Resolver for CachedResolver<R>>::lookup",  # Instant equality is unreachable
+
+  # cpworker/src/config.rs
+  "cpworker/src/config\\.rs:549:5: replace de_nonnull -> std::result::Result<Option<T>, D::Error> with Ok\\(None\\)",  # runner timeout: mutation loops forever, no finite test can report it
+  "cpworker/src/config\\.rs:762:8:",  # runner timeout: mutation loops forever, no finite test can report it
+  "cpworker/src/config\\.rs:1060:58:",  # runner timeout: mutation loops forever, no finite test can report it
+
+  # cpworker/src/output/gre.rs
+  "cpworker/src/output/gre\\.rs:114:30: replace > with >= in GreOutput::flush_error_info",  # unsigned counters: logging gate only
+  "cpworker/src/output/gre\\.rs:114:56: replace > with >= in GreOutput::flush_error_info",  # unsigned counters: logging gate only
+  "cpworker/src/output/gre\\.rs:114:91: replace > with >= in GreOutput::flush_error_info",  # unsigned counters: logging gate only
+  "cpworker/src/output/gre\\.rs:135:50: replace < with <= in <impl Output for GreOutput>::send_packet",  # slice == caplen: same value either branch
+  "cpworker/src/output/gre\\.rs:186:45:",  # backoff duration is timing-only (negative cast = 6e11 s)
+  "cpworker/src/output/gre\\.rs:186:53:",  # backoff duration is timing-only (negative cast = 6e11 s)
+  "cpworker/src/output/gre\\.rs:188:31: replace \\+= with -= in <impl Output for GreOutput>::send_packet",  # runner timeout: mutation loops forever, no finite test can report it
+
+  # cpworker/src/output/vxlan.rs
+  "cpworker/src/output/vxlan\\.rs:81:56: replace \\+ with \\* in vxlan_encapsulate",  # max == 0 still yields one fragment
+  "cpworker/src/output/vxlan\\.rs:81:70: replace \\+ with \\* in vxlan_encapsulate",  # max == 0 still yields one fragment
+  "cpworker/src/output/vxlan\\.rs:173:30: replace > with >= in VxlanOutput::flush_error_info",  # unsigned counters: logging gate only
+  "cpworker/src/output/vxlan\\.rs:173:56: replace > with >= in VxlanOutput::flush_error_info",  # unsigned counters: logging gate only
+  "cpworker/src/output/vxlan\\.rs:173:91: replace > with >= in VxlanOutput::flush_error_info",  # unsigned counters: logging gate only
+  "cpworker/src/output/vxlan\\.rs:222:45:",  # backoff duration is timing-only (negative cast = 6e11 s)
+  "cpworker/src/output/vxlan\\.rs:222:53:",  # backoff duration is timing-only (negative cast = 6e11 s)
+  "cpworker/src/output/vxlan\\.rs:224:31: replace \\+= with -= in VxlanOutput::do_send_packet",  # runner timeout: mutation loops forever, no finite test can report it
+  "cpworker/src/output/vxlan\\.rs:247:50: replace < with <= in <impl Output for VxlanOutput>::send_packet",  # slice == caplen: same value either branch
+  "cpworker/src/output/vxlan\\.rs:276:39:",  # max == 0 still yields one fragment
+
+  # cpworker/src/packet.rs
+  "cpworker/src/packet\\.rs:168:15: replace < with <= in parse_packet",  # exact-boundary frame cannot complete the parse anyway
+  "cpworker/src/packet\\.rs:180:19: replace < with <= in parse_packet",  # exact-boundary frame cannot complete the parse anyway
+  "cpworker/src/packet\\.rs:195:19: replace < with <= in parse_packet",  # exact-boundary frame cannot complete the parse anyway
+  "cpworker/src/packet\\.rs:201:19: replace < with <= in parse_packet",  # exact-boundary frame cannot complete the parse anyway
+  "cpworker/src/packet\\.rs:201:19: replace < with == in parse_packet",  # exact-boundary frame cannot complete the parse anyway
+  "cpworker/src/packet\\.rs:214:53: replace \\+ with - in parse_packet",  # shrunk threshold still caught by the final caplen guard
+  "cpworker/src/packet\\.rs:219:32: replace \\+ with - in parse_packet",  # shrunk threshold still caught by the final caplen guard
+  "cpworker/src/packet\\.rs:237:19: replace < with <= in parse_packet",  # exact-boundary frame cannot complete the parse anyway
+  "cpworker/src/packet\\.rs:247:23: replace < with <= in parse_packet",  # exact-boundary frame cannot complete the parse anyway
+  "cpworker/src/packet\\.rs:253:23: replace < with <= in parse_packet",  # exact-boundary frame cannot complete the parse anyway
+  "cpworker/src/packet\\.rs:253:23: replace < with == in parse_packet",  # exact-boundary frame cannot complete the parse anyway
+  "cpworker/src/packet\\.rs:253:32: replace \\+ with - in parse_packet",  # shrunk threshold still caught by the final caplen guard
+  "cpworker/src/packet\\.rs:273:53: replace \\+ with - in parse_packet",  # shrunk threshold still caught by the final caplen guard
+  "cpworker/src/packet\\.rs:278:32: replace \\+ with - in parse_packet",  # shrunk threshold still caught by the final caplen guard
+  "cpworker/src/packet\\.rs:303:22: replace > with >= in parse_packet",  # clamp at equality is a no-op
+  "cpworker/src/packet\\.rs:330:23: replace < with <= in extract_ipport",  # exact-boundary frame cannot complete the parse anyway
+  "cpworker/src/packet\\.rs:340:31: replace < with <= in extract_ipport",  # exact-boundary frame cannot complete the parse anyway
+  "cpworker/src/packet\\.rs:422:40: replace \\+ with - in fill_ports",  # shrunk threshold still caught by the final caplen guard
+  "cpworker/src/packet\\.rs:422:54: replace \\+ with - in fill_ports",  # shrunk threshold still caught by the final caplen guard
+
+  # cpworker/src/packet_split.rs
+  "cpworker/src/packet_split\\.rs:158:81: replace \\+ with \\* in build_fragment",  # checksum reads only ihl*4 bytes
+
+  # cpworker/src/zmtp/client.rs
+  "cpworker/src/zmtp/client\\.rs:72:9:",  # default body: only in-memory test transports use it
+  "cpworker/src/zmtp/client\\.rs:129:25:",  # compaction is a memory optimisation
+  "cpworker/src/zmtp/client\\.rs:298:9: replace ZmtpPush::is_connected -> bool with true",  # runner timeout: mutation loops forever, no finite test can report it
+  "cpworker/src/zmtp/client\\.rs:298:52:",  # runner timeout: mutation loops forever, no finite test can report it
+  "cpworker/src/zmtp/client\\.rs:379:12:",  # gates one log line only
+  "cpworker/src/zmtp/client\\.rs:392:40:",  # runner timeout: mutation loops forever, no finite test can report it
+  "cpworker/src/zmtp/client\\.rs:392:58: replace < with <= in ZmtpPush::drain_for",  # Instant equality is unreachable
+  "cpworker/src/zmtp/client\\.rs:392:58: replace < with > in ZmtpPush::drain_for",  # runner timeout: mutation loops forever, no finite test can report it
+  "cpworker/src/zmtp/client\\.rs:394:16:",  # extra 1 ms sleep is timing-only
+  "cpworker/src/zmtp/client\\.rs:401:50: replace < with <= in ZmtpPush::maybe_connect",  # Instant equality is unreachable
+  "cpworker/src/zmtp/client\\.rs:478:31: replace match guard e\\.kind\\(\\) == io::ErrorKind::Interrupted with true in ZmtpPush::drive_conn",  # runner timeout: mutation loops forever, no finite test can report it
+  "cpworker/src/zmtp/client\\.rs:478:40:",  # runner timeout: mutation loops forever, no finite test can report it
+  "cpworker/src/zmtp/client\\.rs:493:31: replace match guard e\\.kind\\(\\) == io::ErrorKind::Interrupted with true in ZmtpPush::drive_conn",  # runner timeout: mutation loops forever, no finite test can report it
+  "cpworker/src/zmtp/client\\.rs:493:40:",  # runner timeout: mutation loops forever, no finite test can report it
+  "cpworker/src/zmtp/client\\.rs:535:34: replace \\+= with \\*= in ZmtpPush::flush_pending",  # runner timeout: mutation loops forever, no finite test can report it
+  "cpworker/src/zmtp/client\\.rs:543:35: replace match guard e\\.kind\\(\\) == io::ErrorKind::Interrupted with true in ZmtpPush::flush_pending",  # runner timeout: mutation loops forever, no finite test can report it
+  "cpworker/src/zmtp/client\\.rs:543:44:",  # runner timeout: mutation loops forever, no finite test can report it
+  "cpworker/src/zmtp/client\\.rs:585:9: replace <impl Transport for TcpTransport>::read -> io::Result<usize> with Ok\\(1\\)",  # runner timeout: mutation loops forever, no finite test can report it
+  "cpworker/src/zmtp/client\\.rs:600:58:",  # POLLERR/POLLHUP disjoint; TCP cannot hit the None branch
+  "cpworker/src/zmtp/client\\.rs:621:9:",  # best-effort close; fd closes on drop
+  "cpworker/src/zmtp/client\\.rs:772:12:",  # warn-once latch: logging only
+]

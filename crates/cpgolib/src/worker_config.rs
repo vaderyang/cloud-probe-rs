@@ -191,3 +191,28 @@ pub struct RotatingFileOutputConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_file_interval: Option<i32>,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn ctrl(ty: &str, unix: Option<&str>) -> ControlConfig {
+        ControlConfig {
+            ty: ty.to_string(),
+            unix: unix.map(|p| ControlUnixConfig {
+                path: p.to_string(),
+            }),
+        }
+    }
+
+    #[test]
+    fn connect_string_formats_unix_and_others() {
+        assert_eq!(
+            ctrl("unix", Some("/run/cp.sock")).connect_string(),
+            "unix:///run/cp.sock"
+        );
+        assert_eq!(ctrl("unix", None).connect_string(), "unix://");
+        assert_eq!(ctrl("tcp", Some("/x")).connect_string(), "");
+        assert_eq!(ctrl("", None).connect_string(), "");
+    }
+}

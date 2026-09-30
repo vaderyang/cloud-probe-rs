@@ -923,7 +923,7 @@ mod tests {
         if expected.is_empty() {
             return; // environment has no localhost entry
         }
-        let ast = parse("host localhost").unwrap();
+        let ast = parse_with("host localhost", &DnsResolver).unwrap();
         let mut got = Vec::new();
         collect(&ast, &mut got);
         let got: std::collections::BTreeSet<IpAddr> = got.into_iter().collect();
@@ -1076,5 +1076,312 @@ mod tests {
         assert!(parse(&("ip and ".repeat(2000) + "ip")).is_err());
         // A deep-but-legal expression still parses.
         assert!(parse(&("not ".repeat(100) + "ip")).is_ok());
+    }
+
+    // -----------------------------------------------------------------------
+    // Tokenizer, grammar aliases, precedence, error paths and address math.
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn tokenizer_splits_operators_and_parens() {
+        let t = |s: &str| tokenize(s);
+        assert_eq!(t("a&&b"), vec!["a", "&&", "b"]);
+        assert_eq!(t("a||b"), vec!["a", "||", "b"]);
+        // A lone `&`/`|` is normalized to the double form, not dropped.
+        assert_eq!(t("a&b"), vec!["a", "&&", "b"]);
+        assert_eq!(t("a|b"), vec!["a", "||", "b"]);
+        assert_eq!(t("!a"), vec!["!", "a"]);
+        assert_eq!(t("(a)"), vec!["(", "a", ")"]);
+        assert_eq!(t("  \t\n "), Vec::<String>::new());
+        assert_eq!(t("a  b"), vec!["a", "b"]);
+        assert_eq!(
+            t("(udp and (port 1 or port 2))"),
+            vec!["(", "udp", "and", "(", "port", "1", "or", "port", "2", ")", ")"]
+        );
+    }
+
+    #[test]
+    fn boolean_aliases_and_precedence() {
+        assert!(matches!(parse("ip && tcp").unwrap(), Ast::And(..)));
+        assert!(matches!(parse("ip || tcp").unwrap(), Ast::Or(..)));
+        assert!(matches!(parse("!ip").unwrap(), Ast::Not(_)));
+        assert!(matches!(parse("ip and tcp and udp").unwrap(), Ast::And(..)));
+        assert!(matches!(parse("ip or tcp or udp").unwrap(), Ast::Or(..)));
+        assert!(matches!(
+            parse("not not ip").unwrap(),
+            Ast::Not(inner) if matches!(*inner, Ast::Not(_))
+        ));
+        // `and` binds tighter than `or`: `ip or tcp and udp` = ip or (tcp and udp).
+        match parse("ip or tcp and udp").unwrap() {
+            Ast::Or(left, right) => {
+                assert!(matches!(*left, Ast::Proto(Proto::Ip)));
+                assert!(matches!(*right, Ast::And(..)), "and must bind tighter");
+            }
+            other => panic!("expected Or, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_errors_are_specific() {
+        for bad in [
+            "",
+            "   ",
+            "ip ip",
+            "(ip",
+            "ip)",
+            "ip and",
+            "and ip",
+            "src ip",
+            "ip src proto 6",
+            "tcp proto 6",
+            "ip proto 999",
+            "ip proto abc",
+            "tcp host 1.2.3.4",
+            "tcp net 10.0.0.0/8",
+            "ip portrange 1-2",
+            "ip port 80",
+            "port",
+            "port abc",
+            "portrange 200-100",
+            "portrange 100",
+            "portrange a-b",
+            "net 10.0.0.0",
+            "net 10.0.0.0/abc",
+            "ether",
+            "ether foo",
+            "ether host 00:11:22:33:44",
+            "ether host zz:11:22:33:44:55",
+            "src ether host 00:11:22:33:44:55",
+            "vlan 5",
+            "greater 100",
+        ] {
+            assert!(parse(bad).is_err(), "`{bad}` must be rejected");
+        }
+    }
+
+    #[test]
+    fn proto_aliases_and_inline_direction() {
+        assert!(matches!(parse("ipv6").unwrap(), Ast::Proto(Proto::Ip6)));
+        assert!(matches!(parse("icmpv6").unwrap(), Ast::Proto(Proto::Icmp6)));
+        assert!(matches!(
+            parse("tcp dst port 80").unwrap(),
+            Ast::Port {
+                dir: Dir::Dst,
+                l4: L4::Tcp,
+                ..
+            }
+        ));
+        assert!(matches!(
+            parse("udp src portrange 1-2").unwrap(),
+            Ast::Port {
+                dir: Dir::Src,
+                l4: L4::Udp,
+                spec: PortSpec::Range(1, 2)
+            }
+        ));
+        assert!(matches!(
+            parse("ip dst net 10.0.0.0/8").unwrap(),
+            Ast::Net {
+                dir: Dir::Dst,
+                proto: Some(Proto::Ip),
+                ..
+            }
+        ));
+        assert!(matches!(
+            parse("arp src host 10.0.0.1").unwrap(),
+            Ast::Host {
+                dir: Dir::Src,
+                proto: Some(Proto::Arp),
+                ..
+            }
+        ));
+        assert!(matches!(
+            parse("ip6 dst host fe80::1").unwrap(),
+            Ast::Host {
+                dir: Dir::Dst,
+                proto: Some(Proto::Ip6),
+                ..
+            }
+        ));
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn v6(a: u16, b: u16, c: u16, d: u16, e: u16, f: u16, g: u16, h: u16) -> IpAddr {
+        IpAddr::V6(Ipv6Addr::new(a, b, c, d, e, f, g, h))
+    }
+
+    #[test]
+    fn prefix_mask_boundaries() {
+        assert_eq!(prefix_mask(v4(1, 2, 3, 4), 0).unwrap(), v4(0, 0, 0, 0));
+        assert_eq!(prefix_mask(v4(1, 2, 3, 4), 8).unwrap(), v4(255, 0, 0, 0));
+        assert_eq!(
+            prefix_mask(v4(1, 2, 3, 4), 32).unwrap(),
+            v4(255, 255, 255, 255)
+        );
+        assert!(prefix_mask(v4(1, 2, 3, 4), 33).is_err());
+        assert_eq!(
+            prefix_mask(v6(0, 0, 0, 0, 0, 0, 0, 0), 0).unwrap(),
+            v6(0, 0, 0, 0, 0, 0, 0, 0)
+        );
+        assert_eq!(
+            prefix_mask(v6(1, 2, 3, 4, 5, 6, 7, 8), 128).unwrap(),
+            v6(0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff)
+        );
+        assert_eq!(
+            prefix_mask(v6(0x2001, 0xdb8, 0, 0, 0, 0, 0, 0), 32).unwrap(),
+            v6(0xffff, 0xffff, 0, 0, 0, 0, 0, 0)
+        );
+        assert!(prefix_mask(v6(0, 0, 0, 0, 0, 0, 0, 0), 129).is_err());
+    }
+
+    #[test]
+    fn mask_addr_masks_or_passes_through() {
+        assert_eq!(
+            mask_addr(v4(10, 1, 2, 3), v4(255, 0, 0, 0)),
+            v4(10, 0, 0, 0)
+        );
+        assert_eq!(
+            mask_addr(
+                v6(0x2001, 0xdb8, 0x1234, 0, 0, 0, 0, 1),
+                v6(0xffff, 0xffff, 0, 0, 0, 0, 0, 0)
+            ),
+            v6(0x2001, 0xdb8, 0, 0, 0, 0, 0, 0)
+        );
+        // A family mismatch is returned unchanged (the caller filters these).
+        assert_eq!(
+            mask_addr(v4(10, 1, 2, 3), v6(0xffff, 0, 0, 0, 0, 0, 0, 0)),
+            v4(10, 1, 2, 3)
+        );
+    }
+
+    #[test]
+    fn net_masks_dedups_and_reports_the_reason() {
+        // Two addresses in the same /24 collapse to one term.
+        let out = net_masks(
+            "t",
+            &[v4(192, 0, 2, 5), v4(192, 0, 2, 9)],
+            &NetSpec::Prefix(24),
+        )
+        .unwrap();
+        assert_eq!(out, vec![(v4(192, 0, 2, 0), v4(255, 255, 255, 0))]);
+        // Explicit mask with no matching family names the token.
+        let err = net_masks(
+            "v6only.example",
+            &[v6(0, 0, 0, 0, 0, 0, 0, 1)],
+            &NetSpec::Mask(v4(255, 0, 0, 0)),
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(err.contains("v6only.example"), "{err}");
+        assert!(err.contains("netmask family"), "{err}");
+    }
+
+    #[test]
+    fn parse_mac_accepts_colon_and_dash() {
+        assert_eq!(
+            parse_mac("00:11:22:33:44:55").unwrap(),
+            [0x00, 0x11, 0x22, 0x33, 0x44, 0x55]
+        );
+        assert_eq!(
+            parse_mac("aa-bb-cc-dd-ee-ff").unwrap(),
+            [0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff]
+        );
+        assert!(parse_mac("00:11:22:33:44").is_err());
+        assert!(parse_mac("00:11:22:33:44:55:66").is_err());
+        assert!(parse_mac("gg:11:22:33:44:55").is_err());
+    }
+
+    #[test]
+    fn resolve_sorts_dedups_and_bounds() {
+        struct R(Vec<IpAddr>);
+        impl Resolver for R {
+            fn lookup(&self, _h: &str) -> std::io::Result<Vec<IpAddr>> {
+                Ok(self.0.clone())
+            }
+        }
+        // Duplicates are removed and the order is deterministic.
+        let r = R(vec![v4(10, 0, 0, 2), v4(10, 0, 0, 1), v4(10, 0, 0, 2)]);
+        let p = Parser {
+            toks: vec![],
+            pos: 0,
+            depth: 0,
+            nodes: 0,
+            resolver: &r,
+        };
+        assert_eq!(
+            p.resolve("x").unwrap(),
+            vec![v4(10, 0, 0, 1), v4(10, 0, 0, 2)]
+        );
+        // A literal never reaches the resolver.
+        assert_eq!(p.resolve("10.0.0.9").unwrap(), vec![v4(10, 0, 0, 9)]);
+        // An empty answer is an error naming the host.
+        let empty = Parser {
+            toks: vec![],
+            pos: 0,
+            depth: 0,
+            nodes: 0,
+            resolver: &R(vec![]),
+        };
+        let err = empty.resolve("nowhere.example").unwrap_err().to_string();
+        assert!(err.contains("nowhere.example"), "{err}");
+    }
+
+    #[test]
+    fn filter_length_limit_is_enforced_before_parsing() {
+        assert!(parse(&" ".repeat(MAX_FILTER_LEN + 1)).is_err());
+        assert!(parse(&" ".repeat(MAX_FILTER_LEN)).is_err()); // still no tokens
+                                                              // Exactly at the limit is accepted (the check is `>`, not `>=`).
+        let padded = format!("ip{}", " ".repeat(MAX_FILTER_LEN - 2));
+        assert_eq!(padded.len(), MAX_FILTER_LEN);
+        assert!(matches!(parse(&padded).unwrap(), Ast::Proto(Proto::Ip)));
+    }
+
+    /// `enter`/`bump` are exercised directly so the limits are checked at the
+    /// exact boundary (256 levels, 4096 nodes) rather than only far past them.
+    #[test]
+    fn depth_and_node_limits_are_checked_at_the_boundary() {
+        let r = FixedResolver(vec![]);
+        let mut p = Parser {
+            toks: vec![],
+            pos: 0,
+            depth: 0,
+            nodes: 0,
+            resolver: &r,
+        };
+        for _ in 0..MAX_DEPTH {
+            p.enter().expect("depth up to the limit is allowed");
+        }
+        let e = p.enter().unwrap_err().to_string();
+        assert!(e.contains("nesting too deep"), "{e}");
+
+        let mut p = Parser {
+            toks: vec![],
+            pos: 0,
+            depth: 0,
+            nodes: 0,
+            resolver: &r,
+        };
+        for _ in 0..MAX_NODES {
+            p.bump().expect("nodes up to the limit are allowed");
+        }
+        let e = p.bump().unwrap_err().to_string();
+        assert!(e.contains("too complex"), "{e}");
+    }
+
+    #[test]
+    fn depth_is_released_between_siblings() {
+        // Each `not`/`(...)` must restore the depth on the way out. If it did
+        // not, a long *flat* chain would be mistaken for deep nesting.
+        let flat_not = std::iter::repeat_n("not ip", MAX_DEPTH + 1)
+            .collect::<Vec<_>>()
+            .join(" and ");
+        assert!(parse(&flat_not).is_ok());
+        let flat_paren = std::iter::repeat_n("(ip)", MAX_DEPTH + 1)
+            .collect::<Vec<_>>()
+            .join(" and ");
+        assert!(parse(&flat_paren).is_ok());
+        // And exactly MAX_DEPTH nesting is still accepted.
+        assert!(parse(&("not ".repeat(MAX_DEPTH) + "ip")).is_ok());
+        assert!(parse(&("not ".repeat(MAX_DEPTH + 1) + "ip")).is_err());
     }
 }

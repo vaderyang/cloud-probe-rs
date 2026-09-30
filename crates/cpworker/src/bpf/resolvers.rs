@@ -175,6 +175,10 @@ mod tests {
     use std::net::{Ipv4Addr, ToSocketAddrs};
     use std::sync::atomic::{AtomicUsize, Ordering};
 
+    /// Serialises tests that touch the process-wide table (the others use a
+    /// private table, but `prewarm`/`parse` populate the global one).
+    static GLOBAL_CACHE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     /// Counts lookups and can be made slow, which is how "the caller never blocks"
     /// is observed without touching a name server.
     #[derive(Clone, Default)]
@@ -286,6 +290,10 @@ mod tests {
     #[test]
     fn prewarming_resolves_what_the_compile_needs() {
         use super::super::{compile, parser::parse};
+        let _g = GLOBAL_CACHE_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        clear_name_cache();
         let expr = "not host localhost";
         let ast = parse(expr).expect("first parse resolves the name");
         let after_first = name_cache_len();
@@ -316,5 +324,41 @@ mod tests {
             Ast::Host { .. } => 1,
             _ => 0,
         }
+    }
+
+    #[test]
+    fn is_empty_tracks_the_table() {
+        let inner = Counting::new(vec![addr(1)], Duration::ZERO);
+        let r = CachedResolver::with_ttl(inner, Duration::from_secs(60));
+        assert!(r.is_empty());
+        r.lookup("x.example").unwrap();
+        assert!(!r.is_empty(), "a populated table is not empty");
+        r.clear();
+        assert!(r.is_empty(), "clear must empty the table");
+    }
+
+    /// Entries below the cap must be kept; only a full table is evicted.
+    #[test]
+    fn a_small_table_is_not_evicted() {
+        let inner = Counting::new((0..5).map(addr).collect(), Duration::ZERO);
+        let r = CachedResolver::with_ttl(inner, Duration::from_secs(60));
+        for i in 0..5u8 {
+            r.lookup(&format!("h{i}.example")).unwrap();
+        }
+        assert_eq!(r.len(), 5, "lookups below the cap must accumulate");
+    }
+
+    #[test]
+    fn global_cache_can_be_cleared_and_counted() {
+        let _g = GLOBAL_CACHE_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        clear_name_cache();
+        assert_eq!(name_cache_len(), 0);
+        let r = CachedResolver::system();
+        r.lookup("localhost").expect("resolve localhost");
+        assert_eq!(name_cache_len(), 1, "one name must be remembered");
+        clear_name_cache();
+        assert_eq!(name_cache_len(), 0, "clear_name_cache must empty it");
     }
 }

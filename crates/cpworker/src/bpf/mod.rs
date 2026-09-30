@@ -203,6 +203,12 @@ mod tests {
     }
 
     #[test]
+    fn empty_program_is_empty() {
+        assert!(Program::default().is_empty());
+        assert!(!compile("ip").unwrap().is_empty());
+    }
+
+    #[test]
     fn long_filters_exceed_the_kernel_instruction_limit() {
         // A realistic output-host exclusion chain reaches the kernel's
         // 4096-instruction cap quickly; the AF_PACKET capturer must then fall
@@ -229,5 +235,15 @@ mod tests {
         let sock = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
         let p = compile("udp and port 53").unwrap();
         attach_filter(sock.as_raw_fd(), &p).expect("kernel rejected bpf program");
+    }
+
+    /// `attach_filter` must surface the kernel's verdict, not paper over it.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn attaching_to_a_bad_socket_fails() {
+        let p = compile("ip").unwrap();
+        // -1 is not a socket, so `setsockopt` must fail with EBADF.
+        let err = attach_filter(-1, &p).unwrap_err();
+        assert_eq!(err.raw_os_error(), Some(libc::EBADF), "{err}");
     }
 }

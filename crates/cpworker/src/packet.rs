@@ -910,4 +910,184 @@ mod tests {
         assert!(matches!(p.src, IpAddr::V6(_)));
         assert_eq!((p.sport, p.dport), (0x0a0b, 0x0c0d));
     }
+
+    /// Every `caplen < offset + N` in `parse_packet` is a minimum capture length
+    /// copied from `packet_split.c`: a frame shortened below it must be rejected,
+    /// and the frame that is exactly long enough must be accepted. Sweeping every
+    /// prefix of each minimal frame pins those comparisons from both sides, which
+    /// is what lets an off-by-one (or a flipped `+`) hide otherwise.
+    #[test]
+    fn every_truncation_of_a_minimal_frame_is_rejected() {
+        let ext8 = |next: u8| -> Vec<u8> {
+            let mut e = vec![next, 0]; // (0 + 1) * 8 = 8 bytes
+            e.resize(8, 0);
+            e
+        };
+        let ext24 = |next: u8| -> Vec<u8> {
+            let mut e = vec![next, 2]; // (2 + 1) * 8 = 24 bytes
+            e.resize(24, 0);
+            e
+        };
+        let dbl_vlan = |inner: &[u8]| -> Vec<u8> {
+            let mut v = eth(ETHERTYPE_VLAN, &[0x00, 0x01]);
+            v.extend_from_slice(&ETHERTYPE_DOT1AD.to_be_bytes());
+            v.extend_from_slice(&[0x00, 0x02, 0x08, 0x00]); // second TCI + IPv4
+            v.extend_from_slice(inner);
+            v
+        };
+
+        let frames: Vec<(&str, Vec<u8>)> = vec![
+            (
+                "v4+tcp",
+                eth(ETHERTYPE_IP, &ipv4(IPPROTO_TCP, &tcp(1, 2, 5, &[]))),
+            ),
+            (
+                "v4+udp",
+                eth(ETHERTYPE_IP, &ipv4(IPPROTO_UDP, &udp(1, 2, &[]))),
+            ),
+            (
+                "v4 options + tcp",
+                eth(
+                    ETHERTYPE_IP,
+                    &ipv4_bytes(IPPROTO_TCP, 6, 24 + 20, &[9; 4], &tcp(1, 2, 5, &[])),
+                ),
+            ),
+            (
+                "v4 + tcp with a 24 B header",
+                eth(ETHERTYPE_IP, &ipv4(IPPROTO_TCP, &tcp(1, 2, 6, &[0u8; 4]))),
+            ),
+            (
+                "vlan + v4 + tcp",
+                vlan(ETHERTYPE_IP, &ipv4(IPPROTO_TCP, &tcp(1, 2, 5, &[]))),
+            ),
+            (
+                "vlan + vlan + v4 + udp",
+                dbl_vlan(&ipv4(IPPROTO_UDP, &udp(1, 2, &[]))),
+            ),
+            ("v6+tcp", ipv6(IPPROTO_TCP, 20, &[], &tcp(1, 2, 5, &[]))),
+            ("v6+udp", ipv6(IPPROTO_UDP, 8, &[], &udp(1, 2, &[]))),
+            (
+                "v6 + hopopts + udp",
+                ipv6(IPPROTO_HOPOPTS, 16, &ext8(IPPROTO_UDP), &udp(1, 2, &[])),
+            ),
+            (
+                "v6 + routing + tcp",
+                ipv6(IPPROTO_ROUTING, 44, &ext24(IPPROTO_TCP), &tcp(1, 2, 5, &[])),
+            ),
+            (
+                "v6 + dstopts + udp",
+                ipv6(IPPROTO_DSTOPTS, 16, &ext8(IPPROTO_UDP), &udp(1, 2, &[])),
+            ),
+        ];
+
+        for (label, f) in frames {
+            assert!(
+                parse_packet(&f).is_some(),
+                "{label}: the minimal frame ({} B) must parse",
+                f.len()
+            );
+            for cut in 0..f.len() {
+                assert!(
+                    parse_packet(&f[..cut]).is_none(),
+                    "{label}: {cut}/{} B must be rejected, not reported as a packet",
+                    f.len()
+                );
+            }
+        }
+    }
+
+    /// `payload_len` is what the *sender* declared, clamped to what was actually
+    /// captured (`PARITY.md`, `packet_split.c`). Reported from the declared length
+    /// means the subtractions that derive it are load-bearing, not decoration.
+    #[test]
+    fn ipv4_payload_len_follows_the_declared_total_length() {
+        // 30 bytes of TCP on the wire, but tot_len says the datagram is 40 B
+        // long, i.e. ip(20) + tcp(20) + no payload.
+        let f = eth(
+            ETHERTYPE_IP,
+            &ipv4_bytes(IPPROTO_TCP, 5, 40, &[], &tcp(1, 2, 5, &[0u8; 10])),
+        );
+        assert_eq!(f.len(), 14 + 20 + 30);
+        assert_eq!(parse_packet(&f).unwrap().payload_len, 0);
+
+        // 45 - 40 = 5 declared payload bytes, still fewer than what was captured.
+        let f = eth(
+            ETHERTYPE_IP,
+            &ipv4_bytes(IPPROTO_TCP, 5, 45, &[], &tcp(1, 2, 5, &[0u8; 10])),
+        );
+        assert_eq!(parse_packet(&f).unwrap().payload_len, 5);
+    }
+
+    #[test]
+    fn ipv6_payload_len_subtracts_both_the_extension_and_the_l4_header() {
+        // Declared payload 28 B = hopopts(8) + tcp(20), while the capture holds
+        // 10 payload bytes more than that.
+        let f = ipv6(
+            IPPROTO_HOPOPTS,
+            28,
+            &[IPPROTO_TCP, 0, 0, 0, 0, 0, 0, 0],
+            &tcp(1, 2, 5, &[0u8; 10]),
+        );
+        assert_eq!(f.len(), 14 + 40 + 8 + 30);
+        let r = parse_packet(&f).unwrap();
+        assert_eq!(r.ipv6_ext_len, 8);
+        assert_eq!(r.l4_hdr_len, 20);
+        assert_eq!(r.payload_len, 0, "28 - 8 - 20");
+
+        // Same frame, now declaring 5 extra payload bytes.
+        let f = ipv6(
+            IPPROTO_HOPOPTS,
+            33,
+            &[IPPROTO_TCP, 0, 0, 0, 0, 0, 0, 0],
+            &tcp(1, 2, 5, &[0u8; 10]),
+        );
+        assert_eq!(parse_packet(&f).unwrap().payload_len, 5, "33 - 8 - 20");
+    }
+
+    /// `extract_ipport` walks Ethernet, then an optional VLAN tag, then IP, then
+    /// the port pair, so it has its own ladder of minimum lengths.
+    #[test]
+    fn extract_ipport_needs_a_complete_header_at_every_layer() {
+        let l4 = udp(0x0a0b, 0x0c0d, &[]);
+        let f = vlan(ETHERTYPE_IP, &ipv4(IPPROTO_UDP, &l4)); // 14 + 4 + 20 + 8
+        assert_eq!(f.len(), 46);
+
+        // The inner EtherType lives at 16..18; a shorter capture cannot even
+        // read it, let alone the inner IPv4 header that follows at offset 18.
+        for cut in 0..38 {
+            assert!(
+                extract_ipport(&f[..cut], 0).is_none(),
+                "cut to {cut} B must be rejected"
+            );
+        }
+        // Fixed IPv4 header (18 + 20 = 38) present, port pair (38 + 8) not yet.
+        for cut in 38..46 {
+            let p = extract_ipport(&f[..cut], 0)
+                .unwrap_or_else(|| panic!("cut to {cut} B must report the addresses"));
+            assert!(p.has_ip && !p.has_port, "cut to {cut} B");
+        }
+        let p = extract_ipport(&f, 0).unwrap();
+        assert!(p.has_ip && p.has_port);
+        assert_eq!((p.sport, p.dport), (0x0a0b, 0x0c0d));
+    }
+
+    #[test]
+    fn extract_ipport_ipv6_reports_both_addresses_and_ports() {
+        let f = ipv6(IPPROTO_TCP, 20, &[], &tcp(0xabcd, 0xef01, 5, &[]));
+        let p = extract_ipport(&f, 0).unwrap();
+        assert_eq!(
+            p.src,
+            IpAddr::V6([0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1]),
+            "source must come from bytes 8..24"
+        );
+        assert_eq!(
+            p.dst,
+            IpAddr::V6([0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2]),
+            "destination must come from bytes 24..40"
+        );
+        assert_eq!((p.sport, p.dport), (0xabcd, 0xef01));
+
+        // Truncated one byte before the destination address is complete.
+        assert!(extract_ipport(&f[..14 + 40 - 1], 0).is_none());
+    }
 }
