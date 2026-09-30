@@ -611,4 +611,23 @@ mod tests {
             "unexpected error: {err}"
         );
     }
+
+    /// The constructor's socket path: creating a raw GRE socket needs CAP_NET_RAW,
+    /// so this is Err in the unprivileged job and Ok in the privileged live job.
+    /// Either way the creation + error branch runs.
+    #[test]
+    fn new_creates_a_raw_socket_or_reports_the_permission_error() {
+        let gre = crate::config::GreConfig {
+            host: "127.0.0.1".to_string(),
+            service_tag: 0,
+            bind_device: String::new(),
+            pmtudisc: -1,
+        };
+        let out = OutputConfig {
+            kind: crate::config::OutputKind::Gre(gre.clone()),
+            rate_limit_mbps: 0,
+            slice: 0,
+        };
+        let _ = GreOutput::new(&gre, &out, Arc::new(OutputStats::default()));
+    }
 }

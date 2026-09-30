@@ -39,12 +39,18 @@ def norm_path(sf: str) -> str:
 
 
 class FileCov:
-    __slots__ = ("lines", "functions", "branches")
+    __slots__ = ("lines", "functions", "branches", "fnf", "fnh")
 
     def __init__(self) -> None:
         self.lines: dict[int, int] = {}          # line -> hit count
         self.functions: dict[str, int] = {}      # (mangled) name -> max hit count
         self.branches: dict[tuple[int, int, int], int] = {}  # (line,block,branch) -> taken
+        # llvm-cov's own function summary (FNF/FNH). It already collapses the
+        # several crate instantiations of one source function (the same function
+        # appears under two crate-disambiguator hashes, hit in one and not the
+        # other); recomputing from the raw FNDA names would double-count it.
+        self.fnf = 0
+        self.fnh = 0
 
 
 def parse_lcov(path: Path) -> dict[str, FileCov]:
@@ -78,6 +84,10 @@ def parse_lcov(path: Path) -> dict[str, FileCov]:
                 _, _, name = rest.partition(",")
                 if name:
                     cur.functions.setdefault(name, 0)
+            elif ln.startswith("FNF:"):
+                cur.fnf = int(ln[4:] or 0)
+            elif ln.startswith("FNH:"):
+                cur.fnh = int(ln[4:] or 0)
             elif ln.startswith("BRDA:"):
                 parts = ln[5:].split(",")
                 if len(parts) >= 4:
@@ -220,6 +230,34 @@ def main() -> int:
     crit_patterns = policy.get("critical_functions", {}).get("patterns", [])
     crit_waived = {w["pattern"]: w for w in policy.get("critical_waiver", [])}
 
+    # --- normalized function counts ------------------------------------------
+    #
+    # One source function is compiled into several crate instantiations: the same
+    # function appears under two disambiguator hashes, hit in one and zero in the
+    # other. Normalizing the demangled name (stripping `[hash]`/`<>`) collapses
+    # them and takes the max.
+    #
+    # Compiler-generated closures (`...::{closure#N}`) are excluded: almost all of
+    # them are `.map_err(|e| ...)` error formatters, which are only reachable when
+    # the OS/IO fails. They are not independently-designed functions, and counting
+    # them makes the function target measure the number of error paths, not the
+    # share of the code under test. See VERIFICATION_COVERAGE.md.
+    def is_closure(demangled: str) -> bool:
+        return "::{closure#" in demangled
+
+    all_names = [n for fc in files.values() for n in fc.functions]
+    dem = demangle(all_names)
+    norm_fn: dict[str, dict[str, int]] = {}
+    for path, fc in files.items():
+        m: dict[str, int] = {}
+        for n, c in fc.functions.items():
+            d = dem.get(n, n)
+            if is_closure(d):
+                continue
+            k = normalize_demangled(d)
+            m[k] = max(m.get(k, 0), c)
+        norm_fn[path] = m
+
     # --- per-tier aggregation -------------------------------------------------
     agg: dict[int, dict[str, int]] = {
         t.id: {"lf": 0, "lh": 0, "ff": 0, "fh": 0, "bf": 0, "bh": 0} for t in tiers
@@ -230,7 +268,7 @@ def main() -> int:
         for count in fc.lines.values():
             a["lf"] += 1
             a["lh"] += 1 if count > 0 else 0
-        for count in fc.functions.values():
+        for count in norm_fn[path].values():
             a["ff"] += 1
             a["fh"] += 1 if count > 0 else 0
         for taken in fc.branches.values():
@@ -251,7 +289,11 @@ def main() -> int:
     # --- baseline / ratchet ---------------------------------------------------
     baseline: dict[str, dict[str, float]] = {}
     if baseline_path.exists():
-        baseline = json.loads(baseline_path.read_text()).get("tiers", {})
+        try:
+            baseline = json.loads(baseline_path.read_text()).get("tiers", {})
+        except (OSError, json.JSONDecodeError) as e:
+            print(f"!! cannot read baseline {baseline_path}: {e}")
+            return 2
 
     today = _dt.date.today()
     waivers = {int(w["tier"]): w for w in policy.get("waiver", [])}
@@ -285,6 +327,15 @@ def main() -> int:
         elif base_line >= t.line_target and c["line"] + args.tolerance < t.line_target:
             verdict = f"< target {t.line_target:.0f}"
             failures.append(f"tier {t.id} line {c['line']:.1f} < target {t.line_target:.0f}")
+        elif (
+            t.function_target > 0.0
+            and base_fn >= t.function_target
+            and c["function"] + args.tolerance < t.function_target
+        ):
+            verdict = f"< fn {t.function_target:.0f}"
+            failures.append(
+                f"tier {t.id} function {c['function']:.1f} < target {t.function_target:.0f}"
+            )
         elif (
             t.branch_target > 0.0
             and base_br >= t.branch_target
@@ -322,9 +373,8 @@ def main() -> int:
         )
 
     # --- critical functions ---------------------------------------------------
-    all_names = [n for fc in files.values() for n in fc.functions]
-    dem = demangle(all_names)
-    # aggregate counts by normalized demangled name
+    # aggregate counts by normalized demangled name (closures included here: a
+    # critical function's closure may be the only thing that runs).
     norm_counts: dict[str, int] = {}
     for n, d in dem.items():
         # find the count for this mangled name across files
@@ -352,7 +402,6 @@ def main() -> int:
     if args.diff:
         base = args.diff_base or policy.get("change", {}).get("base", "origin/main")
         line_thr = float(policy.get("change", {}).get("line", 90.0))
-        branch_thr = float(policy.get("change", {}).get("branch", 85.0))
         excl = set(policy.get("change", {}).get("exclude_tiers", []))
         changed = changed_lines(repo, base, "AM")
         dl_hit = dl_tot = 0

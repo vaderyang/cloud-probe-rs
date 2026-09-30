@@ -106,3 +106,46 @@ mod imp {
 }
 
 pub use imp::{enter_netns_by_fd, enter_netns_by_path, open_self_netns};
+
+#[cfg(all(test, target_os = "linux"))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn open_self_netns_returns_a_fd() {
+        // `/proc/self/ns/net` is readable by an unprivileged process.
+        let fd = open_self_netns().expect("open self netns");
+        drop(fd);
+    }
+
+    #[test]
+    fn entering_the_current_namespace_is_a_noop_or_a_permission_error() {
+        // `setns(CLONE_NEWNET)` needs CAP_SYS_ADMIN: the unprivileged test job
+        // gets EPERM, the privileged live job succeeds (into the *same*
+        // namespace, so it is still a no-op). Both arms exercise the call.
+        match enter_netns_by_path("/proc/self/ns/net") {
+            Ok(fd) => drop(fd),
+            Err(e) => assert!(e.to_string().contains("setns error"), "{e}"),
+        }
+        let self_fd = open_self_netns().expect("open self netns");
+        let _ = enter_netns_by_fd(&self_fd);
+    }
+
+    #[test]
+    fn a_bad_path_is_reported() {
+        let e = enter_netns_by_path("/nonexistent/netns/path").unwrap_err();
+        assert!(e.to_string().contains("open netns"), "{e}");
+    }
+
+    #[test]
+    fn a_bare_name_falls_back_to_the_run_dir() {
+        let e = enter_netns_by_path("cp-no-such-netns").unwrap_err();
+        assert!(e.to_string().contains("open netns"), "{e}");
+    }
+
+    #[test]
+    fn a_nul_path_is_rejected() {
+        let e = enter_netns_by_path("bad\0path").unwrap_err();
+        assert!(e.to_string().contains("invalid netns path"), "{e}");
+    }
+}

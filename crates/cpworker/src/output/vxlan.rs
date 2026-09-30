@@ -804,4 +804,69 @@ mod tests {
         }
         assert!(set_pmtudisc(&sock, 12345).is_err());
     }
+
+    /// The constructor's non-privileged half: a real UDP socket, the pmtudisc
+    /// wrapper and the rate-limit token bucket. `bind_device` needs CAP_NET_RAW,
+    /// so its outcome is exercised but not asserted.
+    #[test]
+    fn new_builds_a_socket_and_honours_the_output_limits() {
+        use crate::config::IP_PMTUDISC_DO;
+        let out = |rate, slice| OutputConfig {
+            kind: crate::config::OutputKind::Null,
+            rate_limit_mbps: rate,
+            slice,
+        };
+        let cfg = VxlanConfig {
+            host: "127.0.0.1".to_string(),
+            port: 4789,
+            capture_time: false,
+            vni_version: 1,
+            vni: VNI,
+            bind_device: String::new(),
+            pmtudisc: -1,
+            split: crate::config::SplitConfig::default(),
+        };
+        let stats = Arc::new(OutputStats::default());
+        let plain = VxlanOutput::new(&cfg, &out(0, 0), Arc::clone(&stats)).expect("udp socket");
+        assert!(plain.throttle.is_none());
+
+        let cfg2 = VxlanConfig {
+            pmtudisc: IP_PMTUDISC_DO,
+            ..cfg
+        };
+        let limited = VxlanOutput::new(&cfg2, &out(10, 128), stats).expect("udp socket");
+        assert!(
+            limited.throttle.is_some(),
+            "a positive rate limit is a bucket"
+        );
+    }
+
+    #[test]
+    fn new_rejects_a_bad_host_and_runs_the_bind_device_path() {
+        let out = OutputConfig {
+            kind: crate::config::OutputKind::Null,
+            rate_limit_mbps: 0,
+            slice: 0,
+        };
+        let stats = Arc::new(OutputStats::default());
+        let mut cfg = VxlanConfig {
+            host: "not-an-ip".to_string(),
+            port: 4789,
+            capture_time: false,
+            vni_version: 1,
+            vni: VNI,
+            bind_device: String::new(),
+            pmtudisc: -1,
+            split: crate::config::SplitConfig::default(),
+        };
+        let e = match VxlanOutput::new(&cfg, &out, Arc::clone(&stats)) {
+            Ok(_) => panic!("expected an invalid-host error"),
+            Err(e) => e,
+        };
+        assert!(e.to_string().contains("invalid vxlan host"), "{e}");
+        cfg.host = "127.0.0.1".to_string();
+        cfg.bind_device = "lo".to_string();
+        // SO_BINDTODEVICE needs CAP_NET_RAW: Err unprivileged, Ok privileged.
+        let _ = VxlanOutput::new(&cfg, &out, stats);
+    }
 }

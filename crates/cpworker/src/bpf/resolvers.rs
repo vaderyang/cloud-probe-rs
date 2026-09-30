@@ -326,6 +326,25 @@ mod tests {
         }
     }
 
+    /// The AST walk behind the pre-warm assertion must count every host under
+    /// every operator, not just the one shape that test happens to use.
+    #[test]
+    fn hosts_len_counts_every_operator() {
+        use super::super::parser::parse;
+        let _g = GLOBAL_CACHE_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        for (expr, want) in [
+            ("host localhost", 1),
+            ("not host localhost", 1),
+            ("host localhost or host localhost", 2),
+            ("host localhost and not host localhost", 2),
+        ] {
+            let ast = parse(expr).expect("parse");
+            assert_eq!(hosts_len(&ast), want, "{expr}");
+        }
+    }
+
     #[test]
     fn is_empty_tracks_the_table() {
         let inner = Counting::new(vec![addr(1)], Duration::ZERO);
@@ -346,6 +365,20 @@ mod tests {
             r.lookup(&format!("h{i}.example")).unwrap();
         }
         assert_eq!(r.len(), 5, "lookups below the cap must accumulate");
+    }
+
+    /// A full table is cleared before the next insert, so a filter that resolves
+    /// unbounded distinct names cannot grow the process without bound.
+    #[test]
+    fn a_full_table_is_cleared_before_the_next_insert() {
+        let inner = Counting::new(vec![addr(1)], Duration::ZERO);
+        let r = CachedResolver::with_ttl(inner, Duration::from_secs(60));
+        for i in 0..MAX_CACHED_NAMES {
+            r.lookup(&format!("host-{i}.example")).unwrap();
+        }
+        assert_eq!(r.len(), MAX_CACHED_NAMES);
+        r.lookup("one-more.example").unwrap();
+        assert_eq!(r.len(), 1, "the table was cleared before the insert");
     }
 
     #[test]

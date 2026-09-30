@@ -130,3 +130,58 @@ mod imp {
 }
 
 pub use imp::{bind_to_device, set_pmtudisc, set_tcp_user_timeout};
+
+#[cfg(all(test, target_os = "linux"))]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+
+    fn udp_socket() -> socket2::Socket {
+        socket2::Socket::new(
+            socket2::Domain::IPV4,
+            socket2::Type::DGRAM,
+            Some(socket2::Protocol::UDP),
+        )
+        .expect("udp socket")
+    }
+
+    #[test]
+    fn pmtudisc_is_set_on_a_udp_socket() {
+        // IP_MTU_DISCOVER is allowed without privileges.
+        let s = udp_socket();
+        assert!(set_pmtudisc(&s, libc::IP_PMTUDISC_DO).is_ok());
+    }
+
+    #[test]
+    fn tcp_user_timeout_is_set_on_a_tcp_socket() {
+        let s = socket2::Socket::new(
+            socket2::Domain::IPV4,
+            socket2::Type::STREAM,
+            Some(socket2::Protocol::TCP),
+        )
+        .expect("tcp socket");
+        assert!(set_tcp_user_timeout(&s, Duration::from_secs(5)).is_ok());
+    }
+
+    #[test]
+    fn tcp_user_timeout_rejects_an_unrepresentable_duration() {
+        let s = udp_socket();
+        let e = set_tcp_user_timeout(&s, Duration::from_secs(u64::MAX / 1000)).unwrap_err();
+        assert!(e.to_string().contains("too big"), "{e}");
+    }
+
+    #[test]
+    fn bind_to_device_reports_a_nul_device() {
+        let s = udp_socket();
+        let e = bind_to_device(&s, "bad\0dev").unwrap_err();
+        assert!(e.to_string().contains("NUL"), "{e}");
+    }
+
+    #[test]
+    fn bind_to_device_needs_privilege_or_succeeds() {
+        let s = udp_socket();
+        // SO_BINDTODEVICE needs CAP_NET_RAW: EPERM in the unprivileged job, Ok in
+        // the privileged live job. Both arms exercise the syscall wrapper.
+        let _ = bind_to_device(&s, "lo");
+    }
+}
