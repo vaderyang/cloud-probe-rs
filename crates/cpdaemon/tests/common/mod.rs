@@ -30,27 +30,40 @@ use serde_json::{json, Value};
 /// Absolute path to the `cpworker` binary built alongside the test binary.
 ///
 /// The supported invocation is `cargo test --workspace` (the gate), which builds
-/// `target/<profile>/cpworker`. The test binary lives in `target/<profile>/deps/`,
-/// so going up one or two levels finds it in both the workspace and the
-/// `-p cpdaemon` case. A missing binary is a hard error (AUDIT4 P2-2: never let
-/// an end-to-end test pass by silently skipping).
+/// `target/<profile>/cpworker`. The test binary usually lives in
+/// `target/<profile>/deps/`, but coverage runs relocate it: under
+/// `cargo llvm-cov` it is under `target/llvm-cov-target/debug/deps/` (or, with
+/// `--branch`, even under `.../build/<pkg>/<hash>/out/`). Rather than count
+/// directory levels, walk up and take the first ancestor that holds a `cpworker`
+/// next to the profile directory - which also guarantees the *instrumented*
+/// worker is the one driven when the tests themselves are instrumented.
+///
+/// A missing binary is a hard error (AUDIT4 P2-2: never let an end-to-end test
+/// pass by silently skipping).
 ///
 /// Caveat: `cargo test -p cpdaemon` alone neither builds nor refreshes the
 /// worker, so use `--workspace` (or `cargo build -p cpworker`) after touching
 /// `crates/cpworker`, else this drives a stale binary.
 pub fn cpworker_binary() -> PathBuf {
-    let mut dir = std::env::current_exe().expect("current_exe");
-    dir.pop(); // the test binary file name
-    if dir.file_name().and_then(|n| n.to_str()) == Some("deps") {
-        dir.pop();
+    let exe = std::env::current_exe().expect("current_exe");
+    let mut searched = Vec::new();
+    for dir in exe.ancestors().skip(1) {
+        let candidate = dir.join("cpworker");
+        if candidate.is_file() {
+            return candidate;
+        }
+        searched.push(candidate);
     }
-    let bin = dir.join("cpworker");
-    assert!(
-        bin.is_file(),
-        "cpworker binary not found at {}; build it first (e.g. `cargo build -p cpworker` or run `cargo test --workspace`)",
-        bin.display()
+    panic!(
+        "cpworker binary not found near {} (looked in: {}); build it first \
+         (e.g. `cargo build -p cpworker` or `cargo test --workspace`)",
+        exe.display(),
+        searched
+            .iter()
+            .map(|p| p.display().to_string())
+            .collect::<Vec<_>>()
+            .join(", ")
     );
-    bin
 }
 
 /// Poll `f` every 20ms until it returns `true` or `timeout` elapses.
