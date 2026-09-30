@@ -214,3 +214,76 @@ libpcap capturer 在 `pcap_activate` 失败时直接让 task 创建失败（`lib
 - **libpcap 在 loopback 只交付接收副本**（`linux_check_direction`）：这是 libpcap 的预期行为，不是 cloud-probe 缺陷。
 - **`pcap_set_immediate_mode` weak symbol 的运行时版本耦合**：是规避手段，不是 bug。
 - **issue #231（ZMQ VLAN 遍历越界读写）**：已报告，且在独立移植中已复现并做了回归。
+
+---
+
+## 对拍结论与建议：S2-5 (#236) / S2-6 (#237)（cloud-probe-rs-q20.5, cloud-probe-rs-q20.6）
+
+参考基线：`cloud-probe` @ `f925e5f6`（`v0.9.4-3`），Linux 7.x，libpcap 1.10.4，Go 1.27；
+Rust 端口位于本仓库 `crates/cpworker`（#236）与 `crates/cpgolib` / `crates/cpdaemon`（#237）。
+
+### #236 接口 down：C 让 task 创建失败，Rust 让 task 存活等待恢复（**建议保留现状**）
+
+**C 侧**：`cpworker/src/libpcap.c:203` 在 `pcap_activate()` 返回负值时 `goto error`，task 创建直接失败；
+接口 down 时 libpcap 报 `That device is not up`，且没有重试路径——接口恢复也不会自动重建 task。
+
+**Rust 侧（逐步核对 `crates/cpworker/src/capturer/af_packet.rs`）**：
+
+| 时刻 / 场景 | Rust 行为 | 与 C 的异同 |
+|---|---|---|
+| 创建期：接口**不存在**（或名字非法） | `interface_index()` 调 `if_nametoindex` 返回 0 → `Error("unknown interface '<if>': <errno>")`，task 创建失败（`AfPacketCapturer::open` → `bind_socket`） | **一致**：C 的 `pcap_activate` 同样失败 |
+| 创建期：接口**存在但 down** | `if_nametoindex` 仍返回非 0；`bind(AF_PACKET, ETH_P_ALL, ifindex)` 在 down 接口上成功；task 正常创建（并照常装载 BPF/netns） | **分歧（有意）**：C 在此失败，task 根本不存在 |
+| 采集期：接口 down | socket 非阻塞；断链瞬间内核先给一次 `ENETDOWN`，之后为 `EAGAIN`。`EAGAIN` 走 `Ok(None)` 分支并 `backoff.reset()`，随后 `poll(POLLIN, readability_wait_ms)`（默认 1ms），不空转 | 存活 |
+| 采集期：接口恢复 UP | 有帧入队时 `poll` 立即返回、`recvmsg` 成功，`backoff.reset()`，**无需重载配置**即刻恢复采集 | **更强**：C 的 task 已消失，需要外部重配置 |
+| 采集期：设备被删除（`ENODEV` 风暴） | `Err(e)` 分支：`ErrorBackoff` 1ms 起、倍增、100ms 封顶，并每 2s 打一条 `recvmsg error`（`interface=... netns=... recvmsg error`） | 存活、且 CPU 受控 |
+| 采集期：设备被删除后**以新 ifindex 重建** | 残留问题：socket 绑定的是旧的数字 `ifindex`，端口不会重新 `if_nametoindex`/rebind；若新设备的 ifindex 不同，则永远收不到包（`ENODEV` 持续） | **已知限制**，见下 |
+
+**性质**：该分歧已被本仓库 `PARITY.md §2.6` 记录并实测（4 task down 口 CPU 30.2% → 3.2%，无流量口 30.3% → 3.2%）：
+Rust 用 `AF_PACKET` 的 `socket()+bind()` 复刻不了 `pcap_activate` 对 down 口失败的副作用，但也因此天然具备
+C 没有的“链路 flap 后自愈”。`ErrorBackoff` + 空读 1ms `poll` 已消除 down 口空转（AUDIT4 P5-12 / 复核 P2-6）。
+
+**建议**：
+1. **保留 Rust 现状**（task 存活、退避、自动恢复），**不新增“失败即报错”开关**。原因：接口 flap 在容器网络里是常态，
+   失败即报错会让 worker 以 0 个 task 运行且无自愈；而当前的存活语义与上游诉求（现场希望 task 挺过短暂 down）一致，
+   且是**严格更强**的行为，不改变对外可观测的采集面指标。
+2. 若上游坚持“创建失败即报错”作为默认，建议做成**显式配置项**（如 `libpcap.wait_for_interface_up`，默认 true），
+   而不是把 Rust 拉回 C 的行为——但这属于策略选择，**不建议在未确认上游意图前实现**。
+3. 记录一个**残留限制**：设备被删除后以不同 ifindex 重建时不会自动 rebind（需要重开 socket / 重进 netns，
+   语义待设计）。这属于“等待恢复”承诺的边界，建议在文档/issue 回复中写明，而不是现在改代码。
+
+### #237 Go 配置解码宽容：Rust serde 更严格，且**仅在本非生产解码路径**上分歧（**建议 document**）
+
+**Go 侧**：`encoding/json` 对结构体字段名大小写不敏感，且缺失字段保留零值（`cpdaemon/pkg/worker/config.go`
+的 `json:"..."` 标签）。**Rust 侧**：`crates/cpgolib/src/worker_config.rs` 用 serde 派生，字段名大小写敏感，
+非 `Option` 字段必须出现，未出现即 `missing field`；未知 key 在两侧都被忽略。
+
+**实测（Go oracle 直接编译 `parity/difffuzz/go/oracle.go`，`J<json TaskConfig>` 请求）**：
+
+| 输入（`TaskConfig`） | Go oracle 结果 | Rust serde（`crates/cpdaemon/src/worker_config.rs` 新增测试钉住） |
+|---|---|---|
+| `{"capturer":{"type":"libpcap","libpcap":{"interface":"eth0","snAplen":1234}},"outputs":[]}` | **成功**；指纹与 `snaplen:1234` 完全相同（`96857b284cc98c99`）——即 Go **采纳**大小写不符的值 | **成功但丢弃**：`snAplen` 是未知 key，`snaplen` 保持 `None`；指纹与规范写法**不同** |
+| `{"capturer":{"type":"libpcap","libpcap":{"interface":"eth0"}},"outputs":[]}` | 同规范输入，成功 | 成功 |
+| `{"outputs":[]}`（缺 `capturer`） | **成功**（零值 `CapturerConfig{}`），指纹 `7f739484af728467` | **失败**：`missing field capturer` |
+| `{"interface":"eth0"}`（顶层形状不对） | **成功**（整体零值），指纹 `eb79587b5c876f8b` | **失败**：`missing field capturer`（且 `interface` 是未知 key） |
+| 任意输入 + `"bogus_unknown_key":1` | 成功，忽略 | 成功，忽略（**两侧一致**） |
+
+**生产路径澄清（重要）**：Rust 的 `cpdaemon` **不**从 JSON 解码 `worker.Config`——它由
+`WorkerManager::new_worker_config` 在代码中构造（见 `crates/cpdaemon/src/cpm/worker_mgr.rs`）。因此上表
+“缺 field 直接报错”只影响差分 fuzzer 的 `task_fingerprint` 模式（该模式已在
+`crates/cpworker/fuzz/fuzz_targets/diff_oracle.rs` 里把单侧 `PARSE_FAIL` 归类为已知良性分歧，见 `PARITY.md §2.3`）。
+真正的 Go `encoding/json` 生产解码点是 CPM 响应：`cpdaemon/pkg/cpm/client.go` 的
+`SyncStrategyResponse` / `StrategyEntry`。这里同样存在大小写差异：Go 对 `"slicelen"` 会**采纳**到 `SliceLen`，
+而 Rust 的 `crates/cpdaemon/src/cpm/models.rs` 用 `#[serde(rename = "sliceLen")]`，会静默忽略该小写 key
+（所有字段都有 `#[serde(default)]`，所以不会报错，只是取默认值）。因 CPM 发出的都是规范大小写，
+这条在当前实际链路上**不可触发**，属良性。
+
+**建议**：**document，不收敛到 Go 的宽容语义**。
+1. 大小写不敏感匹配 + 缺失必填字段零值填充是 Go 的健壮性缺陷（一个 `snAplen` typo 会静默改行为），
+   把 Rust 改成同样宽容是主动降级；`serde` 也没有“整结构体大小写不敏感”的原生开关，只能靠大量自定义 deserializer。
+2. 保留 serde 的严格语义，并把这条差异写进移植文档（已有 `PARITY.md §2.3` + fuzzer 的分类过滤）。
+3. 仅当将来发现真实 CPM 报文使用非规范名字时，对**具体字段**加 `#[serde(alias = "...")]` 做点对点兼容，
+   不要放开整个解码器。
+
+> qw: 本节由 agent3 追加，覆盖 cloud-probe-rs-q20.5（#236）与 cloud-probe-rs-q20.6（#237）；
+> #236 结论=保留现状（含一处 rebind 残留限制），#237 结论=document、不收敛。
+
