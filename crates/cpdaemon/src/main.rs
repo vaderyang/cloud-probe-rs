@@ -197,10 +197,7 @@ async fn run_server(cfg: DaemonConfig) -> anyhow::Result<()> {
 
     let client = HttpClient::new(
         &cfg.cpm.base_url,
-        ClientConfig {
-            timeout: DaemonConfig::parse_duration(&cfg.cpm.client.timeout, Duration::from_secs(15)),
-            insecure_skip_verify: true,
-        },
+        ClientConfig::from_cpm_client(&cfg.cpm.client),
     )?;
 
     let worker_mgr = WorkerManager::new(worker_cfg, tool.clone());

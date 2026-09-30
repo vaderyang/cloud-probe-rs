@@ -346,6 +346,23 @@ UP"的反应**不是一回事**。独占 veth 对（`p2spin0/p2spin1`，实验�
 `drop_packets` 仍只来自 `getsockopt(PACKET_STATISTICS)` 的 `tp_drops`（§4 采集面语义），退避与空闲等待不改变
 任何计数口径。
 
+## 2.7 CPM 客户端 TLS 校验的有意分歧（上游 #232）
+
+上游 `cpdaemon/cmd/internal/asm/provider.go` 无条件构造
+`tls.Config{InsecureSkipVerify: true}`，且没有任何配置开关（上游 issue #232）。
+Go 版因此**永远不校验 CPM 的服务端证书**：能对 CPM 通道做中间人的一方可以用任意自签证书
+冒充 CPM，返回的 JSON 会驱动探针建任务、下发 BPF/转发主机/输出目标。
+
+Rust 移植**有意偏离**该行为，改为安全默认：
+
+| 项 | Go oracle | Rust（本仓库） | 性质 |
+|---|---|---|---|
+| CPM 服务端证书校验 | 硬编码 `InsecureSkipVerify: true`，无开关 | **默认校验**；`cpm.client.tls.insecure_skip_verify: true` 才显式关闭（映射到 reqwest `danger_accept_invalid_certs`） | **有意分歧（安全修复）**：默认即安全；需要连接不受信证书的测试/遗留环境可显式降级 |
+| mTLS 客户端证书（PKCS#12） | 配置了 `cpm.client.tls.pkcs12_cert_file` 时用 PKCS#12 做客户端证书（`provider.go:116`） | 键仍可解析但**尚未接线**（reqwest/rustls 无内建 PKCS#12 解码器），列为独立后续 `cloud-probe-rs-ryg.2` | 未移植项（见 §5.1） |
+
+行为由 `crates/cpdaemon/tests/cpm_tls_verify.rs` 用**真实自签 TLS 服务端**固定：默认客户端
+握手失败（服务端未完成握手），`insecure_skip_verify = true` 时同一请求成功。
+
 ## 3. 关键一致性向量（已通过）
 
 * `workerTaskBuilder` 产出的 task fingerprint（含 Go 反射标签算法的怪异 `UUID()`

@@ -10,9 +10,14 @@
 id = "RISK-CPM-TLS"
 category = "security"
 priority = "P0"
-source = "SECURITY.md / UPSTREAM_ISSUES #232"
-description = "MITM on the CPM channel can inject tasks/BPF; the client is InsecureSkipVerify"
-evidence = ["path:SECURITY.md", "path:verification/policy.toml"]
+source = "SECURITY.md / UPSTREAM_ISSUES #232 / PARITY.md §2.7"
+description = "MITM on the CPM channel could inject tasks/BPF; the client now verifies the server certificate by default and only skips on explicit opt-in"
+evidence = [
+  "path:SECURITY.md",
+  "path:verification/policy.toml",
+  "test:self_signed_certificate_is_rejected_by_default",
+  "test:self_signed_certificate_is_accepted_when_verification_is_skipped",
+]
 
 [[risk]]
 id = "RISK-UNTRUSTED-CONFIG"
