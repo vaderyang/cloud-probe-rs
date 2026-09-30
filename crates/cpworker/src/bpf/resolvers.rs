@@ -335,10 +335,10 @@ mod tests {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         for (expr, want) in [
-            ("host localhost", 1),
-            ("not host localhost", 1),
-            ("host localhost or host localhost", 2),
-            ("host localhost and not host localhost", 2),
+            ("host 192.0.2.1", 1),
+            ("not host 192.0.2.1", 1),
+            ("host 192.0.2.1 or host 192.0.2.2", 2),
+            ("host 192.0.2.1 and not host 192.0.2.2", 2),
         ] {
             let ast = parse(expr).expect("parse");
             assert_eq!(hosts_len(&ast), want, "{expr}");
