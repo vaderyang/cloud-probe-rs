@@ -1,9 +1,16 @@
 //! Task orchestration. Port of `task.c`.
 //!
 //! Deviations from the C implementation, documented for reviewers:
-//! * Reload rebuilds every task from the new config instead of matching
-//!   fingerprints and reusing unchanged tasks. Behaviour is equivalent
-//!   (config becomes live without restart) but less efficient.
+//! * Reload reuses a task's capturer and outputs when its config fingerprint is
+//!   unchanged, matching `task.c`'s `find_task_by_fingerprint`; only added or
+//!   changed tasks are rebuilt. The fingerprint is the daemon-computed task
+//!   fingerprint (see `cpgolib::worker_fingerprint`), which changes whenever any
+//!   field of the task config changes. A task without a fingerprint (the daemon
+//!   always fills them in, but hand-written configs may omit it) is rebuilt,
+//!   because it cannot be identified across configs. The C thread/mailbox
+//!   protocol is collapsed into the single manager mutex: the shared output
+//!   thread is stopped for the swap, so no in-flight ring message can be
+//!   delivered to a reordered task slot.
 //! * The pipeline output thread and ring are safe abstractions, not the
 //!   original lock-free SPSC structures.
 
@@ -36,6 +43,10 @@ struct TaskEntry {
     fingerprint: Option<String>,
     capturer: Option<Box<dyn Capturer>>,
     error: Option<String>,
+    /// Reload generation in which this entry's capturer/outputs were built. The
+    /// initial build is generation 0; an entry whose generation is older than
+    /// the manager's current epoch was *reused* across a reload (not rebuilt).
+    build_epoch: u64,
 }
 
 /// RTC sink: forwards packets directly to a task's outputs.
@@ -182,6 +193,19 @@ fn build_task(
     Ok((capturer, pending.finish()))
 }
 
+/// Find an old task that can satisfy `task_cfg` without being rebuilt: the same
+/// non-empty config fingerprint, successfully built (a failed old task is retried),
+/// and not already claimed by another new task.
+fn find_reusable(entries: &[TaskEntry], reused: &[bool], task_cfg: &TaskConfig) -> Option<usize> {
+    let fingerprint = task_cfg.fingerprint.as_deref()?;
+    entries.iter().enumerate().find_map(|(j, old)| {
+        (!reused.get(j).copied().unwrap_or(false)
+            && old.capturer.is_some()
+            && old.fingerprint.as_deref() == Some(fingerprint))
+        .then_some(j)
+    })
+}
+
 /// Owns all tasks, their capturers and outputs, and the execution threads.
 pub struct TaskManager {
     config: Config,
@@ -200,6 +224,9 @@ pub struct TaskManager {
     running: Arc<AtomicBool>,
     output_thread: Option<JoinHandle<()>>,
     inited_count: usize,
+    /// Incremented once per reload; new/rebuild task entries carry it as
+    /// [`TaskEntry::build_epoch`], reused entries keep their old value.
+    reload_epoch: u64,
 }
 
 impl TaskManager {
@@ -236,6 +263,7 @@ impl TaskManager {
             running: Arc::new(AtomicBool::new(false)),
             output_thread: None,
             inited_count: 0,
+            reload_epoch: 0,
         };
         mgr.build_all()?;
         Ok(mgr)
@@ -262,6 +290,7 @@ impl TaskManager {
                         fingerprint: task_cfg.fingerprint.clone(),
                         capturer: Some(capturer),
                         error: None,
+                        build_epoch: self.reload_epoch,
                     });
                     out_sets.push(TaskOutputs { outputs });
                     inited += 1;
@@ -273,6 +302,7 @@ impl TaskManager {
                         fingerprint: task_cfg.fingerprint.clone(),
                         capturer: None,
                         error: Some(e.to_string()),
+                        build_epoch: self.reload_epoch,
                     });
                     out_sets.push(TaskOutputs {
                         outputs: Vec::new(),
@@ -387,20 +417,28 @@ impl TaskManager {
         }
     }
 
+    /// Stop the pipeline output thread (if running) and join it, *without*
+    /// touching any task's outputs. Used by [`Self::reload`], which keeps the
+    /// resources of unchanged tasks and only hands the replaced ones to
+    /// `destroy()`. Every other shutdown path goes through [`Self::stop`].
+    fn stop_output_thread(&mut self) {
+        if let Some(handle) = self.output_thread.take() {
+            self.running.store(false, Ordering::Release);
+            let _ = handle.join();
+        }
+    }
+
     /// Stop the pipeline output thread (if running), join it, and run the one
     /// and only `Output::destroy()` call point for every live output.
     ///
-    /// Shutdown (and `Drop`) and reload both funnel through here, so an
+    /// Shutdown (and `Drop`) and the fallback reload path funnel through here, so an
     /// output's linger / flush can never be skipped by an implicit
     /// `Box<dyn Output>` release. The outputs are *taken* out of the shared set
     /// before being destroyed, which makes repeat calls a no-op (destroy is
     /// never run twice) and keeps the shared lock held only for the O(n) swap,
     /// not for the multi-second linger wait.
     pub fn stop(&mut self) {
-        if let Some(handle) = self.output_thread.take() {
-            self.running.store(false, Ordering::Release);
-            let _ = handle.join();
-        }
+        self.stop_output_thread();
         let mut doomed: Vec<Box<dyn Output>> = {
             let mut sets = self.out_sets.lock();
             sets.iter_mut().flat_map(|s| s.outputs.drain(..)).collect()
@@ -469,26 +507,43 @@ impl TaskManager {
         total
     }
 
-    /// Rebuild all tasks from a freshly parsed config. In-place reload.
+    /// Reload in place from a freshly parsed config, reusing unchanged tasks.
+    ///
+    /// A task whose non-empty config fingerprint still appears in `new_config`
+    /// and whose old build succeeded keeps its capturer and outputs: its live
+    /// capture state (BPF program, socket, netns, open file) and its output
+    /// connection are *not* recreated. Added and changed tasks are built fresh;
+    /// tasks absent from the new config (or belonging to a changed fingerprint)
+    /// have their outputs destroyed. This mirrors `task.c`'s
+    /// `find_task_by_fingerprint` reuse without its three-phase mailbox dance,
+    /// because the manager is already serialised by a single mutex.
     ///
     /// Callers that hold the manager mutex should prefer the free [`reload_from_file`],
     /// which parses and resolves host names *before* taking the lock: a BPF expression
     /// containing a name blocks there for as long as the resolver takes.
     ///
+    /// Lock discipline: the shared output thread is joined *before* any old
+    /// resource is moved, and `out_sets` is locked only in short, non-overlapping
+    /// statements (never across a `self.start()` or a multi-second `destroy()`),
+    /// so this cannot reproduce the double-lock deadlock that bit
+    /// `collect_stats_summary`.
+    ///
     /// # Errors
     /// Returns an error if the rebuilt task set cannot be constructed.
     pub fn reload(&mut self, new_config: Config) -> Result<()> {
         let was_running = self.output_thread.is_some();
-        // Always goes through stop(): it joins the output thread *and* runs the
-        // destroy() call point, so the old outputs drain before they are
-        // replaced.
-        self.stop();
+        // Join the shared output thread but keep every task's resources so
+        // unchanged tasks can be reused below. `stop()` would destroy them all.
+        self.stop_output_thread();
 
-        // Drop old capturers/outputs before creating new ones (so sockets and
-        // files are released).
+        // Move the old task state aside. `out_sets` is left empty so a later
+        // `stop()` / `Drop` cannot double-destroy anything we keep.
+        let old_entries = std::mem::take(&mut self.entries);
+        let old_out_sets = std::mem::take(&mut *self.out_sets.lock());
+
+        // Drop old config after building new tasks (so filter names/sockets are
+        // released only once the replacements exist, as before).
         let old_config = std::mem::replace(&mut self.config, new_config);
-        self.entries.clear();
-        *self.out_sets.lock() = Vec::new();
 
         // Recreate pipeline ring/alloc if the buffer size changed.
         self.pipeline = None;
@@ -501,7 +556,8 @@ impl TaskManager {
             });
         }
 
-        let result = self.build_all();
+        self.reload_epoch += 1;
+        let result = self.rebuild_reusing(old_entries, old_out_sets);
         drop(old_config);
 
         if was_running {
@@ -510,6 +566,118 @@ impl TaskManager {
         result?;
         crate::log_info!("reload complete: {} tasks", self.inited_count);
         Ok(())
+    }
+
+    /// Build the new task set, moving the capturer and outputs of each old task
+    /// whose non-empty fingerprint is unchanged into the new set untouched, and
+    /// destroying the outputs of every old task that is not reused.
+    ///
+    /// `old_entries` and `old_out_sets` are parallel by position; both were moved
+    /// out of the manager by [`Self::reload`], which already joined the output
+    /// thread, so nothing polls them here.
+    ///
+    /// # Errors
+    /// Reserved for a future fatal build failure; per-task build failures are
+    /// recorded and reported like [`Self::build_all`] (`Ok`).
+    fn rebuild_reusing(
+        &mut self,
+        mut old_entries: Vec<TaskEntry>,
+        mut old_out_sets: Vec<TaskOutputs>,
+    ) -> Result<()> {
+        let tasks_cfg = self.config.tasks.clone();
+        let mut entries = Vec::with_capacity(tasks_cfg.len());
+        let mut out_sets = Vec::with_capacity(tasks_cfg.len());
+        let mut inited = 0;
+        let mut reused = vec![false; old_entries.len()];
+
+        crate::log_info!("find {} tasks", tasks_cfg.len());
+        for (i, task_cfg) in tasks_cfg.iter().enumerate() {
+            if let Some(j) = find_reusable(&old_entries, &reused, task_cfg) {
+                // `find_reusable` only returns built tasks; if that ever changed,
+                // fall through and rebuild rather than leaving a hole.
+                if let Some(capturer) = old_entries[j].capturer.take() {
+                    reused[j] = true;
+                    let outputs = std::mem::take(&mut old_out_sets[j].outputs);
+                    crate::log_info!(
+                        "existing task-{i}, fingerprint={}",
+                        task_cfg.fingerprint.as_deref().unwrap_or("")
+                    );
+                    entries.push(TaskEntry {
+                        index: i,
+                        fingerprint: task_cfg.fingerprint.clone(),
+                        capturer: Some(capturer),
+                        error: None,
+                        build_epoch: old_entries[j].build_epoch,
+                    });
+                    out_sets.push(TaskOutputs { outputs });
+                    inited += 1;
+                    continue;
+                }
+            }
+
+            match build_task(
+                &tasks_cfg,
+                task_cfg,
+                self.stats_capture.clone(),
+                self.stats_output.clone(),
+            ) {
+                Ok((capturer, outputs)) => {
+                    crate::log_info!("create task-{i} success");
+                    entries.push(TaskEntry {
+                        index: i,
+                        fingerprint: task_cfg.fingerprint.clone(),
+                        capturer: Some(capturer),
+                        error: None,
+                        build_epoch: self.reload_epoch,
+                    });
+                    out_sets.push(TaskOutputs { outputs });
+                    inited += 1;
+                }
+                Err(e) => {
+                    crate::log_error!("new task-{i} error: {e}");
+                    entries.push(TaskEntry {
+                        index: i,
+                        fingerprint: task_cfg.fingerprint.clone(),
+                        capturer: None,
+                        error: Some(e.to_string()),
+                        build_epoch: self.reload_epoch,
+                    });
+                    out_sets.push(TaskOutputs {
+                        outputs: Vec::new(),
+                    });
+                }
+            }
+        }
+
+        // Only the outputs of old tasks that were not moved into the new set are
+        // destroyed. This is the reload analogue of `stop()`'s single destroy()
+        // call point; the shared output thread is already joined above, so the
+        // doomed set is not polled.
+        let mut doomed: Vec<Box<dyn Output>> = Vec::new();
+        for (j, mut set) in old_out_sets.into_iter().enumerate() {
+            if !reused.get(j).copied().unwrap_or(false) {
+                doomed.append(&mut set.outputs);
+            }
+        }
+        for o in doomed.iter_mut() {
+            o.destroy();
+        }
+        drop(doomed);
+
+        self.entries = entries;
+        *self.out_sets.lock() = out_sets;
+        self.inited_count = inited;
+        Ok(())
+    }
+
+    #[cfg(test)]
+    /// The reload generation in which task `index`'s capturer/outputs were last
+    /// built (0 = initial build). An entry reused across a reload keeps its old
+    /// value; a rebuilt/added one carries the new epoch. Tests use this to tell
+    /// reuse from rebuild without relying only on destroy spies.
+    #[must_use]
+    pub(crate) fn task_build_epoch(&self, index: usize) -> Option<u64> {
+        self.entries.get(index).map(|e| e.build_epoch)
     }
 
     /// Build the `collect_stats_summary` RPC payload. Mirrors
@@ -1569,5 +1737,224 @@ mod tests {
             1,
             "only the pcap_file task can be rebuilt"
         );
+    }
+
+    /// Build the JSON for an RTC manager whose tasks all capture the same
+    /// one-packet scratch pcap and carry the given config fingerprints.
+    fn fp_tasks_cfg(pcap: &std::path::Path, fps: &[&str]) -> String {
+        let tasks: Vec<String> = fps
+            .iter()
+            .map(|fp| {
+                format!(
+                    r#"{{"fingerprint":"{fp}","capturer":{{"type":"pcap_file","pcap_file":{{"file_name":"{}"}}}},"outputs":[{{"type":"null"}}]}}"#,
+                    pcap.display()
+                )
+            })
+            .collect();
+        format!(
+            r#"{{"execution_model":"rtc","tasks":[{}]}}"#,
+            tasks.join(",")
+        )
+    }
+
+    /// The core of the efficiency change: in one reload, an unchanged fingerprint
+    /// keeps its capturer and outputs untouched, a changed fingerprint (same task,
+    /// new config) is rebuilt, an added task is built, and a removed one is
+    /// destroyed. The generation counter makes reuse vs rebuild explicit, and the
+    /// destroy spy proves the unchanged output was *not* recreated.
+    #[test]
+    fn reload_reuses_unchanged_tasks_and_rebuilds_only_the_rest() {
+        let dir = tempfile::tempdir().unwrap();
+        let pcap = scratch_pcap(dir.path());
+        let mut mgr = TaskManager::new(
+            Config::parse_str(&fp_tasks_cfg(&pcap, &["a", "b", "d"])).expect("parse"),
+            "test.json".into(),
+            dir.path().display().to_string(),
+        )
+        .expect("manager");
+
+        // Attach one spy output to each initial task so a rebuild is observable.
+        let spies: Vec<Arc<AtomicUsize>> = (0..3).map(|_| Arc::new(AtomicUsize::new(0))).collect();
+        {
+            let mut sets = mgr.out_sets.lock();
+            for (i, c) in spies.iter().enumerate() {
+                sets[i].outputs.push(Box::new(SpyOutput {
+                    destroyed: c.clone(),
+                }));
+            }
+        }
+        for i in 0..3 {
+            assert_eq!(mgr.task_build_epoch(i), Some(0), "initial build is epoch 0");
+        }
+
+        // New order: a unchanged, b -> b2 (changed fingerprint), c added, d gone.
+        mgr.reload(Config::parse_str(&fp_tasks_cfg(&pcap, &["a", "b2", "c"])).expect("parse"))
+            .expect("reload");
+
+        assert_eq!(mgr.inited_count(), 3);
+        assert_eq!(mgr.total_tasks(), 3);
+        assert_eq!(
+            spies[0].load(Ordering::SeqCst),
+            0,
+            "unchanged task 'a' must be reused: its output must not be destroyed"
+        );
+        assert_eq!(
+            spies[1].load(Ordering::SeqCst),
+            1,
+            "removed/changed task 'b' must be destroyed"
+        );
+        assert_eq!(
+            spies[2].load(Ordering::SeqCst),
+            1,
+            "removed task 'd' must be destroyed"
+        );
+        assert_eq!(
+            mgr.task_build_epoch(0),
+            Some(0),
+            "'a' keeps its old generation => reused"
+        );
+        assert_eq!(
+            mgr.task_build_epoch(1),
+            Some(1),
+            "'b2' was rebuilt => new generation"
+        );
+        assert_eq!(
+            mgr.task_build_epoch(2),
+            Some(1),
+            "'c' was added => new generation"
+        );
+
+        // The reused capturer still works: each of the three tasks drains its own
+        // scratch-pcap packet (a was not left in a broken half-reloaded state).
+        assert_eq!(mgr.poll_packets_batch(4), 3);
+    }
+
+    /// A non-empty fingerprint reused across two reloads is reused again (and its
+    /// output survives both), while a fingerprint that disappears is destroyed once.
+    #[test]
+    fn repeated_reload_keeps_reusing_the_same_task() {
+        let dir = tempfile::tempdir().unwrap();
+        let pcap = scratch_pcap(dir.path());
+        let mut mgr = TaskManager::new(
+            Config::parse_str(&fp_tasks_cfg(&pcap, &["keep"])).expect("parse"),
+            "test.json".into(),
+            dir.path().display().to_string(),
+        )
+        .expect("manager");
+        let c = Arc::new(AtomicUsize::new(0));
+        mgr.out_sets.lock()[0].outputs.push(Box::new(SpyOutput {
+            destroyed: c.clone(),
+        }));
+
+        for _ in 0..3 {
+            mgr.reload(Config::parse_str(&fp_tasks_cfg(&pcap, &["keep"])).expect("parse"))
+                .expect("reload");
+            assert_eq!(mgr.task_build_epoch(0), Some(0), "still the initial build");
+        }
+        assert_eq!(
+            c.load(Ordering::SeqCst),
+            0,
+            "never destroyed while fingerprint holds"
+        );
+
+        // Drop the task: now its output must be destroyed exactly once.
+        mgr.reload(Config::parse_str(&fp_tasks_cfg(&pcap, &[])).expect("parse"))
+            .expect("reload");
+        assert_eq!(mgr.inited_count(), 0);
+        assert_eq!(c.load(Ordering::SeqCst), 1);
+    }
+
+    /// A task without a fingerprint cannot be identified across configs, so it is
+    /// rebuilt even when the rest of its config is byte-identical. This preserves
+    /// the pre-change behaviour for hand-written configs.
+    #[test]
+    fn reload_rebuilds_a_task_without_a_fingerprint() {
+        let dir = tempfile::tempdir().unwrap();
+        let pcap = scratch_pcap(dir.path());
+        let cfg = format!(
+            r#"{{"execution_model":"rtc","tasks":[{{"capturer":{{"type":"pcap_file","pcap_file":{{"file_name":"{}"}}}},"outputs":[{{"type":"null"}}]}}]}}"#,
+            pcap.display()
+        );
+        let mut mgr = TaskManager::new(
+            Config::parse_str(&cfg).expect("parse"),
+            "test.json".into(),
+            dir.path().display().to_string(),
+        )
+        .expect("manager");
+        let c = Arc::new(AtomicUsize::new(0));
+        mgr.out_sets.lock()[0].outputs.push(Box::new(SpyOutput {
+            destroyed: c.clone(),
+        }));
+        mgr.reload(Config::parse_str(&cfg).expect("parse"))
+            .expect("reload");
+        assert_eq!(
+            c.load(Ordering::SeqCst),
+            1,
+            "an anonymous task must be rebuilt (and its old output destroyed)"
+        );
+        assert_eq!(mgr.task_build_epoch(0), Some(1));
+    }
+
+    /// Lock-discipline regression: reload and `collect_stats_summary` run on
+    /// separate threads against the same manager. If the new reload path nested
+    /// the `out_sets`/ring locks (or held one across `start()`), the workers would
+    /// park forever; the watchdog fails the test instead of hanging the suite.
+    #[test]
+    fn reload_and_stats_summary_run_without_deadlock() {
+        let dir = tempfile::tempdir().unwrap();
+        let pcap = scratch_pcap(dir.path());
+        let cfg_path = dir.path().join("cfg.json");
+        let json = format!(
+            r#"{{"execution_model":"pipeline","pipeline":{{"buffer_size_mb":1}},"tasks":[
+                {{"fingerprint":"a","capturer":{{"type":"pcap_file","pcap_file":{{ "file_name":"{}"}}}},"outputs":[{{"type":"null"}}]}}
+            ]}}"#,
+            pcap.display()
+        );
+        std::fs::write(&cfg_path, &json).expect("write config");
+        let mgr = Arc::new(Mutex::new(
+            TaskManager::new(
+                Config::parse_str(&json).expect("parse"),
+                cfg_path.display().to_string(),
+                dir.path().display().to_string(),
+            )
+            .expect("manager"),
+        ));
+        mgr.lock().start();
+
+        let (tx, rx) = std::sync::mpsc::channel();
+        let mut handles = Vec::new();
+        for _ in 0..3 {
+            let m = mgr.clone();
+            let tx = tx.clone();
+            handles.push(std::thread::spawn(move || {
+                for _ in 0..300 {
+                    let s = m.lock().collect_stats_summary();
+                    assert!(s["pipeline_buffer"]["ring_total"].as_u64().unwrap_or(0) > 0);
+                }
+                tx.send(()).expect("send");
+            }));
+        }
+        {
+            let m = mgr.clone();
+            let path = cfg_path.display().to_string();
+            let tx = tx.clone();
+            handles.push(std::thread::spawn(move || {
+                for _ in 0..20 {
+                    let plan = prepare_reload(&path).expect("prepare");
+                    m.lock().reload(plan.config).expect("reload");
+                }
+                tx.send(()).expect("send");
+            }));
+        }
+        drop(tx);
+
+        for _ in 0..handles.len() {
+            rx.recv_timeout(std::time::Duration::from_secs(30))
+                .expect("reload/stats deadlocked: a lock outlived its scope");
+        }
+        for h in handles {
+            h.join().expect("worker panicked");
+        }
+        mgr.lock().stop();
     }
 }
