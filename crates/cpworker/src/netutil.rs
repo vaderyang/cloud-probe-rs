@@ -75,28 +75,55 @@ pub fn bpf_filter_replace_nic(bpf: &str) -> Result<String> {
 /// Latin-1 mojibake and produced a filter that no longer compiles
 /// (AUDIT4 P5-21).
 fn replace_nic(bpf: &str, resolve: impl Fn(&str) -> Result<IpAddr>) -> Result<String> {
-    let mut out: Vec<u8> = Vec::with_capacity(bpf.len() + 16);
-    let mut rest = bpf;
-    while let Some(pos) = rest.find(NIC_TOKEN) {
-        out.extend_from_slice(&rest.as_bytes()[..pos]);
-        let name = &rest[pos + NIC_TOKEN.len()..];
-        // `str::find` with a `char` predicate yields a char boundary, so
-        // non-ASCII whitespace (U+3000 IDEOGRAPHIC SPACE, NBSP is not
-        // whitespace and stays part of the name) ends the interface name
-        // exactly where a UTF-8-aware scan would stop.
-        let end = name.find(char::is_whitespace).unwrap_or(name.len());
-        let ifname = &name[..end];
-        let addr = resolve(ifname)
-            .map_err(|_| Error::new(format!("no ip found for interface {ifname}")))?;
-        let ip = addr.format();
-        log(
-            LOG_INFO,
-            &format!("bpf_filter interface {ifname} addresss is {ip}"),
-        );
-        out.extend_from_slice(ip.as_bytes());
-        rest = &name[end..];
+    // Upstream #281: a `nic.` token starts at the beginning or after a delimiter,
+    // and ends at the next delimiter - `(`, `)` or whitespace, because the BPF
+    // lexer treats parentheses as syntax. Without the start check,
+    // `panic.example.com` contains `nic.` and was mistaken for an interface
+    // reference; without the parenthesis delimiters, `(host nic.eth0)` swallowed
+    // the closing `)` into the interface name.
+    fn is_delim(c: char) -> bool {
+        c.is_whitespace() || c == '(' || c == ')'
     }
-    out.extend_from_slice(rest.as_bytes());
+    /// `IF_NAMESIZE` from `<net/if.h>`.
+    const IF_NAMESIZE: usize = 16;
+
+    let bytes = bpf.as_bytes();
+    let mut out: Vec<u8> = Vec::with_capacity(bpf.len() + 16);
+    let mut plain_start = 0usize;
+    let mut i = 0usize;
+    while i < bytes.len() {
+        let is_token = bpf[i..].starts_with(NIC_TOKEN)
+            && (i == 0 || bpf[..i].chars().next_back().is_some_and(is_delim));
+        if is_token {
+            let name = &bpf[i + NIC_TOKEN.len()..];
+            // The interface name ends at the next delimiter. A non-ASCII
+            // whitespace (U+3000) ends it too, which is the AUDIT4 P5-21
+            // improvement over C's byte-wise `isspace`.
+            let end = name.find(is_delim).unwrap_or(name.len());
+            let ifname = &name[..end];
+            if ifname.is_empty() || ifname.len() >= IF_NAMESIZE {
+                return Err(Error::new(format!(
+                    "invalid interface name in bpf_filter: {}",
+                    &bpf[i..i + NIC_TOKEN.len() + end]
+                )));
+            }
+            let addr = resolve(ifname)
+                .map_err(|_| Error::new(format!("no ip found for interface {ifname}")))?;
+            let ip = addr.format();
+            log(
+                LOG_INFO,
+                &format!("bpf_filter interface {ifname} address is {ip}"),
+            );
+            out.extend_from_slice(&bytes[plain_start..i]);
+            out.extend_from_slice(ip.as_bytes());
+            i += NIC_TOKEN.len() + end;
+            plain_start = i;
+            continue;
+        }
+        // `i` stays on a char boundary, so the non-token text is copied as-is.
+        i += bpf[i..].chars().next().map_or(1, char::len_utf8);
+    }
+    out.extend_from_slice(&bytes[plain_start..]);
     // Every piece pushed above is either a verbatim slice of the (valid UTF-8)
     // input or an ASCII address, so this cannot fail. It stays fallible rather
     // than panicking (AUDIT4 P5-23).
@@ -153,8 +180,29 @@ mod tests {
 
     #[test]
     fn non_ascii_around_a_token_is_preserved() {
-        let out = replace_nic("端口 网卡：nic.eth0 and 更多", fake_ip).expect("replace");
-        assert_eq!(out, "端口 网卡：192.0.2.1 and 更多");
+        let out = replace_nic("端口 网卡 nic.eth0 and 更多", fake_ip).expect("replace");
+        assert_eq!(out, "端口 网卡 192.0.2.1 and 更多");
+    }
+
+    /// Upstream #281: `nic.` is only a token at the start or after a delimiter
+    /// (whitespace, `(` or `)`), and the interface name ends at one too. The old
+    /// `str::find` treated the `nic.` inside `panic.example.com` as a token and
+    /// swallowed `)` into the name.
+    #[test]
+    fn nic_is_a_token_only_at_a_delimiter() {
+        // `panic.example.com` contains `nic.` but is not a token.
+        assert_eq!(
+            replace_nic("host panic.example.com", fake_ip).expect("verbatim"),
+            "host panic.example.com"
+        );
+        // Parentheses delimit both ends of the token.
+        assert_eq!(
+            replace_nic("(host nic.eth0)", fake_ip).expect("replace"),
+            "(host 192.0.2.1)"
+        );
+        // An empty or over-long interface name is an error, not a mangled filter.
+        assert!(replace_nic("host nic.", fake_ip).is_err());
+        assert!(replace_nic(&format!("host nic.{}", "a".repeat(16)), fake_ip).is_err());
     }
 
     /// Non-ASCII whitespace must terminate the interface name. The old loop

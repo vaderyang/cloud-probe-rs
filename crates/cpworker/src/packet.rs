@@ -201,6 +201,12 @@ pub fn parse_packet(pkt_data: &[u8]) -> Option<PacketParseResult> {
         if caplen < offset + r.ip_hdr_len || r.ip_hdr_len < 20 {
             return None;
         }
+        // A fragment carries only part of an L4 datagram: a non-first fragment has
+        // no L4 header at all, and splitting a first fragment at the L4 boundary
+        // breaks reassembly of the rest (upstream #282 / #244). Send it unsplit.
+        if be16(&pkt_data[offset + 6..offset + 8]) & 0x3fff != 0 {
+            return None;
+        }
         let ip_proto = pkt_data[offset + 9];
         offset += r.ip_hdr_len;
         r.l4_offset = offset;
@@ -999,6 +1005,25 @@ mod tests {
     /// `payload_len` is what the *sender* declared, clamped to what was actually
     /// captured (`PARITY.md`, `packet_split.c`). Reported from the declared length
     /// means the subtractions that derive it are load-bearing, not decoration.
+    #[test]
+    fn ipv4_fragments_are_rejected() {
+        // Upstream #282 / #244: a fragment has no complete L4 datagram (a
+        // non-first one has no L4 header at all), so splitting it would rewrite
+        // payload bytes as a sequence number/checksum. `parse_packet` rejects it
+        // and the caller sends the packet unchanged.
+        for frag in [0x2000u16, 0x0001, 0x2001, 0x3fff] {
+            let mut ip = ipv4(IPPROTO_UDP, &udp(1, 2, &[]));
+            ip[6..8].copy_from_slice(&frag.to_be_bytes());
+            let frame = eth(ETHERTYPE_IP, &ip);
+            assert!(
+                parse_packet(&frame).is_none(),
+                "frag_off {frag:#06x} must not parse (and must not be split)"
+            );
+        }
+        // A packet with frag_off 0 still parses.
+        assert!(parse_packet(&eth(ETHERTYPE_IP, &ipv4(IPPROTO_UDP, &udp(1, 2, &[])))).is_some());
+    }
+
     #[test]
     fn ipv4_payload_len_follows_the_declared_total_length() {
         // 30 bytes of TCP on the wire, but tot_len says the datagram is 40 B

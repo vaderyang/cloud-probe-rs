@@ -118,6 +118,17 @@ pub fn calculate_fragment_count(r: &PacketParseResult, max_payload_size: i32) ->
     r.payload_len.div_ceil(max_payload_size as usize) as i32
 }
 
+/// RFC 768: a computed UDP checksum of zero is transmitted as all ones, because
+/// a zero field means "no checksum" (and is invalid for UDP over IPv6, RFC 8200
+/// section 8.1). TCP is unaffected (upstream #282 / #245).
+fn udp_checksum_for_wire(ck: u16) -> u16 {
+    if ck == 0 {
+        0xffff
+    } else {
+        ck
+    }
+}
+
 /// Build fragment `fragment_index` into `output_buf`, returning its length.
 pub fn build_fragment(
     r: &PacketParseResult,
@@ -211,7 +222,10 @@ pub fn build_fragment(
                     udp_len,
                 )
             };
-            put_ne16(&mut output_buf[r.l4_offset + 6..], ck);
+            put_ne16(
+                &mut output_buf[r.l4_offset + 6..],
+                udp_checksum_for_wire(ck),
+            );
         }
     }
 
@@ -316,6 +330,15 @@ mod checksum_tests {
             u16::from_ne_bytes([0x01, 0x02]) as u32 + 3
         );
         assert_eq!(htons(0x1234), 0x1234u16.to_be());
+    }
+
+    #[test]
+    fn a_zero_udp_checksum_is_sent_as_all_ones() {
+        // RFC 768: a computed zero means "no checksum", so it is transmitted as
+        // 0xFFFF (upstream #282 / #245); TCP is unaffected.
+        assert_eq!(udp_checksum_for_wire(0), 0xffff);
+        assert_eq!(udp_checksum_for_wire(0x1234), 0x1234);
+        assert_eq!(udp_checksum_for_wire(0xffff), 0xffff);
     }
 
     #[test]

@@ -185,7 +185,7 @@ parity/run.sh 5000 42     # packet_split: C vs Rust
 
 ## 2.2 有意的安全分歧（C 的未定义行为）
 
-对拍还暴露了原 C 代码的两个内存安全问题。Rust 端口选择**安全行为**而非复刻 UB：
+对拍还暴露了原 C 代码的内存安全问题。Rust 端口选择**安全行为**而非复刻 UB：
 
 1. **ZMQ VLAN 遍历越界写**（`output_zmq.c`）：VLAN 遍历的边界用 `caplen + 4`（把合成的
    MPLS 区当成 VLAN 标签），当 `slice` 截断 VLAN 帧时会算出 `vlan_total_size > length-18`，
@@ -193,21 +193,27 @@ parity/run.sh 5000 42     # packet_split: C vs Rust
    `BatchBuilder::append_packet` 中检测该条件并丢弃该包。
 2. **ZMQ VLAN 遍历越界读**：同一遍历在数据不足时读取 `caplen` 之后的 4 字节。Rust 增加了
    `pkt_data.len()` 边界保护。
-3. **IPv4 IHL / TCP data offset 最小长度校验**（`packet_split.c` ↔ `packet.rs`）：C 只检查
-   `caplen >= ihl*4`（不要求 `ihl >= 5`），且不要求 TCP data offset `>= 5`；Rust 额外要求
-   两者至少 20 字节，因此会**拒绝** C 会接受的一类畸形头部（例如 IHL=1 或 TCP data offset=0）。
-   这是 Rust 有意的输入校验硬化（避免把重叠的头部当合法分片），由差分 fuzzer
-   （`parity/difffuzz.sh packet_split`）发现；其余输入逐字节一致。
-
-以上三类输入在生成器中已规避，以保证差分对拍比较的是**有定义的行为**；其余全部输入逐字节一致。
-
-4. **`req_pattern` 超长表达式的递归深度**：C 的 `req_pattern.c` 与 Rust 端口都是递归下降
+3. **`req_pattern` 超长表达式的递归深度**：C 的 `req_pattern.c` 与 Rust 端口都是递归下降
    解析器（`parse_expression → parse_term → parse_factor → parse_expression`），且 AST 的求值/
    析构也递归。数千层嵌套 `(` 或数千个 `and`/`or` 会耗尽栈。Rust 现在在
    `parse_pattern` 以 `MAX_PATTERN_LEN = 512` 拒绝（`INIT_FAIL`，不会崩溃），C 侧的同一边界
    写在 `parity/c_req_pattern.c`；真实 pattern 只有几十字节，C 的深递归本就是 UB（它只是
    栈帧更小、撑得久一点）。由 `parity/difffuzz.sh req_pattern` 发现（ASan 在 ~3300 层嵌套处
    报 stack-overflow），两侧现在返回相同的 accept/reject。
+4. **IPv4 IHL / TCP data offset 最小长度校验**（`packet_split.c` ↔ `packet.rs`）：Rust 端口
+   原本就额外要求两者至少 20 字节，会拒绝 C 曾经接受的畸形头部（IHL=1、TCP data offset=0）。
+   上游 #282 现已同样拒绝，**分歧已收敛**；Rust 只是更早做了这项硬化。
+
+以上输入在生成器中已规避，或由双方同一边界拒绝，以保证差分对拍比较的是**有定义的行为**；
+其余全部输入逐字节一致。
+
+> **上游 #281 / #282 的记忆安全同步**：#281 的 `bpf_filter_replace_nic` 堆溢出在 Rust 里
+> 不存在（`String` 增长无越界），但**语义**已同步——`nic.` 只在行首或定界符（空白、`(`、`)`）
+> 之后开始、在下一个定界符结束，名字为空或长度 ≥ `IF_NAMESIZE` 报错，因此 `panic.example.com`
+> 不再被误认，`(host nic.eth0)` 也能正确替换。#282 同步了 `parse_packet` 对 IPv4 分片
+> （MF 或 offset ≠ 0）的拒绝（不分片，原样发送）、`build_fragment` 在 UDP 校验和算得 0 时
+> 发送 `0xFFFF`（RFC 768），以及 IPv6 扩展头循环去重；`parity/run.sh` 与 `parity/verify_bpf.sh`
+> 对新 tip 全绿。
 
 > **由差分 fuzzing 发现并修复（同一处两次）**：`req_pattern` 的端口解析先是补齐了 C 的
 > `strtol(..., 10)` 语义（接受 `-0`、`+80`）；上游随后把规则收紧为**纯十进制**
