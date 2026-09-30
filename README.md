@@ -125,7 +125,7 @@ Faithfully ported:
   The C unit tests that covered packet splitting, req_pattern, config and
   stats are ported (see `cargo test`).
 * **cpgolib**, **cpctl**, **dockerpid**, **cripid** — full ports.
-* **cpdaemon** — worker lifecycle, cgroup-v2 CPU limiting, CPM HTTP client and
+* **cpdaemon** — worker lifecycle, cgroup-v1/v2 CPU limiting, CPM HTTP client and
   models, a functional register/strategy/metrics sync loop, and the
   `worker_task_builder` heuristics (startup-arg parsing, container-ID decoding,
   VNI→tag encoding) ported with the exact Go test vectors as unit tests

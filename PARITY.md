@@ -37,8 +37,8 @@
 | `pkg/worker/config.go` | `worker_config.rs` | ✅ |
 | `pkg/worker/worker.go` | `worker.rs` | ✅ |
 | `pkg/worker/log.go` | `worker_log.rs` | ✅ |
-| `pkg/worker/reslimit*.go` | `reslimit.rs` | ⚠️ 仅 cgroup v2 CPU |
-| `pkg/cgroup/*` | `reslimit.rs` | ⚠️ 无 cgroup v1 |
+| `pkg/worker/reslimit*.go` | `reslimit.rs` | ✅（cgroup v1/v2 CPU 限额） |
+| `pkg/cgroup/*` | `reslimit.rs` | ⚠️ v1/v2 CPU 配额；写后校验未移植 |
 | `pkg/common/{fnv,fingerprint,signature,fingerprint_reflect}.go` | `common.rs` | ✅ 测试向量验证 |
 | `pkg/cpm/client.go` / `models.go` | `cpm/client.rs` / `models.rs` | ✅ |
 | `pkg/cpm/syncer.go` | `cpm/syncer.rs` | ✅ |
@@ -500,13 +500,16 @@ release profile 用 `panic = "abort"`：**panic 是致命事件，不是可恢�
 
 ### 5.1 计划移植（有明确目标）
 
+> **已完成（bead 4mv.5）**：cgroup v1 CPU 限额（`cpu.cfs_period_us` / `cpu.cfs_quota_us` / `tasks`）已随 v2
+> 一同 port 到 `reslimit.rs`；`version=auto` 按 `cgroup.controllers` 探测 v2，否则回退 v1。Go
+> `verifyProcessCgroup` 的写后校验仍未移植（不影响限额生效，只是缺一条观测日志）。
+
 | 项 | 来源 | 现状 | 决策 / 触发条件 |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | DPDK capturer（`dpdk/pdump.c`） | C | 未 port，按类型返回不支持 | **计划移植**，仅在目标部署需要 `dpdk_pdump` 时实现；否则维持显式错误 |
 | task reload 的 fingerprint 复用 / mailbox 协议 | `task.c` | 简化为重建全部 task | **计划移植**：行为等价但效率低；仅在 reload 抖动成为实际问题时实现 |
 | `unix-manager` select 单线程语义 | `unix-manager.c` | 用“非阻塞 accept + 独立线程” | **计划移植**（可选）：当前与 C 行为对齐（1.5s 超时断开），仅在并发语义差异暴露时改 |
 | 无锁 ring buffer | `ring_buffer.c` | 语义等价的加锁实现 | **计划移植**（可选）：仅在 P3/性能复测显示锁成为瓶颈时实现 lock-free SPSC |
-| cgroup v1 支持 | Go `pkg/cgroup` | 仅 cgroup v2 CPU 限额 | **计划移植**：仅在仍需 cgroup v1 的宿主（老内核/容器）上实现 |
 | 其余 C/Go 单测移植 | 上游测试 | 部分已移植 | **持续**：随功能补齐同步移植向量 |
 
 ### 5.2 不计划移植（明确排除）

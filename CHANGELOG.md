@@ -107,6 +107,12 @@ Two conventions worth knowing before reading:
   both lockfiles match their manifests (P5-28). Dependabot gained the matching
   second entry (`directory: /crates/cpworker/fuzz`), so that lockfile now gets
   update PRs instead of only being policed.
+- `cpdaemon` now supports **cgroup v1 CPU limiting** alongside v2 (`reslimit.rs`),
+  closing the last item in PARITY.md §5.1. Explicit `cgroup.version = v1` writes
+  `cpu.cfs_period_us` (100ms) + `cpu.cfs_quota_us` (clamped to the 1000us kernel
+  floor) and adds the pid to `tasks`; `v2` keeps `cpu.max` + `cgroup.procs`.
+  `version = auto` detects v2 by `cgroup.controllers` and otherwise falls back to
+  v1. `reset()` writes `-1` to the v1 quota and `max <period>` to `cpu.max`.
 - `bench/live_bench.py`: manual, root-only live-capture A/B (C/libpcap vs the Rust
   `AF_PACKET` path) reporting frames captured, drop counters and CPU seconds per
   captured million frames. Not a CI gate and not a throughput ceiling - see its
