@@ -89,6 +89,24 @@ fn hdrlen() -> usize {
     align(mem::size_of::<TpacketHdr>()) + mem::size_of::<libc::sockaddr_ll>()
 }
 
+/// Parse `[ifname] [n_datagrams] [port]` with the historical defaults.
+fn parse_args(a: &[String]) -> (String, u32, u16) {
+    let ifname = a.get(1).cloned().unwrap_or_else(|| "lo".to_string());
+    let n: u32 = a.get(2).and_then(|s| s.parse().ok()).unwrap_or(2000);
+    let port: u16 = a.get(3).and_then(|s| s.parse().ok()).unwrap_or(41255);
+    (ifname, n, port)
+}
+
+/// Smallest power-of-two frame size that holds `need` bytes and divides `page`.
+/// TPACKET_V1/V2 require an integer number of frames per page-sized block.
+fn frame_size_for(page: usize, need: usize) -> usize {
+    let mut frame_size = 64usize;
+    while frame_size < need || !page.is_multiple_of(frame_size) {
+        frame_size *= 2;
+    }
+    frame_size
+}
+
 fn last_err() -> io::Error {
     io::Error::last_os_error()
 }
@@ -113,9 +131,7 @@ fn setsockopt<T>(fd: i32, level: i32, optname: i32, val: &T) -> io::Result<()> {
 
 fn main() -> io::Result<()> {
     let a: Vec<String> = std::env::args().collect();
-    let ifname = a.get(1).cloned().unwrap_or_else(|| "lo".to_string());
-    let n: u32 = a.get(2).and_then(|s| s.parse().ok()).unwrap_or(2000);
-    let port: u16 = a.get(3).and_then(|s| s.parse().ok()).unwrap_or(41255);
+    let (ifname, n, port) = parse_args(&a);
 
     // SAFETY: plain socket() with a host-byte-order-converted protocol.
     let fd = unsafe {
@@ -143,10 +159,7 @@ fn main() -> io::Result<()> {
     // ... and a block must hold an integer number of frames, so the frame size is
     // the smallest power of two that fits header + snaplen and divides a page.
     let need = hdrlen() + SNAPLEN;
-    let mut frame_size = 64usize;
-    while frame_size < need || page % frame_size != 0 {
-        frame_size *= 2;
-    }
+    let frame_size = frame_size_for(page, need);
     let per_block = page / frame_size;
     let block_nr = 1024usize;
     let req = TpacketReq {
@@ -277,4 +290,66 @@ fn main() -> io::Result<()> {
         st.tp_packets, st.tp_drops
     );
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{align, frame_size_for, hdrlen, parse_args, SNAPLEN, TPACKET_ALIGNMENT};
+
+    #[test]
+    fn align_rounds_up_to_the_tpacket_boundary() {
+        assert_eq!(align(0), 0);
+        assert_eq!(align(1), TPACKET_ALIGNMENT);
+        assert_eq!(align(TPACKET_ALIGNMENT), TPACKET_ALIGNMENT);
+        assert_eq!(align(TPACKET_ALIGNMENT + 1), 2 * TPACKET_ALIGNMENT);
+        assert_eq!(align(33), 48);
+    }
+
+    #[test]
+    fn hdrlen_is_the_aligned_v2_header_plus_sockaddr() {
+        let hdr = std::mem::size_of::<super::TpacketHdr>();
+        assert_eq!(align(hdr) % TPACKET_ALIGNMENT, 0);
+        assert_eq!(
+            hdrlen(),
+            align(hdr) + std::mem::size_of::<libc::sockaddr_ll>()
+        );
+        // The copied sockaddr_ll sits at the end of the header area.
+        assert!(hdrlen() >= hdr + std::mem::size_of::<libc::sockaddr_ll>());
+    }
+
+    #[test]
+    fn parse_args_applies_documented_defaults() {
+        let none: Vec<String> = vec!["probe".into()];
+        assert_eq!(parse_args(&none), ("lo".to_string(), 2000, 41255));
+
+        let full: Vec<String> = vec![
+            "probe".into(),
+            "eth0".into(),
+            "3000".into(),
+            "41266".into(),
+            "ignore_outgoing".into(),
+        ];
+        assert_eq!(parse_args(&full), ("eth0".to_string(), 3000, 41266));
+    }
+
+    #[test]
+    fn parse_args_falls_back_on_unparseable_numbers() {
+        let a: Vec<String> = vec!["probe".into(), "lo".into(), "x".into(), "y".into()];
+        assert_eq!(parse_args(&a), ("lo".to_string(), 2000, 41255));
+    }
+
+    #[test]
+    fn frame_size_fits_the_header_snaplen_and_divides_the_page() {
+        let need = hdrlen() + SNAPLEN;
+        for page in [4096usize, 8192, 65536] {
+            let fs = frame_size_for(page, need);
+            assert!(fs >= need, "frame {fs} must hold {need} bytes");
+            assert_eq!(page % fs, 0, "frame {fs} must divide page {page}");
+            assert!(fs.is_power_of_two());
+            // Minimal: halving it would either be too small or not divide.
+            assert!(fs == 64 || fs / 2 < need || page % (fs / 2) != 0);
+        }
+        // A page-aligned block of 4096 with a 52+128-byte need yields 256.
+        assert_eq!(frame_size_for(4096, need), 256);
+    }
 }
