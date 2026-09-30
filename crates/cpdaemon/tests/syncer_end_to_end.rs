@@ -265,3 +265,185 @@ async fn syncer_metric_log_reports_log_count() {
         CAPTURED_LOGS.lock().expect("logs lock")
     );
 }
+
+/// A registration outage must be retried, not fatal: the syncer keeps polling
+/// the same endpoint until shutdown and never advances to strategy/metrics.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn syncer_retries_register_until_shutdown() {
+    let mock = MockCpm::new().register_status(500);
+    let (url, rec) = mock.spawn().await;
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    let sock = dir.path().join("ctl.sock");
+    let tool = Tool {
+        get_kvm_instances_script: "true".into(),
+        ..Default::default()
+    };
+    let client = HttpClient::new(&url, ClientConfig::default()).expect("http client");
+    let worker_mgr =
+        WorkerManager::new(daemon_worker_config(&sock.to_string_lossy()), tool.clone());
+    let cfg = SyncerConfig {
+        reg_retry_interval: Duration::from_millis(50),
+        ..Default::default()
+    };
+    let syncer = Syncer::new(
+        client,
+        worker_mgr,
+        tool,
+        RegConfig {
+            name: "probe-retry".into(),
+            ..Default::default()
+        },
+        cfg,
+    );
+
+    let (tx, rx) = watch::channel(false);
+    let _guard = ShutdownOnDrop(tx.clone());
+    let handle = tokio::spawn(async move { syncer.run(rx) });
+
+    let retried = wait_async(
+        || rec.lock().unwrap().register_bodies.len() >= 3,
+        Duration::from_secs(5),
+    )
+    .await;
+    assert!(retried, "syncer must keep retrying a failed register");
+
+    tx.send(true).expect("send shutdown");
+    tokio::time::timeout(Duration::from_secs(5), handle)
+        .await
+        .expect("syncer did not stop within 5s")
+        .expect("syncer task panicked");
+
+    let r = rec.lock().unwrap();
+    assert!(r.register_bodies.len() >= 3);
+    // No registration succeeded, so no daemon-id call may have been made.
+    assert!(r.strategy_ids.is_empty());
+    assert!(r.metrics_ids.is_empty());
+}
+
+/// Strategy and metric pushes can fail independently; a failure is logged and
+/// the loop must keep running and retry, never unwinding the task.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn syncer_survives_sync_strategy_and_metric_failures() {
+    let mock = MockCpm::new()
+        .register_body(json!({"id": DAEMON_ID, "paUUID": "pa-77", "syncInterval": 1}))
+        .strategy_status(500)
+        .metrics_status(500);
+    let (url, rec) = mock.spawn().await;
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    let sock = dir.path().join("ctl.sock");
+    let tool = Tool {
+        get_kvm_instances_script: "true".into(),
+        ..Default::default()
+    };
+    let client = HttpClient::new(&url, ClientConfig::default()).expect("http client");
+    let worker_mgr =
+        WorkerManager::new(daemon_worker_config(&sock.to_string_lossy()), tool.clone());
+    let cfg = SyncerConfig {
+        reg_retry_interval: Duration::from_millis(50),
+        sync_strategy_interval: Duration::from_millis(50),
+        sync_metric_interval: Duration::from_millis(50),
+        ..Default::default()
+    };
+    let syncer = Syncer::new(
+        client,
+        worker_mgr,
+        tool,
+        RegConfig {
+            name: "probe-errors".into(),
+            ..Default::default()
+        },
+        cfg,
+    );
+
+    let (tx, rx) = watch::channel(false);
+    let _guard = ShutdownOnDrop(tx.clone());
+    let handle = tokio::spawn(async move { syncer.run(rx) });
+
+    let saw_both = wait_async(
+        || {
+            let r = rec.lock().unwrap();
+            r.strategy_versions.len() >= 2 && r.metrics_bodies.len() >= 2
+        },
+        Duration::from_secs(10),
+    )
+    .await;
+    assert!(saw_both, "the loops must keep retrying after HTTP errors");
+
+    tx.send(true).expect("send shutdown");
+    tokio::time::timeout(Duration::from_secs(5), handle)
+        .await
+        .expect("syncer did not stop within 5s")
+        .expect("syncer task panicked");
+
+    let r = rec.lock().unwrap();
+    assert!(
+        r.strategy_ids.iter().all(|&id| id == DAEMON_ID) && !r.strategy_ids.is_empty(),
+        "retried strategy calls must still target the registered daemon id"
+    );
+    assert!(
+        r.metrics_ids.iter().all(|&id| id == DAEMON_ID) && !r.metrics_ids.is_empty(),
+        "retried metric calls must still target the registered daemon id"
+    );
+}
+
+/// A `304 Not Modified` on the very first strategy pull is the "version is
+/// unchanged" path: the syncer must not reconcile and must keep the cached
+/// version (`-1`) for the next poll rather than inventing a response.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn syncer_strategy_not_modified_is_ignored() {
+    let mock = MockCpm::new()
+        .register_body(json!({"id": DAEMON_ID, "paUUID": "pa-77", "syncInterval": 1}))
+        .strategy_not_modified_at("-1");
+    let (url, rec) = mock.spawn().await;
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    let sock = dir.path().join("ctl.sock");
+    let tool = Tool {
+        get_kvm_instances_script: "true".into(),
+        ..Default::default()
+    };
+    let client = HttpClient::new(&url, ClientConfig::default()).expect("http client");
+    let worker_mgr =
+        WorkerManager::new(daemon_worker_config(&sock.to_string_lossy()), tool.clone());
+    let cfg = SyncerConfig {
+        reg_retry_interval: Duration::from_millis(50),
+        sync_strategy_interval: Duration::from_millis(50),
+        sync_metric_interval: Duration::from_millis(50),
+        ..Default::default()
+    };
+    let syncer = Syncer::new(
+        client,
+        worker_mgr,
+        tool,
+        RegConfig {
+            name: "probe-304".into(),
+            ..Default::default()
+        },
+        cfg,
+    );
+
+    let (tx, rx) = watch::channel(false);
+    let _guard = ShutdownOnDrop(tx.clone());
+    let handle = tokio::spawn(async move { syncer.run(rx) });
+
+    let polled = wait_async(
+        || rec.lock().unwrap().strategy_versions.len() >= 2,
+        Duration::from_secs(5),
+    )
+    .await;
+    assert!(polled, "strategy must keep polling after a 304");
+
+    tx.send(true).expect("send shutdown");
+    tokio::time::timeout(Duration::from_secs(5), handle)
+        .await
+        .expect("syncer did not stop within 5s")
+        .expect("syncer task panicked");
+
+    let versions = rec.lock().unwrap().strategy_versions.clone();
+    assert!(
+        versions.iter().all(|v| v == "-1"),
+        "a 304 must not advance the cached version: {versions:?}"
+    );
+}

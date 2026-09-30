@@ -647,4 +647,313 @@ mod tests {
         // 512 (limit) - 256 (task capture buffer) = 256 > min 128.
         assert_eq!(cfg.pipeline.as_ref().unwrap().buffer_size_mb, 256);
     }
+
+    fn valid_config() -> WorkerConfig {
+        let mut wc = base_worker_config();
+        wc.cgroup_cfg.version = "auto".into();
+        wc
+    }
+
+    #[test]
+    fn worker_config_validate_accepts_coherent_configs() {
+        valid_config().validate().expect("fixed-buffer config");
+        let mut wc = valid_config();
+        wc.memory.policy = MEMORY_POLICY_AUTO_NIC_BUFFER.into();
+        wc.validate().expect("auto-buffer config");
+        let mut wc = valid_config();
+        wc.update_policy = UPDATE_POLICY_RELOAD.into();
+        wc.execution_model = EXECUTION_MODEL_PIPELINE.into();
+        wc.validate().expect("pipeline/reload config");
+    }
+
+    #[test]
+    fn worker_config_validate_rejects_each_invalid_field() {
+        let mut wc = valid_config();
+        wc.log_level = "TRACE".into();
+        assert!(wc
+            .validate()
+            .unwrap_err()
+            .to_string()
+            .contains("invalid logLevel"));
+
+        let mut wc = valid_config();
+        wc.control = ControlConfig {
+            ty: "tcp".into(),
+            unix: None,
+        };
+        assert!(wc
+            .validate()
+            .unwrap_err()
+            .to_string()
+            .contains("invalid control.type"));
+
+        let mut wc = valid_config();
+        wc.control = ControlConfig {
+            ty: "unix".into(),
+            unix: None,
+        };
+        assert!(wc
+            .validate()
+            .unwrap_err()
+            .to_string()
+            .contains("require control.unix.path"));
+
+        let mut wc = valid_config();
+        wc.control = ControlConfig {
+            ty: "unix".into(),
+            unix: Some(ControlUnixConfig {
+                path: String::new(),
+            }),
+        };
+        assert!(wc
+            .validate()
+            .unwrap_err()
+            .to_string()
+            .contains("require control.unix.path"));
+
+        let mut wc = valid_config();
+        wc.execution_model = "threaded".into();
+        assert!(wc
+            .validate()
+            .unwrap_err()
+            .to_string()
+            .contains("invalid execution_model"));
+
+        let mut wc = valid_config();
+        wc.memory.libpcap.fixed_buffer_size_mb = 0;
+        assert!(wc
+            .validate()
+            .unwrap_err()
+            .to_string()
+            .contains("must be greater than 0"));
+
+        let mut wc = valid_config();
+        wc.memory.policy = "guess".into();
+        assert!(wc
+            .validate()
+            .unwrap_err()
+            .to_string()
+            .contains("invalid memoryPolicy.strategy"));
+
+        let mut wc = valid_config();
+        wc.update_policy = "sometimes".into();
+        assert!(wc
+            .validate()
+            .unwrap_err()
+            .to_string()
+            .contains("invalid updatePolicy"));
+
+        let mut wc = valid_config();
+        wc.cgroup_cfg.version = "v3".into();
+        assert!(wc
+            .validate()
+            .unwrap_err()
+            .to_string()
+            .contains("invalid cgroup.version"));
+    }
+
+    /// A stand-in for the real worker: a script that ignores HUP and sleeps, so
+    /// the manager's process bookkeeping can be exercised unprivileged.
+    fn fake_manager(dir: &std::path::Path, policy: &str) -> WorkerManager {
+        use std::os::unix::fs::PermissionsExt;
+        let p = dir.join("fake-worker.sh");
+        // `prewarm` exits immediately; the real invocation (with `-c`) sleeps.
+        std::fs::write(
+            &p,
+            "#!/bin/sh\n[ \"$1\" = prewarm ] && exit 0\ntrap '' HUP\nexec sleep 30\n",
+        )
+        .expect("write script");
+        let mut perms = std::fs::metadata(&p).expect("stat").permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(&p, perms).expect("chmod");
+        let deadline = Instant::now() + Duration::from_secs(2);
+        loop {
+            match std::process::Command::new(&p).arg("prewarm").output() {
+                Ok(_) => break,
+                Err(_) if Instant::now() < deadline => {
+                    std::thread::sleep(Duration::from_millis(5));
+                }
+                Err(e) => panic!("script {} not executable: {e}", p.display()),
+            }
+        }
+
+        let mut wc = base_worker_config();
+        wc.executable = p.to_string_lossy().into_owned();
+        wc.config_file = dir.join("worker.json").to_string_lossy().into_owned();
+        wc.pid_file = dir.join("worker.pid").to_string_lossy().into_owned();
+        wc.control = ControlConfig {
+            ty: "unix".into(),
+            unix: Some(ControlUnixConfig {
+                path: dir.join("ctl.sock").to_string_lossy().into_owned(),
+            }),
+        };
+        wc.update_policy = policy.into();
+        WorkerManager::new(wc, Tool::default())
+    }
+
+    #[test]
+    fn create_if_dead_spawns_then_stop_terminates() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let mgr = fake_manager(dir.path(), UPDATE_POLICY_RESTART);
+        let res = strategy(&["eth0"], &[], &[]);
+        assert_eq!(mgr.pid(), 0);
+        assert!(!mgr.is_alive());
+        assert!(mgr.start_time().is_none());
+
+        let created = mgr.create_if_dead(&res, "uuid", &[]).expect("create");
+        assert!(created.warnings.is_empty(), "{:?}", created.warnings);
+        assert_eq!(created.buff_size_per_task, 8);
+        let pid = mgr.pid();
+        assert!(pid > 0);
+        assert!(mgr.is_alive());
+        assert!(mgr.start_time().is_some());
+
+        // Both files the manager promises to write exist and match.
+        let recorded: i32 = std::fs::read_to_string(dir.path().join("worker.pid"))
+            .expect("pid file")
+            .trim()
+            .parse()
+            .expect("pid int");
+        assert_eq!(recorded, pid);
+        let cfg: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(dir.path().join("worker.json")).expect("config"))
+                .expect("json");
+        assert_eq!(cfg["tasks"].as_array().map(Vec::len), Some(1));
+
+        // A live worker is not respawned.
+        let err = mgr.create_if_dead(&res, "uuid", &[]).expect_err("alive");
+        assert!(err.to_string().contains("worker is still running"));
+
+        // The stand-in never listens on the control socket, so a stats request
+        // is a transport error rather than a silent default.
+        assert!(mgr
+            .collect_stats_summary(Duration::from_millis(10))
+            .is_err());
+
+        mgr.stop().expect("stop");
+        assert_eq!(mgr.pid(), 0);
+        assert!(!mgr.is_alive());
+        assert!(!dir.path().join("worker.pid").exists());
+    }
+
+    #[test]
+    fn create_propagates_task_warnings_but_still_spawns() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let mgr = fake_manager(dir.path(), UPDATE_POLICY_RESTART);
+        // One valid interface task plus an inactive-instance strategy that only
+        // produces a warning.
+        let mut res = strategy(&["eth0"], &[], &[]);
+        res.strategy.push(StrategyEntry {
+            instance_names: vec!["ghost".into()],
+            packet_channel_type: PACKET_CHANNEL_TYPE_FILE.into(),
+            dump_dir: Some("/tmp/probe".into()),
+            ..Default::default()
+        });
+        let created = mgr.create_if_dead(&res, "uuid", &[]).expect("create");
+        assert_eq!(created.warnings.len(), 1);
+        assert!(created.warnings[0]
+            .to_string()
+            .contains("instance name not found"));
+        assert!(mgr.pid() > 0, "the valid task still spawns the worker");
+        mgr.stop().expect("stop");
+    }
+
+    #[test]
+    fn update_by_restart_replaces_the_running_process() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let mgr = fake_manager(dir.path(), UPDATE_POLICY_RESTART);
+        let res = strategy(&["eth0"], &[], &[]);
+        mgr.create_if_dead(&res, "uuid", &[]).expect("create");
+        let first_pid = mgr.pid();
+        let updated = mgr.update(&res, "uuid", &[]).expect("restart update");
+        assert!(updated.warnings.is_empty(), "{:?}", updated.warnings);
+        let second_pid = mgr.pid();
+        assert!(second_pid > 0);
+        assert_ne!(first_pid, second_pid, "restart must replace the process");
+        assert!(mgr.is_alive());
+        mgr.stop().expect("stop");
+    }
+
+    #[test]
+    fn update_rejects_unknown_policy() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let mgr = fake_manager(dir.path(), "sideways");
+        let res = strategy(&["eth0"], &[], &[]);
+        let err = mgr.update(&res, "uuid", &[]).expect_err("bad policy");
+        assert!(err.to_string().contains("unknown update policy"));
+    }
+
+    #[test]
+    fn update_by_reload_creates_then_reloads_or_errors_cleanly() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let mgr = fake_manager(dir.path(), UPDATE_POLICY_RELOAD);
+        let res = strategy(&["eth0"], &[], &[]);
+        // No worker yet: reload policy must create one.
+        let created = mgr.update(&res, "uuid", &[]).expect("create via reload");
+        assert!(created.warnings.is_empty());
+        assert!(mgr.pid() > 0);
+
+        // With a worker present it rewrites the config (asserted by reading it
+        // back) and then tries to talk to the control socket, which fails
+        // because the stand-in has none.
+        let err = mgr.update(&res, "uuid", &[]).expect_err("reload transport");
+        assert!(
+            err.to_string().contains("reload_config"),
+            "unexpected: {err}"
+        );
+        let cfg: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(dir.path().join("worker.json")).expect("config"))
+                .expect("json");
+        assert_eq!(cfg["tasks"].as_array().map(Vec::len), Some(1));
+        assert!(mgr.is_alive(), "a failed reload must not kill the worker");
+        mgr.stop().expect("stop");
+    }
+
+    #[test]
+    fn update_by_reload_with_empty_strategy_stops_the_worker() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let mgr = fake_manager(dir.path(), UPDATE_POLICY_RELOAD);
+        let res = strategy(&["eth0"], &[], &[]);
+        mgr.update(&res, "uuid", &[]).expect("create via reload");
+        assert!(mgr.pid() > 0);
+
+        let empty = strategy(&[], &[], &[]);
+        let out = mgr.update(&empty, "uuid", &[]).expect("empty reload");
+        assert!(out.warnings.is_empty());
+        assert_eq!(mgr.pid(), 0, "an empty strategy stops the worker");
+    }
+
+    #[test]
+    fn pipeline_and_affinity_are_wired_into_the_worker_config() {
+        let mut wc = base_worker_config();
+        wc.execution_model = EXECUTION_MODEL_PIPELINE.into();
+        wc.cpu_affinity = "0-1".into();
+        wc.memory.default_limit_mb = 1024;
+        wc.pipeline.min_buffer_size_mb = 128;
+        let mgr = WorkerManager::new(wc, Tool::default());
+        let mut res = strategy(&["eth0"], &[], &[]);
+        res.mem_limit = Some(512);
+        let tasks = mgr.build_tasks(&res, "uuid", &[]).unwrap().0;
+        let cfg = mgr.new_worker_config(&tasks, &res);
+        assert_eq!(cfg.cpu_affinity.as_deref(), Some("0-1"));
+        // mem_limit 512 overrides the 1024 default; 512 - 8 capture = 504 > 128.
+        assert_eq!(cfg.pipeline.as_ref().unwrap().buffer_size_mb, 504);
+    }
+
+    #[test]
+    fn auto_buffer_uses_the_response_mem_limit_and_rejects_unknown_policy() {
+        let mut wc = base_worker_config();
+        wc.memory.policy = MEMORY_POLICY_AUTO_NIC_BUFFER.into();
+        wc.memory.default_limit_mb = 100;
+        let mgr = WorkerManager::new(wc, Tool::default());
+        let mut res = strategy(&["eth0", "eth1"], &[], &[]);
+        res.mem_limit = Some(400);
+        // The response limit wins over the configured default: 400 / 2 tasks.
+        assert_eq!(mgr.get_task_buffer_size_mb(&res, &[]).unwrap(), 200);
+
+        let mut wc = base_worker_config();
+        wc.memory.policy = "bogus".into();
+        let mgr = WorkerManager::new(wc, Tool::default());
+        assert!(mgr.get_task_buffer_size_mb(&res, &[]).is_err());
+    }
 }
