@@ -115,7 +115,11 @@ fn to_hex(bytes: &[u8]) -> String {
 fn sanitize(data: &[u8]) -> String {
     let mut s = String::with_capacity(data.len());
     for &b in data {
-        let c = if (0x20..=0x7e).contains(&b) { b as char } else { ' ' };
+        let c = if (0x20..=0x7e).contains(&b) {
+            b as char
+        } else {
+            ' '
+        };
         s.push(c);
     }
     s
@@ -237,10 +241,19 @@ fn rust_packet_split(data: &[u8]) -> Vec<String> {
 // ---------------------------------------------------------------------------
 
 /// Map the fuzz bytes to a config line, but only if it is **valid JSON**.
+///
 /// cJSON and serde disagree on how lenient to be with malformed input (trailing
-/// bytes, invalid `\u` escapes, …); gating on valid JSON keeps the differential
-/// comparison focused on config *semantics*. Malformed-input leniency is covered
-/// by the fixed-seed `parity/verify_config.sh` generator.
+/// bytes, invalid `\u` escapes, over-long number tokens, ...); gating on valid
+/// JSON keeps the differential comparison focused on config *semantics*.
+/// Malformed-input leniency is covered by the fixed-seed
+/// `parity/verify_config.sh` generator.
+///
+/// The number check is explicit because the two JSON readers disagree there:
+/// serde_json accepts an integer of any length (falling back to `f64`), while
+/// cJSON copies a number token into `char number_c_string[64]` and fails to
+/// parse anything longer. Measured against the C oracle: 63 digits parse, 64 do
+/// not. That is a lexer buffer artifact, not a config rule, so such inputs are
+/// skipped rather than compared.
 fn build_config(data: &[u8]) -> Option<String> {
     let s = sanitize(data);
     let s = if s.trim().is_empty() {
@@ -249,7 +262,50 @@ fn build_config(data: &[u8]) -> Option<String> {
         s
     };
     serde_json::from_str::<serde_json::Value>(&s).ok()?;
-    Some(s)
+    number_tokens_fit_cjson(&s).then_some(s)
+}
+
+/// True when every number token in `s` fits cJSON's `number_c_string[64]`
+/// (63 usable bytes plus the NUL). This over-approximates - any `-`/digit run
+/// outside a string counts as a number - which only skips a few more malformed
+/// inputs.
+fn number_tokens_fit_cjson(s: &str) -> bool {
+    const CJSON_NUMBER_MAX: usize = 63;
+    let b = s.as_bytes();
+    let mut i = 0;
+    let mut in_string = false;
+    while i < b.len() {
+        let c = b[i];
+        if in_string {
+            match c {
+                b'\\' => i += 2, // skip the escaped byte, whatever it is
+                b'"' => {
+                    in_string = false;
+                    i += 1;
+                }
+                _ => i += 1,
+            }
+            continue;
+        }
+        match c {
+            b'"' => {
+                in_string = true;
+                i += 1;
+            }
+            b'-' | b'0'..=b'9' => {
+                let start = i;
+                while i < b.len() && matches!(b[i], b'0'..=b'9' | b'-' | b'+' | b'.' | b'e' | b'E')
+                {
+                    i += 1;
+                }
+                if i - start > CJSON_NUMBER_MAX {
+                    return false;
+                }
+            }
+            _ => i += 1,
+        }
+    }
+    true
 }
 
 fn rust_config(line: &str) -> Vec<String> {
@@ -353,7 +409,9 @@ impl<'a> Rng<'a> {
     fn s(&mut self, max: usize) -> String {
         const CS: &[u8] = b"abcdefghijklmnopqrstuvwxyz0123456789.-_";
         let n = (self.b() as usize % max) + 1;
-        (0..n).map(|_| CS[(self.b() as usize) % CS.len()] as char).collect()
+        (0..n)
+            .map(|_| CS[(self.b() as usize) % CS.len()] as char)
+            .collect()
     }
 }
 
@@ -430,7 +488,10 @@ fn build_output(r: &mut Rng) -> String {
             }
             format!("{o}}}{rate}{slice}}}")
         }
-        4 => format!("{{\"type\":\"file\",\"file\":{{\"name\":\"{}\"}}{rate}{slice}}}", r.s(12)),
+        4 => format!(
+            "{{\"type\":\"file\",\"file\":{{\"name\":\"{}\"}}{rate}{slice}}}",
+            r.s(12)
+        ),
         _ => {
             let mut o = format!(
                 "{{\"type\":\"rotating_file\",\"rotating_file\":{{\"file_root\":\"{}\"",

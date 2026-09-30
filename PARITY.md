@@ -210,10 +210,16 @@ parity/run.sh 5000 42     # packet_split: C vs Rust
 * **JSON 解码宽容度**（差分 fuzzer 发现）：
   * cJSON 忽略首个 JSON 值之后的尾部垃圾（`{...},`），serde 拒绝——属非法 JSON。
   * 非法 `\uXXXX` 转义：cJSON 宽容接受，serde 拒绝。
+  * **超长数字 token**（≥ 64 字节，如 70 位整数）：cJSON 把数字复制进
+    `char number_c_string[64]`，整体报 JSON 解析错误；serde_json 接受（回退为 `f64`）。
+    实测 63 位可解析、64 位报错（`PARITY.md` 记录于本次差分 fuzz 发现）。
+    差分 fuzzer 的 `config` 模式据此收紧合法 JSON 闸门（`number_tokens_fit_cjson`），
+    使比较仍聚焦于语义层。
   * Go `encoding/json` **大小写不敏感**匹配字段（`snAplen` → `snaplen`）且对缺失字段
     零值填充（缺 `outputs`/`capturer` 不报错）；serde 大小写敏感且要求必填字段。
   以上均仅在**非法/含糊 JSON**上分歧，且 `TaskConfig` 的直接 JSON 解码不是生产输入路径
-  （Rust 侧由代码构造）。差分 fuzzer 对 `config` 模式只喂**合法 JSON**、对
+  （Rust 侧由代码构造）。差分 fuzzer 对 `config` 模式只喂**合法 JSON**（按 cJSON 的词法
+  严格度，见上条数字长度限制）、对
   `task_fingerprint` 用固定字段名模板并分类单侧 `PARSE_FAIL`，以聚焦语义层差异。
 
 ## 2.4 输出面与生命周期的有意分歧（AUDIT4 M3：P5-04 / P5-10 / P5-11）
