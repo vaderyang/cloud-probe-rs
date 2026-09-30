@@ -28,8 +28,8 @@ PR 里若新增测试却无法指向其规范来源，视为不合格（见 §9 
 
 | 维度 | 度量 | 工件 / 工具 | 门禁（见 §9） |
 |---|---|---|---|
-| **Code coverage** | line / branch / condition(MC-DC) / function，按 Tier | `cargo-llvm-cov`（line/function 稳定；branch 需 nightly `--branch`；MC/DC 需 `--mcdc`） | 分层阈值 + 关键函数 100% |
-| **Change coverage** | 变更行 line≥90% / branch≥85%；**coverage 不得下降** | `git diff` × lcov；`verification/coverage_gate.py`；`verification/baseline.json` | 阻塞 |
+| **Code coverage** | line / branch / condition(MC-DC) / function，按 Tier | `cargo-llvm-cov`（line/function 稳定；branch 需 nightly `--branch`；MC/DC 需 `--mcdc`） | 分层阈值 + 关键函数 100%（branch 在 nightly 阻塞） |
+| **Change coverage** | 变更行 line≥90% / branch≥85%；**coverage 不得下降** | `git diff` × lcov；`verification/coverage_gate.py`；`verification/baseline.json`（`tiers`/`branch_tiers`） | 阻塞 |
 | **Behaviour coverage** | requirement / scenario / state-transition 覆盖 | `verification/requirements.toml` + 测试名映射 | P0 场景 100% |
 | **Risk coverage** | security / concurrency / data integrity / failure modes | `verification/risk.toml` 检查清单 + 专项测试 | P0 风险 100% |
 | **Test effectiveness** | mutation score / poison（故障注入被检出率） | `cargo-mutants`；DST/混沌注入 | 分层 mutation 阈值 |
@@ -62,11 +62,25 @@ PR 里若新增测试却无法指向其规范来源，视为不合格（见 §9 
 - 当前低于 target 的档位，必须在 `verification/policy.toml` 的 `[[waiver]]` 里登记 **owner + 计划 + 到期**；
   到期未达标 = 门禁失败。这样"目标"是硬约束，但给出可执行的收敛路径。
 
-> **现状（2026-09，llvm-cov lines；四个 Tier 均已达 target 且绝对强制，无 waiver）**：
-> Tier 0 **95.4% / 98.2%**、Tier 1 **92.0% / 93.4%**、Tier 2 **96.7% / 94.6%**、Tier 3 **74.0% / 84.1%**
-> （target 分别为 95/95、90/90、80/80、60/—；`verification/baseline.json` 已抬到或高于 target，
-> `[[waiver]]` 全部移除）。
-> Tier 0 的 AF_PACKET 采集器覆盖来自 `verify_coverage.sh --privileged-live`：普通测试套件跑完后，
+> **现状（2026-09；line/function 取自 stable collector，branch 取自 nightly `--branch`
+> collector；两套采集器对源码行的映射不同，因此基线分表存放于 `verification/baseline.json`
+> 的 `tiers` / `branch_tiers`，门禁按报告是否携带 `BRDA` 记录自动选表）**：
+>
+> | Tier | line | function | branch | verdict |
+> |---|---:|---:|---:|---|
+> | Tier 0 | **95.4%** | **98.2%** | 79.6% | line/function 达标；branch 79.6% < 90% → `[[waiver]]` 至 2026-12-31 |
+> | Tier 1 | **92.0%** | **93.4%** | 72.8% | line/function 达标；branch 72.8% < 85% → `[[waiver]]` 至 2026-12-31 |
+> | Tier 2 | **96.7%** | **94.6%** | 88.4% | 全部达标；branch 75% target 已被 ratchet 永久强制 |
+> | Tier 3 | **74.0%** | **84.1%** | 71.0% | line 60% target 强制；无 branch target |
+>
+> line/function 四个 Tier 均已达 target 且绝对强制。branch 于本轮纳入**阻塞门禁**
+> （nightly `verification.yml`）：Tier 2 已达 75% branch target，由 ratchet 永久强制；
+> Tier 0/1 低于 branch target，按 §2 规则登记 `owner + plan + expiry` 的 `[[waiver]]`，
+> 到期未达标 = 门禁失败。branch 沿用与 `verify_coverage.sh --privileged-live` 相同的
+> folded collection 采集（nightly `--branch` 跑完整套件后，以 root 合并 `#[ignore]` 的
+> AF_PACKET live 测试 profraw），因此 Tier 0 的 branch 是真实值而非无权限子集。
+>
+> Tier 0 的 AF_PACKET 采集器 line 覆盖来自 `verify_coverage.sh --privileged-live`：普通测试套件跑完后，
 > 以 root 运行 `#[ignore]` 的 live 测试并把 profraw 合并进同一报告（仅有这条 root-only 路径需要提权；
 > 整个套件用 root 跑会改变很多断言 EPERM 的用例）。函数覆盖按归一化 demangled 名去重并排除
 > `::{closure#N}`（否则同源函数的多个 crate 实例与错误处理闭包会把分母抬高、把数字压低）。
@@ -95,8 +109,8 @@ PR 里若新增测试却无法指向其规范来源，视为不合格（见 §9 
 - **diff coverage**：本次变更命中的行（相对 `origin/main`）中，line 覆盖 ≥ **90%**、
   branch 覆盖 ≥ **85%**。允许在 PR 里对"不可测代码"打**显式豁免**（`// cov:ignore <理由>`），
   豁免需 reviewer 同意。
-- **no-decrease**：每档 line/function 覆盖不得低于 `baseline.json`；提升后由 CI 自动更新 baseline
-  （仅在同一 PR 内，且必须向上）。
+- **no-decrease**：每档 line/function/branch 覆盖不得低于 `baseline.json` 对应的采集器基线表
+  （`tiers` / `branch_tiers`）；提升后由 CI 自动更新 baseline（仅在同一 PR 内，且必须向上）。
 - **baseline 更新流程**：`./verify_coverage.sh --update-baseline`（本地）→ PR 里 review baseline diff，
   只允许数值上升。
 
@@ -168,10 +182,11 @@ CI 门禁（`.github/workflows/ci.yml`）：
 
 | 规则 | 级别 | 内容 | 例 |
 |---|---|---|---|
-| `coverage_not_decrease` | **阻塞** | 每档 line/function ≥ baseline | `baseline.json` |
+| `coverage_not_decrease` | **阻塞** | 每档 line/function/branch ≥ 对应采集器 baseline | `baseline.json` (`tiers`/`branch_tiers`) |
 | `changed_code_coverage` | **阻塞** | 变更行 line≥90% / branch≥85% | `coverage_gate.py --diff` |
 | `critical_functions` | **阻塞** | 清单内函数 function 覆盖 = 100% | §3 |
-| `tier_targets` | 阻塞（达 target 后）/ waiver | Tier0/1/2/3 line 目标 | §2 |
+| `tier_targets` | 阻塞（达 target 后）/ waiver | Tier0/1/2/3 line+function（+branch）目标 | §2 |
+| `branch_targets` | **阻塞**（nightly `verification.yml`） | 达 target 后强制 branch；低于 target 需 `[[waiver]]` | §2/§10 |
 | `p0_requirements` | **阻塞** | P0 scenario/state 覆盖 = 100% | §5 |
 | `p0_risks` | 阻塞 | P0 风险均有验证 | §6 |
 | `mutation` | **阻塞**（PR 变更行 + weekly 全量分片） | Tier0/1 范围零存活（超出 `exclude_re` 即失败） | §7 |
@@ -179,8 +194,10 @@ CI 门禁（`.github/workflows/ci.yml`）：
 | `system` | 定时（nightly/weekly） | soak / chaos / DST | §8 |
 
 > 当前落地：`.github/workflows/ci.yml` 的 `verify-coverage`（line/function、关键函数、no-decrease、
-> diff、P0 requirements）与 `mutation-diff`（变更行零存活）已**阻塞**；branch 与 weekly soak 在
-> `.github/workflows/verification.yml` 每周运行，仍为 advisory，待基线建立后纳入阻塞。
+> diff、P0 requirements）与 `mutation-diff`（变更行零存活）已**阻塞**；
+> `.github/workflows/verification.yml` 每周运行 nightly branch 门禁（`cargo +nightly llvm-cov
+> --branch --lcov` + 按 `branch_tiers` 基线阻塞）、mutation 分片与 soak，均已**阻塞**（阶段 2 的
+> branch 纳入阻塞已完成，见 §10）。
 
 **PR 评审清单（新增）**：
 1. 新测试能指向规范来源（ADR/PARITY/requirements id）？无则不合格。
@@ -195,9 +212,14 @@ CI 门禁（`.github/workflows/ci.yml`）：
 
 - **阶段 1 ✅ 已完成**：框架文档 + `policy/baseline/gate`（line·function·关键函数·no-decrease·diff）
   + CI `verify-coverage`（阻塞）。
-- **阶段 2 ✅ 基本完成**：`requirements.toml` + `requirements_gate.py`（P0 场景 100%，已阻塞进 `verify-coverage`）；
-  nightly `verification.yml` 跑 `cargo +nightly llvm-cov --branch`（branch 数据 + 分层报告，advisory）。
-  待办：`--mcdc`（condition 门禁）与把 branch 纳入阻塞（待基线建立）。
+- **阶段 2 ✅ 已完成**：`requirements.toml` + `requirements_gate.py`（P0 场景 100%，已阻塞进 `verify-coverage`）；
+  nightly `verification.yml` 的 `branch-coverage` job 已**阻塞**：它用 `cargo +nightly llvm-cov
+  --branch` 跑完整套件并合并 `--privileged-live` 的 AF_PACKET live profraw，产出 lcov 后直接跑
+  `coverage_gate.py`——branch 与 line/function 一样有 no-decrease、达 target 后强制、低于 target
+  需 `owner+plan+expiry` 的 `[[waiver]]`；因为 stable 与 nightly `--branch` 两套采集器行映射不同，
+  基线分表存于 `baseline.json` 的 `tiers`/`branch_tiers`，门禁按报告是否带 `BRDA` 自动选表。
+  Tier 2 已越过 75% branch target（ratchet 永久强制），Tier 0/1 目前低于 90%/85%，登记了到
+  2026-12-31 的 `[[waiver]]`。待办：`--mcdc`（condition 门禁）。
 - **阶段 3 ✅ 已完成（mutation 已阻塞）**：`cargo-mutants` 配置 + `verify_mutation.sh`；
   已关闭 gre/vxlan/stats/config/packet/packet_split/zmtp-codec 及本轮 bpf parser·compiler·interp、
   zmtp client、cpgolib、bpf codes/resolvers/mod 的缺口（见 `verification/MUTATION_BASELINE.md`），

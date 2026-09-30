@@ -133,9 +133,27 @@ patterns = [
 # ---------------------------------------------------------------------------
 # Ratchet waivers: a tier below its target must name an owner + plan + expiry.
 # An expired waiver fails the gate. As of the Tier 1/2/3 coverage lift every tier
-# now meets its target, so there are no waivers left; add one only if a tier
-# regresses below its target.
+# meets its line/function target, and the branch gate (nightly verification.yml,
+# blocking) is now baselined too. Tier 0 and Tier 1 are still below their branch
+# targets, so they carry an explicit branch waiver; Tier 2 already clears its 75%
+# branch target and is held there by the ratchet, and Tier 3 has no branch target.
+# Remove each waiver as its branch baseline reaches the target (the gate then
+# enforces the target directly).
 # ---------------------------------------------------------------------------
+
+[[waiver]]
+tier = 0
+owner = "core"
+reason = "Tier 0 branch 79.6% < 90% target; the root-only AF_PACKET error/edge paths are the gap (line/function already above target)"
+plan = "add privileged live cases for the capture error/edge branches under verify_coverage.sh --privileged-live"
+expires = "2026-12-31"
+
+[[waiver]]
+tier = 1
+owner = "core"
+reason = "Tier 1 branch 72.8% < 85% target; daemon reconcile/error branches are the gap (line/function already above target)"
+plan = "scenario-driven tests for the reconcile/error branches; fold the privileged live report"
+expires = "2026-12-31"
 
 # ---------------------------------------------------------------------------
 # Exclusions (path + reason + owner). Keep this the only place a blind spot can
