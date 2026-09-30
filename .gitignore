@@ -17,3 +17,10 @@ target/llvm-cov/
 # cargo-mutants output
 mutants.out/
 mutants.out.old/
+
+# Beads / Dolt files (added by bd init)
+.dolt/
+*.db
+.beads-credential-key
+.beads/proxieddb/
+*.gate.lock*

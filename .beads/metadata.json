@@ -1,0 +1,7 @@
+{
+  "database": "dolt",
+  "backend": "dolt",
+  "dolt_mode": "embedded",
+  "dolt_database": "cloud_probe_rs",
+  "project_id": "77f0f520-828f-4a35-8077-a04e367387b2"
+}
