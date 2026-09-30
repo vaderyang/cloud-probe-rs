@@ -113,7 +113,7 @@ P3 之后新增两个 DST 驱动（回应 AUDIT4 指出的覆盖缺口）：
 |---|---|---|
 | `packet_split` | `parse_packet` + 分片 + 校验和 | C `c_harness.c` |
 | `config` | JSON 解析 + bpf 排除主机 | C `c_config.c` |
-| `req_pattern` | 自定义模式匹配器 | C `c_req_pattern.c` |
+| `req_pattern` | 自定义模式匹配器 + 整包方向判定（`judge_pkt_direction`） | C `c_req_pattern.c` |
 | `fingerprint` | `labels_to_fingerprint` + `String`/`UUID` | Go `difffuzz/go/oracle.go` |
 | `task_fingerprint` | `TaskConfig` → 反射 label → 指纹 | Go `difffuzz/go/oracle.go` |
 
@@ -141,7 +141,7 @@ Go oracle 由 `difffuzz.sh` 现场用临时 module（`replace` 到参考仓库�
 |---|---|
 | `run.sh` | packet_split（解析/分片/校验和） |
 | `verify_config.sh` | config JSON 解析 + bpf 排除主机 |
-| `verify_req.sh` | req_pattern 匹配器 |
+| `verify_req.sh` | req_pattern 匹配器 + 整包方向判定（含 QinQ） |
 | `fuzz_proto.sh` | GRE / VXLAN / ZMQ batch 线格式 |
 | `fuzz_rpc.sh` | Unix JSON-RPC 协议 |
 | `all.sh` | 一键全部 |
@@ -156,6 +156,7 @@ parity/run.sh 5000 42     # packet_split: C vs Rust
 |---|---|---|---|
 | `packet_split`（解析/切片/IP·TCP·UDP 校验和） | C harness vs Rust，逐字节 diff | 5 种子 × 20000 报文 | ✅ 完全一致 |
 | `req_pattern`（mini-language 解析+匹配） | C matcher vs Rust，逐答案 diff | 5 种子 × 4000 查询 | ✅ 完全一致 |
+| `req_pattern` 方向判定（整包 `extract_ipport`，含堆叠 VLAN/QinQ） | C `req_pattern_judge_pkt_direction` vs Rust `judge_pkt_direction`，逐帧 diff | 多种子 × 2000 帧（单/双/三层 0x8100、IPv4·IPv6·TCP·UDP、截断、非 IP） | ✅ 完全一致 |
 | `config`（JSON 解析 + bpf 排除主机） | C parser vs Rust，规范化输出 diff | 5 种子 × 2500 配置 | ✅ 完全一致 |
 | **协议：GRE/VXLAN/ZMQ batch 线格式** | C 真实输出代码（`--wrap=sendto/zmq_send` 拦截）vs Rust | 8 种子 × 150 用例（每用例最多 400 包，含分片/翻页/flush 边界/VLAN/MPLS） | ✅ 逐字节一致 |
 | **协议：Unix JSON-RPC** | 真实 C `unix-manager.c` 服务器 vs Rust 服务器，真实 socket | 17 个用例（握手/命令/错误/超时） | ✅ 一致（JSON 归一化后） |
@@ -206,6 +207,16 @@ parity/run.sh 5000 42     # packet_split: C vs Rust
 
 以上输入在生成器中已规避，或由双方同一边界拒绝，以保证差分对拍比较的是**有定义的行为**；
 其余全部输入逐字节一致。
+
+**堆叠 VLAN（QinQ）与 VLAN 标签类型集合**：上游 `87cbaf6` 让 `req_pattern.c` 的
+`extract_ipport_from_vlan_layer` 在标签内 EtherType 仍是 VLAN 时递归，Rust 端口以等价的
+循环实现同一深层下降（`packet.rs::extract_ipport`，每层都做 `caplen` 边界检查）。差异在于
+标签类型集合：C 的 req-pattern 匹配器只认 `ETHERTYPE_VLAN`（0x8100），而 Rust 端口（与
+`packet_split.c`/`parse_packet` 一致）在**每一层**都接受 0x8100 / 0x88a8 / 0x9100 /
+0x9200。因此在 0x88a8 等外层标签上 Rust 会判定方向、C 返回 `PKT_DIR_UNKNOWN`——这是
+Rust 更宽的、有意保留的接受面；`parity/gen_req_judge.py` 只在双方都有定义的 0x8100
+堆叠域内生成向量，四种标签的深层下降由 Rust 单元测试（
+`extract_ipport_{two,three}_level_qinq_*`、`extract_ipport_qinq_rejects_a_truncated_layer`）固定。
 
 > **上游 #281 / #282 的记忆安全同步**：#281 的 `bpf_filter_replace_nic` 堆溢出在 Rust 里
 > 不存在（`String` 增长无越界），但**语义**已同步——`nic.` 只在行首或定界符（空白、`(`、`)`）
