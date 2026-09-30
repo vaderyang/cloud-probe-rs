@@ -1,5 +1,13 @@
 #!/usr/bin/env bash
 # Differential test: C req_pattern matcher vs Rust.
+#
+# Two comparisons:
+#   1. matcher-only queries  <pattern>\t<ip>\t<port>  (gen_req.py)
+#   2. full direction judge  <pattern>\t<frame_hex>   (gen_req_judge.py)
+# The second feeds real Ethernet frames through
+# `req_pattern_judge_pkt_direction` / `ReqPattern::judge_pkt_direction`, which
+# reaches `extract_ipport` and covers stacked-VLAN (QinQ) descent.
+#
 # Usage: parity/verify_req.sh [num_queries] [seed]
 set -euo pipefail
 export PATH="$HOME/.cargo/bin:$PATH"
@@ -43,5 +51,19 @@ if diff -q "$TMP/c.out" "$TMP/r.out" >/dev/null; then
 else
     echo "❌ MISMATCH"
     diff "$TMP/c.out" "$TMP/r.out" | head -30
+    exit 1
+fi
+
+echo "==> generating $N direction-judge frames (seed=$SEED)"
+python3 "$HERE/gen_req_judge.py" "$N" "$SEED" > "$TMP/judge_in.txt"
+
+"$TMP/c_req" --judge < "$TMP/judge_in.txt" 2>/dev/null > "$TMP/c_judge.out"
+"$RUST_DIR/target/debug/req_parity" --judge < "$TMP/judge_in.txt" 2>/dev/null > "$TMP/r_judge.out"
+
+if diff -q "$TMP/c_judge.out" "$TMP/r_judge.out" >/dev/null; then
+    echo "✅ IDENTICAL: $N direction-judge frames (seed=$SEED)"
+else
+    echo "❌ MISMATCH (direction judge)"
+    diff "$TMP/c_judge.out" "$TMP/r_judge.out" | head -30
     exit 1
 fi

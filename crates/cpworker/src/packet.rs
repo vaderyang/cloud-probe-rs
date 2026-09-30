@@ -336,24 +336,31 @@ pub fn extract_ipport(pkt_data: &[u8], data_offset: usize) -> Option<IpPort> {
     if pkt_data.len() < data_offset + ETH_HDR_LEN {
         return None;
     }
-    let ether_type = be16(&pkt_data[data_offset + 12..data_offset + 14]);
-    let next = data_offset + ETH_HDR_LEN;
+    let mut ether_type = be16(&pkt_data[data_offset + 12..data_offset + 14]);
+    let mut next = data_offset + ETH_HDR_LEN;
+
+    // Descend through stacked VLAN tags (802.1Q/802.1ad and the legacy
+    // 0x9100/0x9200 encapsulations). Each tag consumes four bytes and carries
+    // the next EtherType, which may itself be a VLAN tag: real QinQ nests a
+    // provider tag in front of a customer tag, and arbitrary stacking occurs on
+    // some fabrics. The caplen bound is re-checked before every tag, so a
+    // truncated inner layer yields `None` instead of reading past the captured
+    // slice. Upstream 87cbaf6 (`extract_ipport_from_vlan_layer`) recurses the
+    // same way; the loop here is the stack-safe equivalent.
+    while matches!(
+        ether_type,
+        ETHERTYPE_VLAN | ETHERTYPE_DOT1AD | ETHERTYPE_VLAN_9100 | ETHERTYPE_VLAN_9200
+    ) {
+        if pkt_data.len() < next + VLAN_HDR_LEN {
+            return None;
+        }
+        ether_type = be16(&pkt_data[next + 2..next + 4]);
+        next += VLAN_HDR_LEN;
+    }
 
     match ether_type {
         ETHERTYPE_IP => extract_ipport_ipv4(pkt_data, next),
         ETHERTYPE_IPV6 => extract_ipport_ipv6(pkt_data, next),
-        ETHERTYPE_VLAN | ETHERTYPE_DOT1AD | ETHERTYPE_VLAN_9100 | ETHERTYPE_VLAN_9200 => {
-            if pkt_data.len() < next + VLAN_HDR_LEN {
-                return None;
-            }
-            let inner = be16(&pkt_data[next + 2..next + 4]);
-            let after_vlan = next + VLAN_HDR_LEN;
-            match inner {
-                ETHERTYPE_IP => extract_ipport_ipv4(pkt_data, after_vlan),
-                ETHERTYPE_IPV6 => extract_ipport_ipv6(pkt_data, after_vlan),
-                _ => None,
-            }
-        }
         _ => None,
     }
 }
@@ -488,6 +495,19 @@ mod tests {
     /// Ethernet + one 802.1Q tag wrapping `inner_ether_type` + `inner`.
     fn vlan(inner_ether_type: u16, inner: &[u8]) -> Vec<u8> {
         let mut v = eth(ETHERTYPE_VLAN, &[0x00, 0x01]);
+        v.extend_from_slice(&inner_ether_type.to_be_bytes());
+        v.extend_from_slice(inner);
+        v
+    }
+
+    /// Ethernet + `tpids.len()` stacked VLAN tags (outermost first) wrapping
+    /// `inner_ether_type` + `inner`. With two or more tags this is QinQ.
+    fn qinq(tpids: &[u16], inner_ether_type: u16, inner: &[u8]) -> Vec<u8> {
+        let mut v = eth(tpids[0], &[0x00, 0x01]);
+        for (i, tpid) in tpids.iter().enumerate().skip(1) {
+            v.extend_from_slice(&tpid.to_be_bytes());
+            v.extend_from_slice(&[0x00, (i as u8) + 1]);
+        }
         v.extend_from_slice(&inner_ether_type.to_be_bytes());
         v.extend_from_slice(inner);
         v
@@ -745,6 +765,87 @@ mod tests {
 
         let f = vlan(0x0806, &[0u8; 40]);
         assert!(extract_ipport(&f, 0).is_none());
+    }
+
+    #[test]
+    fn extract_ipport_two_level_qinq_ipv4() {
+        // Outer 0x8100 + inner 0x88a8 around IPv4/UDP.
+        let l4 = udp(0x1111, 0x2222, &[]);
+        let f = qinq(
+            &[ETHERTYPE_VLAN, ETHERTYPE_DOT1AD],
+            ETHERTYPE_IP,
+            &ipv4(IPPROTO_UDP, &l4),
+        );
+        let p = extract_ipport(&f, 0).unwrap();
+        assert_eq!(p.src, IpAddr::V4(L4_SRC));
+        assert_eq!(p.dst, IpAddr::V4(L4_DST));
+        assert_eq!((p.sport, p.dport), (0x1111, 0x2222));
+        assert!(p.has_ip && p.has_port);
+    }
+
+    #[test]
+    fn extract_ipport_three_level_qinq_ipv4() {
+        // 0x8100 / 0x9100 / 0x9200 around IPv4/TCP.
+        let l4 = tcp(0x3333, 0x4444, 5, &[]);
+        let f = qinq(
+            &[ETHERTYPE_VLAN, ETHERTYPE_VLAN_9100, ETHERTYPE_VLAN_9200],
+            ETHERTYPE_IP,
+            &ipv4(IPPROTO_TCP, &l4),
+        );
+        let p = extract_ipport(&f, 0).unwrap();
+        assert_eq!(p.src, IpAddr::V4(L4_SRC));
+        assert_eq!(p.dst, IpAddr::V4(L4_DST));
+        assert_eq!((p.sport, p.dport), (0x3333, 0x4444));
+        assert!(p.has_ip && p.has_port);
+    }
+
+    #[test]
+    fn extract_ipport_three_level_qinq_ipv6_inner() {
+        let l4 = udp(0x5555, 0x6666, &[]);
+        let f = qinq(
+            &[ETHERTYPE_VLAN, ETHERTYPE_DOT1AD, ETHERTYPE_VLAN],
+            ETHERTYPE_IPV6,
+            &{
+                let mut ip = vec![0u8; 40];
+                ip[0] = 0x60;
+                ip[6] = IPPROTO_UDP;
+                ip[8..24].copy_from_slice(&[0x20; 16]);
+                ip[24..40].copy_from_slice(&[0x21; 16]);
+                ip.extend_from_slice(&l4);
+                ip
+            },
+        );
+        let p = extract_ipport(&f, 0).unwrap();
+        assert!(matches!(p.src, IpAddr::V6(_)));
+        assert_eq!((p.sport, p.dport), (0x5555, 0x6666));
+        assert!(p.has_ip && p.has_port);
+    }
+
+    #[test]
+    fn extract_ipport_qinq_rejects_a_truncated_layer() {
+        let l4 = udp(1, 2, &[]);
+        let f = qinq(
+            &[ETHERTYPE_VLAN, ETHERTYPE_VLAN],
+            ETHERTYPE_IP,
+            &ipv4(IPPROTO_UDP, &l4),
+        );
+        // Complete frame parses.
+        assert!(extract_ipport(&f, 0).is_some());
+        // Cut inside the second VLAN tag: the inner (post-tag) EtherType cannot
+        // be read, so the layer must fail closed rather than read past caplen.
+        for cut in 18..22 {
+            assert!(
+                extract_ipport(&f[..cut], 0).is_none(),
+                "cut to {cut} B (inside the inner tag) must be rejected"
+            );
+        }
+        // Cut before the inner IPv4 header is complete.
+        for cut in 22..42 {
+            assert!(
+                extract_ipport(&f[..cut], 0).is_none(),
+                "cut to {cut} B (truncated inner IPv4) must be rejected"
+            );
+        }
     }
 
     #[test]
