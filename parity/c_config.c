@@ -51,7 +51,7 @@ int main(int argc, char **argv)
         printf("log_level=%d\n", c->log_level);
         printf("exec_model=%s\n", c->execution_model == EXECUTION_MODEL_PIPELINE ? "pipeline" : "rtc");
         printf("cpu=%s\n", c->cpu_affinity ? c->cpu_affinity : "");
-        printf("pipeline_mb=%d\n", c->pipeline.buffer_size_mb);
+        printf("pipeline_mb=%zu\n", c->pipeline.buffer_size_mb);
         if (c->control)
             printf("control type=%s path=%s\n", c->control->type,
                    strcmp(c->control->type, CONTROL_TYPE_UNIX) == 0 ? c->control->config.unix_socket.path : "");

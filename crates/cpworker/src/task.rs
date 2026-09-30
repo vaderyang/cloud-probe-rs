@@ -216,7 +216,7 @@ impl TaskManager {
             Some(PipelineShared {
                 ring: Arc::new(Mutex::new(SpscRing::new(1024 * 1024))),
                 alloc: Arc::new(SimpleAllocator::new(
-                    config.pipeline_buffer_size_mb.max(0) as u64 * 1024 * 1024,
+                    config.pipeline_buffer_size_mb * 1024 * 1024,
                 )),
             })
         } else {
@@ -489,7 +489,7 @@ impl TaskManager {
             self.pipeline = Some(PipelineShared {
                 ring: Arc::new(Mutex::new(SpscRing::new(1024 * 1024))),
                 alloc: Arc::new(SimpleAllocator::new(
-                    self.config.pipeline_buffer_size_mb.max(0) as u64 * 1024 * 1024,
+                    self.config.pipeline_buffer_size_mb * 1024 * 1024,
                 )),
             });
         }

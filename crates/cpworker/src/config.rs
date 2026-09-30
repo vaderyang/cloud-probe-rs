@@ -76,45 +76,42 @@ pub const DEFAULT_BUFFER_SIZE_MB: i64 = 256;
 pub const DEFAULT_TIMEOUT_MS: i64 = 0;
 /// Default `dpdk_pdump.ring_size` when the key is absent.
 pub const DEFAULT_RING_SIZE: i64 = 2_048;
-/// Smallest accepted `snaplen`. `0` keeps the backend's own default (the C
-/// parser accepted it too).
-pub const SNAPLEN_MIN: i64 = 0;
-/// Largest accepted `snaplen`: libpcap's own maximum snapshot length, which is
-/// also the largest value a pcap savefile can record (see `CapturerKind::snaplen`
-/// for the offline replay default).
+/// Largest accepted `snaplen`: libpcap's own maximum snapshot length. `libpcap`
+/// *normalises* out-of-range values to this instead of rejecting them (C:
+/// `parse_snaplen`); `dpdk_pdump` rejects `<= 0` and then normalises above it.
 pub const SNAPLEN_MAX: i64 = 262_144;
-/// Smallest accepted `libpcap.buffer_size_mb` (0 = OS default).
-pub const BUFFER_SIZE_MB_MIN: i64 = 0;
-/// Largest accepted `libpcap.buffer_size_mb` (8 GiB). Far above any
-/// `net.core.rmem_max`; larger values are a mistake, not a tuning request.
-pub const BUFFER_SIZE_MB_MAX: i64 = 8_192;
-/// Smallest accepted `libpcap.timeout_ms` (0 = non-blocking / no timeout).
-pub const TIMEOUT_MS_MIN: i64 = 0;
-/// Largest accepted `libpcap.timeout_ms` (10 minutes).
-pub const TIMEOUT_MS_MAX: i64 = 600_000;
+/// Largest accepted `libpcap.buffer_size_mb` (`INT_MAX / 1 MiB`); larger values
+/// are normalised to it (C: `MAX_LIBPCAP_BUFFER_SIZE_MB`).
+pub const BUFFER_SIZE_MB_MAX: i64 = 2_047;
+/// Largest accepted `libpcap.timeout_ms` (`INT_MAX`); larger values are clamped.
+pub const TIMEOUT_MS_MAX: i64 = 2_147_483_647;
 /// Smallest accepted `dpdk_pdump.ring_size`.
-pub const RING_SIZE_MIN: i64 = 1;
-/// Largest accepted `dpdk_pdump.ring_size` (2^20 descriptors).
-pub const RING_SIZE_MAX: i64 = 1_048_576;
+pub const RING_SIZE_MIN: i64 = 2;
+/// Largest accepted `dpdk_pdump.ring_size` (2^30 descriptors).
+pub const RING_SIZE_MAX: i64 = 1 << 30;
 /// Smallest accepted `pipeline.buffer_size_mb` (must be positive).
 pub const PIPELINE_BUFFER_MB_MIN: i64 = 1;
-/// Largest accepted `pipeline.buffer_size_mb` (8 GiB).
-pub const PIPELINE_BUFFER_MB_MAX: i64 = 8_192;
+/// Largest accepted `pipeline.buffer_size_mb`: keeps `buffer_size_mb * 1 MiB`
+/// within `size_t` (C: `SIZE_MAX / (1024 * 1024)`).
+pub const PIPELINE_BUFFER_MB_MAX: i64 = 17_592_186_044_415;
 /// Smallest accepted output `slice` (0 = no truncation).
 pub const SLICE_MIN: i64 = 0;
 /// Largest accepted output `slice`: bigger than any frame, so it already means
-/// "never truncate".
-pub const SLICE_MAX: i64 = 65_535;
+/// "never truncate"; larger values are clamped to it (C clamps to `INT_MAX`).
+pub const SLICE_MAX: i64 = 2_147_483_647;
 /// Smallest accepted `rate_limit_mbps` (0 = unlimited).
 pub const RATE_LIMIT_MBPS_MIN: i64 = 0;
-/// Largest accepted `rate_limit_mbps` (1 Tbps). Consumers multiply it by 1e6 to
-/// get bytes/second, so an unbounded value overflows the token bucket.
-pub const RATE_LIMIT_MBPS_MAX: i64 = 1_000_000;
-/// Smallest accepted `rotating_file.max_file_interval` (-1 = rotate on error
-/// only, which is also the C default).
-pub const MAX_FILE_INTERVAL_MIN: i64 = -1;
-/// Largest accepted `rotating_file.max_file_interval`, in seconds (1 year).
-pub const MAX_FILE_INTERVAL_MAX: i64 = 31_536_000;
+/// Largest accepted `rate_limit_mbps`; larger values are clamped to it (C clamps
+/// to `INT_MAX`, which is unlimited in practice and keeps the `* 1e6` byte rate
+/// within `u64`).
+pub const RATE_LIMIT_MBPS_MAX: i64 = 2_147_483_647;
+/// Default `rotating_file.max_file_interval` when the key is absent (seconds).
+pub const DEFAULT_MAX_FILE_INTERVAL: i64 = 60;
+/// Smallest accepted `rotating_file.max_file_interval` (0 = size-triggered only).
+pub const MAX_FILE_INTERVAL_MIN: i64 = 0;
+/// Largest accepted `rotating_file.max_file_interval`, in seconds; larger values
+/// are clamped to it (C clamps to `INT_MAX`).
+pub const MAX_FILE_INTERVAL_MAX: i64 = 2_147_483_647;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 /// Task execution model.
@@ -170,11 +167,11 @@ pub struct GreConfig {
 
 /// Default ZMQ high-water mark (queued batches).
 pub const DEFAULT_ZMQ_HWM: i32 = 100;
-/// Smallest accepted ZMQ high-water mark.
-pub const ZMQ_HWM_MIN: i32 = 1;
-/// Largest accepted ZMQ high-water mark. Each queued batch can be up to 1 MiB,
-/// so this caps the message-count bound of the pending queue.
-pub const ZMQ_HWM_MAX: i32 = 4096;
+/// Smallest accepted ZMQ high-water mark (0 = no limit).
+pub const ZMQ_HWM_MIN: i32 = 0;
+/// Largest accepted ZMQ high-water mark; larger values are clamped to it (C
+/// clamps to `INT_MAX`).
+pub const ZMQ_HWM_MAX: i32 = i32::MAX;
 
 #[derive(Debug, Clone)]
 /// ZMQ output configuration.
@@ -433,8 +430,8 @@ pub struct Config {
     pub cpu_affinity: String,
     /// Task execution model.
     pub execution_model: ExecutionModel,
-    /// Pipeline ring buffer size in MB.
-    pub pipeline_buffer_size_mb: i32,
+    /// Pipeline ring buffer size in MB (0 when not running the pipeline model).
+    pub pipeline_buffer_size_mb: u64,
     /// Optional control channel.
     pub control: Option<ControlConfig>,
     /// Tasks to run.
@@ -563,6 +560,47 @@ where
     }
 }
 
+/// Same as [`de_nonnull`] but for numeric fields that must accept an integral
+/// float, mirroring C's `cjson_get_integer`/`cjson_get_int64_range`: `2048.0`
+/// and `1e3` mean 2048 and 1000, a fraction is rejected, and an explicit `null`
+/// is an error (an absent key stays `None`). Values beyond `i64` saturate; every
+/// field either clamps or range-rejects them, so the saturation is unobservable.
+fn de_int<'de, D>(d: D) -> std::result::Result<Option<i64>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    match Option::<f64>::deserialize(d)? {
+        None => Err(serde::de::Error::custom("null value not allowed")),
+        Some(f) => crate::num::integral_i64(f).map(Some).ok_or_else(|| {
+            serde::de::Error::custom(format!("invalid number {f}: must be an integer"))
+        }),
+    }
+}
+
+/// A sub-object whose validation C defers until a discriminator (`type`,
+/// `execution_model`, ...) selects it. Keeping the raw [`serde_json::Value`]
+/// means a malformed *sibling* - a `"zmq"` key on a `null` output, a `"libpcap"`
+/// key on a `pcap_file` capturer - is ignored exactly as `cJSON` ignores it,
+/// instead of failing serde eagerly.
+type RawObject = serde_json::Value;
+
+/// Parse a deferred sub-object: absent or `null` -> `None`; an object is parsed
+/// strictly (so a bad field inside it still errors); any other type -> `None`,
+/// which the caller turns into its "missing/invalid <x>" error. C walks a
+/// non-object looking for fields, finds none and reports the first missing one,
+/// so `None` here matches its accept/reject decision.
+fn object_or_none<T: serde::de::DeserializeOwned>(
+    field: &str,
+    v: Option<RawObject>,
+) -> Result<Option<T>> {
+    match v {
+        Some(v @ serde_json::Value::Object(_)) => serde_json::from_value(v)
+            .map(Some)
+            .map_err(|e| Error::new(format!("invalid {field}: {e}"))),
+        _ => Ok(None),
+    }
+}
+
 #[derive(Debug, Deserialize)]
 struct RawConfig {
     #[serde(default, deserialize_with = "de_nonnull")]
@@ -571,8 +609,8 @@ struct RawConfig {
     cpu_affinity: Option<String>,
     #[serde(default, deserialize_with = "de_nonnull")]
     execution_model: Option<String>,
-    #[serde(default, deserialize_with = "de_nonnull")]
-    pipeline: Option<RawPipeline>,
+    #[serde(default)]
+    pipeline: Option<RawObject>,
     #[serde(default, deserialize_with = "de_nonnull")]
     control: Option<RawControl>,
     // C requires the `tasks` key to be an array (empty is allowed).
@@ -581,7 +619,8 @@ struct RawConfig {
 
 #[derive(Debug, Deserialize)]
 struct RawPipeline {
-    buffer_size_mb: i64,
+    #[serde(default, deserialize_with = "de_int")]
+    buffer_size_mb: Option<i64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -612,8 +651,8 @@ struct RawTask {
 struct RawReqPattern {
     #[serde(rename = "type")]
     ty: String,
-    #[serde(default, deserialize_with = "de_nonnull")]
-    custom: Option<RawCustom>,
+    #[serde(default)]
+    custom: Option<RawObject>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -626,12 +665,12 @@ struct RawCustom {
 struct RawCapturer {
     #[serde(rename = "type")]
     ty: String,
-    #[serde(default, deserialize_with = "de_nonnull")]
-    libpcap: Option<RawLibpcap>,
-    #[serde(default, deserialize_with = "de_nonnull")]
-    pcap_file: Option<RawPcapFile>,
-    #[serde(default, deserialize_with = "de_nonnull")]
-    dpdk_pdump: Option<RawDpdk>,
+    #[serde(default)]
+    libpcap: Option<RawObject>,
+    #[serde(default)]
+    pcap_file: Option<RawObject>,
+    #[serde(default)]
+    dpdk_pdump: Option<RawObject>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -639,13 +678,13 @@ struct RawLibpcap {
     interface: String,
     #[serde(default, deserialize_with = "de_nonnull")]
     netns: Option<String>,
-    #[serde(default, deserialize_with = "de_nonnull")]
+    #[serde(default, deserialize_with = "de_int")]
     snaplen: Option<i64>,
     #[serde(default, deserialize_with = "de_nonnull")]
     bpf: Option<String>,
-    #[serde(default, deserialize_with = "de_nonnull")]
+    #[serde(default, deserialize_with = "de_int")]
     buffer_size_mb: Option<i64>,
-    #[serde(default, deserialize_with = "de_nonnull")]
+    #[serde(default, deserialize_with = "de_int")]
     timeout_ms: Option<i64>,
     #[serde(default, deserialize_with = "de_nonnull")]
     not_filter_output_hosts: Option<bool>,
@@ -661,11 +700,11 @@ struct RawPcapFile {
 #[derive(Debug, Deserialize)]
 struct RawDpdk {
     interface: String,
-    #[serde(default, deserialize_with = "de_nonnull")]
+    #[serde(default, deserialize_with = "de_int")]
     snaplen: Option<i64>,
     #[serde(default, deserialize_with = "de_nonnull")]
     bpf: Option<String>,
-    #[serde(default, deserialize_with = "de_nonnull")]
+    #[serde(default, deserialize_with = "de_int")]
     ring_size: Option<i64>,
 }
 
@@ -673,46 +712,46 @@ struct RawDpdk {
 struct RawOutput {
     #[serde(rename = "type")]
     ty: String,
-    #[serde(default, deserialize_with = "de_nonnull")]
+    #[serde(default, deserialize_with = "de_int")]
     rate_limit_mbps: Option<i64>,
-    #[serde(default, deserialize_with = "de_nonnull")]
+    #[serde(default, deserialize_with = "de_int")]
     slice: Option<i64>,
-    #[serde(default, deserialize_with = "de_nonnull")]
-    vxlan: Option<RawVxlan>,
-    #[serde(default, deserialize_with = "de_nonnull")]
-    gre: Option<RawGre>,
-    #[serde(default, deserialize_with = "de_nonnull")]
-    zmq: Option<RawZmq>,
-    #[serde(default, deserialize_with = "de_nonnull")]
-    file: Option<RawFile>,
-    #[serde(default, deserialize_with = "de_nonnull")]
-    rotating_file: Option<RawRotatingFile>,
+    #[serde(default)]
+    vxlan: Option<RawObject>,
+    #[serde(default)]
+    gre: Option<RawObject>,
+    #[serde(default)]
+    zmq: Option<RawObject>,
+    #[serde(default)]
+    file: Option<RawObject>,
+    #[serde(default)]
+    rotating_file: Option<RawObject>,
 }
 
 #[derive(Debug, Deserialize)]
 struct RawVxlan {
     host: String,
-    #[serde(default, deserialize_with = "de_nonnull")]
-    port: Option<u16>,
+    #[serde(default, deserialize_with = "de_int")]
+    port: Option<i64>,
     #[serde(default, deserialize_with = "de_nonnull")]
     capture_time: Option<bool>,
-    #[serde(default, deserialize_with = "de_nonnull")]
-    vni1: Option<u32>,
-    #[serde(default, deserialize_with = "de_nonnull")]
-    vni2: Option<u32>,
+    #[serde(default, deserialize_with = "de_int")]
+    vni1: Option<i64>,
+    #[serde(default, deserialize_with = "de_int")]
+    vni2: Option<i64>,
     #[serde(default, deserialize_with = "de_nonnull")]
     bind_device: Option<String>,
     #[serde(default, deserialize_with = "de_nonnull")]
     pmtudisc: Option<String>,
-    #[serde(default, deserialize_with = "de_nonnull")]
-    split: Option<RawSplit>,
+    #[serde(default)]
+    split: Option<RawObject>,
 }
 
 #[derive(Debug, Deserialize)]
 struct RawGre {
     host: String,
-    #[serde(default, deserialize_with = "de_nonnull")]
-    service_tag: Option<u32>,
+    #[serde(default, deserialize_with = "de_int")]
+    service_tag: Option<i64>,
     #[serde(default, deserialize_with = "de_nonnull")]
     bind_device: Option<String>,
     #[serde(default, deserialize_with = "de_nonnull")]
@@ -722,14 +761,15 @@ struct RawGre {
 #[derive(Debug, Deserialize)]
 struct RawZmq {
     host: String,
-    port: u16,
-    #[serde(default, deserialize_with = "de_nonnull")]
+    #[serde(default, deserialize_with = "de_int")]
+    port: Option<i64>,
+    #[serde(default, deserialize_with = "de_int")]
     hwm: Option<i64>,
-    #[serde(default, deserialize_with = "de_nonnull")]
-    service_tag: Option<u32>,
+    #[serde(default, deserialize_with = "de_int")]
+    service_tag: Option<i64>,
     #[serde(default, deserialize_with = "de_nonnull")]
     uuid: Option<String>,
-    #[serde(default, deserialize_with = "de_nonnull")]
+    #[serde(default, deserialize_with = "de_int")]
     heartbeat_ms: Option<i64>,
 }
 
@@ -741,13 +781,13 @@ struct RawFile {
 #[derive(Debug, Deserialize)]
 struct RawRotatingFile {
     file_root: String,
-    #[serde(default, deserialize_with = "de_nonnull")]
+    #[serde(default, deserialize_with = "de_int")]
     max_file_interval: Option<i64>,
 }
 
 #[derive(Debug, Deserialize)]
 struct RawSplit {
-    #[serde(default, deserialize_with = "de_nonnull")]
+    #[serde(default, deserialize_with = "de_int")]
     max_payload_size: Option<i64>,
     #[serde(default, deserialize_with = "de_nonnull_bool")]
     recalculate_checksum: bool,
@@ -797,6 +837,59 @@ fn u16_in(field: &str, v: i64, min: i64, max: i64) -> Result<u16> {
     })
 }
 
+/// C `parse_snaplen`: absent -> [`DEFAULT_SNAPLEN`]; `0` -> max (libpcap only)
+/// with an info log; `< 0` or `> max` -> max with a warning. `dpdk_pdump` passes
+/// `non_positive_means_max = false`, so `<= 0` there is an error instead.
+fn snaplen_in(field: &str, v: Option<i64>, non_positive_means_max: bool) -> Result<i32> {
+    let v = v.unwrap_or(DEFAULT_SNAPLEN);
+    if v <= 0 && !non_positive_means_max {
+        return Err(Error::new(format!("invalid {field}: {v}, must be > 0")));
+    }
+    if v == 0 {
+        crate::log_info!("{field} is 0, using the maximum {SNAPLEN_MAX}");
+        return Ok(i32::try_from(SNAPLEN_MAX).unwrap_or(i32::MAX));
+    }
+    if !(0..=SNAPLEN_MAX).contains(&v) {
+        crate::log_warn!("{field} {v} is out of range, using {SNAPLEN_MAX}");
+        return Ok(i32::try_from(SNAPLEN_MAX).unwrap_or(i32::MAX));
+    }
+    Ok(i32::try_from(v).unwrap_or(i32::MAX))
+}
+
+/// C `libpcap.buffer_size_mb`: absent -> `default`; `<= 0` -> error; above `max`
+/// -> warn + clamp; everything else as-is.
+fn positive_clamped(field: &str, v: Option<i64>, default: i64, max: i64) -> Result<i32> {
+    let v = v.unwrap_or(default);
+    if v <= 0 {
+        return Err(Error::new(format!("invalid {field}: {v}, must be > 0")));
+    }
+    if v > max {
+        crate::log_warn!("{field} {v} is above {max}, using {max}");
+        return Ok(i32::try_from(max).unwrap_or(i32::MAX));
+    }
+    Ok(i32::try_from(v).unwrap_or(i32::MAX))
+}
+
+/// C's `cjson_get_integer` + `value < 0` error + `value > INT_MAX` clamp, used by
+/// output `slice`/`rate_limit_mbps`, `zmq.hwm`, `libpcap.timeout_ms` and
+/// `rotating_file.max_file_interval`.
+fn nonneg_clamped(field: &str, v: i64) -> Result<i32> {
+    if v < 0 {
+        return Err(Error::new(format!("invalid {field}: {v}, must be >= 0")));
+    }
+    Ok(i32::try_from(v).unwrap_or(i32::MAX))
+}
+
+/// [`int_in`] plus a lossless conversion to `u32`.
+fn u32_in(field: &str, v: i64, min: i64, max: i64) -> Result<u32> {
+    let v = int_in(field, v, min, max)?;
+    u32::try_from(v).map_err(|_| {
+        Error::new(format!(
+            "invalid {field} {v}: must be between {min} and {max}"
+        ))
+    })
+}
+
 fn parse_pmtudisc(s: &str) -> Result<i32> {
     match s {
         "do" => Ok(IP_PMTUDISC_DO),
@@ -823,23 +916,36 @@ impl RawOutput {
     fn build(self) -> Result<OutputConfig> {
         // AUDIT4 P5-15: every numeric field is range-checked and converted
         // losslessly; `as` casts used to wrap into absurd running parameters.
-        let rate_limit_mbps = u64_in(
+        // C clamps `rate_limit_mbps`/`slice` to INT_MAX (beyond it they are
+        // indistinguishable in practice) but rejects negative values.
+        let rate_limit_mbps = u64::try_from(nonneg_clamped(
             "rate_limit_mbps",
             self.rate_limit_mbps.unwrap_or(0),
-            RATE_LIMIT_MBPS_MIN,
-            RATE_LIMIT_MBPS_MAX,
-        )?;
-        let slice = i32_in("slice", self.slice.unwrap_or(0), SLICE_MIN, SLICE_MAX)?;
+        )?)
+        .unwrap_or(0);
+        let slice = nonneg_clamped("slice", self.slice.unwrap_or(0))?;
 
         let kind = match self.ty.as_str() {
             OUTPUT_TYPE_VXLAN => {
-                let v = self
-                    .vxlan
+                let v = object_or_none::<RawVxlan>("vxlan", self.vxlan)?
                     .ok_or_else(|| Error::new("missing vxlan config"))?;
+                if v.vni1.is_some() && v.vni2.is_some() {
+                    return Err(Error::new(
+                        "vxlan.vni1 and vxlan.vni2 are mutually exclusive",
+                    ));
+                }
                 let (vni_version, vni) = if let Some(v1) = v.vni1 {
+                    let v1 = u32_in("vxlan.vni1", v1, 0, i64::from(u32::MAX))?;
+                    // The wire carries `vni1 << 8`, so only the low 24 bits reach
+                    // the VNI field; C keeps the full value and warns.
+                    if v1 > 0x00ff_ffff {
+                        crate::log_warn!(
+                            "vxlan.vni1 {v1} exceeds 24 bits and overlaps the reserved bits of the VXLAN header"
+                        );
+                    }
                     (1u8, v1)
                 } else if let Some(v2) = v.vni2 {
-                    (2u8, v2)
+                    (2u8, u32_in("vxlan.vni2", v2, 0, i64::from(u32::MAX))?)
                 } else {
                     return Err(Error::new("require vxlan.vni1 or vxlan.vni2"));
                 };
@@ -847,10 +953,13 @@ impl RawOutput {
                     None => -1,
                     Some(s) => parse_pmtudisc(s)?,
                 };
-                let split = v.split.map(|s| s.build()).transpose()?.unwrap_or_default();
+                let split = object_or_none::<RawSplit>("vxlan.split", v.split)?
+                    .map(|s| s.build())
+                    .transpose()?
+                    .unwrap_or_default();
                 OutputKind::Vxlan(VxlanConfig {
                     host: v.host,
-                    port: v.port.unwrap_or(4789),
+                    port: u16_in("vxlan.port", v.port.unwrap_or(4789), 1, i64::from(u16::MAX))?,
                     capture_time: v.capture_time.unwrap_or(false),
                     vni_version,
                     vni,
@@ -860,64 +969,78 @@ impl RawOutput {
                 })
             }
             OUTPUT_TYPE_GRE => {
-                let g = self.gre.ok_or_else(|| Error::new("missing gre config"))?;
+                let g = object_or_none::<RawGre>("gre", self.gre)?
+                    .ok_or_else(|| Error::new("missing gre config"))?;
                 let pmtudisc = match g.pmtudisc.as_deref() {
                     None => -1,
                     Some(s) => parse_pmtudisc(s)?,
                 };
+                let service_tag = u32_in(
+                    "gre.service_tag",
+                    g.service_tag.unwrap_or(i64::from(u32::MAX)),
+                    0,
+                    i64::from(u32::MAX),
+                )?;
+                if service_tag > 0x0fff_ffff {
+                    crate::log_warn!(
+                        "gre.service_tag {service_tag} exceeds 28 bits and overlaps the direction bits of the GRE key"
+                    );
+                }
                 OutputKind::Gre(GreConfig {
                     host: g.host,
-                    service_tag: g.service_tag.unwrap_or(0xffff_ffff),
+                    service_tag,
                     bind_device: g.bind_device.unwrap_or_default(),
                     pmtudisc,
                 })
             }
             OUTPUT_TYPE_ZMQ => {
-                let z = self.zmq.ok_or_else(|| Error::new("missing zmq config"))?;
+                let z = object_or_none::<RawZmq>("zmq", self.zmq)?
+                    .ok_or_else(|| Error::new("missing zmq config"))?;
+                let port = u16_in(
+                    "zmq.port",
+                    z.port.ok_or_else(|| Error::new("missing zmq.port"))?,
+                    1,
+                    i64::from(u16::MAX),
+                )?;
                 let heartbeat_ms =
                     i32_in("zmq.heartbeat_ms", z.heartbeat_ms.unwrap_or(0), 0, 60_000)?;
-                // The pending queue is bounded by `hwm` messages of at most
-                // ZMQ_MAX_BATCH_BUF_SIZE each, so an unbounded hwm is an unbounded
-                // memory promise: reject it here instead of letting the worker get
-                // OOM-killed later. This `i32_in` is the *only* gate - the second
-                // check that used to sit here re-tested the range `i32_in` had just
-                // enforced, so it was unreachable, and the message inside it (with
-                // its run of spaces) could never be shown.
-                let hwm = i32_in(
-                    "zmq.hwm",
-                    z.hwm.unwrap_or(i64::from(DEFAULT_ZMQ_HWM)),
-                    i64::from(ZMQ_HWM_MIN),
-                    i64::from(ZMQ_HWM_MAX),
-                )
-                .map_err(|e| {
-                    Error::new(format!(
-                        "{e} (each queued batch is up to 1 MiB, so hwm bounds the output's memory)"
-                    ))
-                })?;
+                let service_tag = u32_in(
+                    "zmq.service_tag",
+                    z.service_tag.unwrap_or(i64::from(u32::MAX)),
+                    0,
+                    i64::from(u32::MAX),
+                )?;
+                if service_tag > 0x0fff {
+                    crate::log_warn!(
+                        "zmq.service_tag {service_tag} exceeds 12 bits: packet labels carry {}",
+                        service_tag & 0x0fff
+                    );
+                }
+                // 0 is libzmq's "no limit"; a negative value is rejected. A very
+                // large hwm is clamped to INT_MAX rather than rejected.
+                let hwm = nonneg_clamped("zmq.hwm", z.hwm.unwrap_or(i64::from(DEFAULT_ZMQ_HWM)))?;
                 OutputKind::Zmq(ZmqConfig {
                     host: z.host,
-                    port: z.port,
+                    port,
                     hwm,
-                    service_tag: z.service_tag.unwrap_or(0xffff_ffff),
+                    service_tag,
                     uuid: z.uuid.unwrap_or_default(),
                     heartbeat_ms,
                 })
             }
             OUTPUT_TYPE_FILE => {
-                let f = self.file.ok_or_else(|| Error::new("missing file config"))?;
+                let f = object_or_none::<RawFile>("file", self.file)?
+                    .ok_or_else(|| Error::new("missing file config"))?;
                 OutputKind::File(FileConfig { name: f.name })
             }
             OUTPUT_TYPE_ROTATING_FILE => {
-                let r = self
-                    .rotating_file
+                let r = object_or_none::<RawRotatingFile>("rotating_file", self.rotating_file)?
                     .ok_or_else(|| Error::new("missing rotating_file config"))?;
                 OutputKind::RotatingFile(RotatingFileConfig {
                     file_root: r.file_root,
-                    max_file_interval: i32_in(
+                    max_file_interval: nonneg_clamped(
                         "rotating_file.max_file_interval",
-                        r.max_file_interval.unwrap_or(-1),
-                        MAX_FILE_INTERVAL_MIN,
-                        MAX_FILE_INTERVAL_MAX,
+                        r.max_file_interval.unwrap_or(DEFAULT_MAX_FILE_INTERVAL),
                     )?,
                 })
             }
@@ -937,37 +1060,28 @@ impl RawCapturer {
     fn build(self) -> Result<CapturerConfig> {
         let kind = match self.ty.as_str() {
             CAPTURER_TYPE_LIBPCAP => {
-                let c = self
-                    .libpcap
+                let c = object_or_none::<RawLibpcap>("libpcap", self.libpcap)?
                     .ok_or_else(|| Error::new("missing libpcap config"))?;
                 CapturerKind::Libpcap(LibpcapConfig {
                     interface: c.interface,
-                    snaplen: i32_in(
-                        "libpcap.snaplen",
-                        c.snaplen.unwrap_or(DEFAULT_SNAPLEN),
-                        SNAPLEN_MIN,
-                        SNAPLEN_MAX,
-                    )?,
+                    snaplen: snaplen_in("libpcap.snaplen", c.snaplen, true)?,
                     netns: c.netns.unwrap_or_default(),
                     bpf: c.bpf.unwrap_or_default(),
-                    buffer_size_mb: i32_in(
+                    buffer_size_mb: positive_clamped(
                         "libpcap.buffer_size_mb",
-                        c.buffer_size_mb.unwrap_or(DEFAULT_BUFFER_SIZE_MB),
-                        BUFFER_SIZE_MB_MIN,
+                        c.buffer_size_mb,
+                        DEFAULT_BUFFER_SIZE_MB,
                         BUFFER_SIZE_MB_MAX,
                     )?,
-                    timeout_ms: i32_in(
+                    timeout_ms: nonneg_clamped(
                         "libpcap.timeout_ms",
                         c.timeout_ms.unwrap_or(DEFAULT_TIMEOUT_MS),
-                        TIMEOUT_MS_MIN,
-                        TIMEOUT_MS_MAX,
                     )?,
                     not_filter_output_hosts: c.not_filter_output_hosts.unwrap_or(false),
                 })
             }
             CAPTURER_TYPE_PCAP_FILE => {
-                let c = self
-                    .pcap_file
+                let c = object_or_none::<RawPcapFile>("pcap_file", self.pcap_file)?
                     .ok_or_else(|| Error::new("missing pcap_file config"))?;
                 CapturerKind::PcapFile(PcapFileConfig {
                     file_name: c.file_name,
@@ -975,17 +1089,11 @@ impl RawCapturer {
                 })
             }
             CAPTURER_TYPE_DPDK_PDUMP => {
-                let c = self
-                    .dpdk_pdump
+                let c = object_or_none::<RawDpdk>("dpdk_pdump", self.dpdk_pdump)?
                     .ok_or_else(|| Error::new("missing dpdk_pdump config"))?;
                 CapturerKind::DpdkPdump(DpdkPdumpConfig {
                     interface: c.interface,
-                    snaplen: i32_in(
-                        "dpdk_pdump.snaplen",
-                        c.snaplen.unwrap_or(DEFAULT_SNAPLEN),
-                        SNAPLEN_MIN,
-                        SNAPLEN_MAX,
-                    )?,
+                    snaplen: snaplen_in("dpdk_pdump.snaplen", c.snaplen, false)?,
                     bpf: c.bpf.unwrap_or_default(),
                     ring_size: i32_in(
                         "dpdk_pdump.ring_size",
@@ -1008,8 +1116,7 @@ impl RawReqPattern {
             // rejected. "none" is the default used when req_pattern is absent.
             REQ_PATTERN_TYPE_AUTO_STR => Ok(ReqPatternConfig::Auto),
             REQ_PATTERN_TYPE_CUSTOM_STR => {
-                let c = self
-                    .custom
+                let c = object_or_none::<RawCustom>("custom", self.custom)?
                     .ok_or_else(|| Error::new("custom is not an object"))?;
                 Ok(ReqPatternConfig::Custom {
                     pattern: c.pattern.unwrap_or_default(),
@@ -1058,12 +1165,12 @@ impl RawConfig {
         };
 
         let pipeline_buffer_size_mb = if execution_model == ExecutionModel::Pipeline {
-            let p = self
-                .pipeline
+            let p = object_or_none::<RawPipeline>("pipeline", self.pipeline)?
                 .ok_or_else(|| Error::new("missing pipeline config"))?;
-            i32_in(
+            u64_in(
                 "pipeline.buffer_size_mb",
-                p.buffer_size_mb,
+                p.buffer_size_mb
+                    .ok_or_else(|| Error::new("missing pipeline.buffer_size_mb"))?,
                 PIPELINE_BUFFER_MB_MIN,
                 PIPELINE_BUFFER_MB_MAX,
             )?
@@ -1270,126 +1377,112 @@ mod tests {
         }
     }
 
-    /// AUDIT4 P5-15: JSON numbers arrive as `i64` while the runtime structs use
-    /// `i32`. A bare `as i32` wraps silently and the capture plane turns the wrapped
-    /// value into an absurd running parameter:
-    ///
-    /// * `snaplen: 2147483648` -> `i32::MIN` -> `snaplen.max(1)` -> **one byte per
-    ///   packet**: every frame is truncated so hard that no BPF test matches and the
-    ///   task captures nothing;
-    /// * `buffer_size_mb: 4294967296` -> `0` -> `SO_RCVBUF=0` (massive loss);
-    /// * `timeout_ms: 4294967396` -> `100` (not what anyone asked for);
-    /// * `slice: 4294967296` -> `0` (= never truncate, the opposite of the request).
-    ///
-    /// Each of them must be a configuration error that names the field, while the
-    /// in-range boundaries keep being accepted verbatim.
+    /// Upstream `#279` ports C's numeric rules: out-of-range values *normalise*
+    /// (or clamp) exactly like `parse_snaplen`/`cjson_get_integer`, while
+    /// genuinely invalid values (negative where the wire requires non-negative,
+    /// ports outside `[1, 65535]`, ...) still error and name the field. The
+    /// differential harness (`parity/verify_config.sh`) is the acceptance test
+    /// for these rules; this test only pins the boundary values.
     #[test]
-    fn numeric_fields_are_range_checked_not_truncated() {
-        // --- libpcap.snaplen ---------------------------------------------------
-        assert_rejects(
-            "libpcap.snaplen",
-            with_libpcap(r#""snaplen":4294967296"#), // wraps to 0 -> 1-byte captures
-        );
-        assert_rejects(
-            "libpcap.snaplen",
-            with_libpcap(r#""snaplen":2147483648"#), // wraps to i32::MIN
-        );
-        assert_rejects("libpcap.snaplen", with_libpcap(r#""snaplen":-1"#));
-        for boundary in [0_i64, 2048, SNAPLEN_MAX] {
-            let c = with_libpcap(&format!(r#""snaplen":{boundary}"#))
-                .unwrap_or_else(|e| panic!("snaplen {boundary} is in range and must stay: {e}"));
+    fn numeric_fields_normalise_out_of_range_values() {
+        // --- libpcap.snaplen: <=0 or >MAX -> MAX ------------------------------
+        for (given, want) in [
+            (0_i64, SNAPLEN_MAX),
+            (-1, SNAPLEN_MAX),
+            (SNAPLEN_MAX + 1, SNAPLEN_MAX),
+            (2048, 2048),
+            (SNAPLEN_MAX, SNAPLEN_MAX),
+        ] {
+            let c = with_libpcap(&format!(r#""snaplen":{given}"#)).expect("accepted");
             match &c.tasks[0].capturer.kind {
-                CapturerKind::Libpcap(l) => assert_eq!(l.snaplen, boundary as i32),
+                CapturerKind::Libpcap(l) => assert_eq!(l.snaplen, want as i32, "snaplen {given}"),
                 other => panic!("expected libpcap capturer, got {other:?}"),
             }
         }
+        let c = Config::parse_str(
+            r#"{"tasks":[{"capturer":{"type":"libpcap","libpcap":{"interface":"eth0"}},"outputs":[]}]}"#,
+        )
+        .expect("absent snaplen takes the default");
+        match &c.tasks[0].capturer.kind {
+            CapturerKind::Libpcap(l) => assert_eq!(l.snaplen, DEFAULT_SNAPLEN as i32),
+            other => panic!("expected libpcap capturer, got {other:?}"),
+        }
 
-        // --- libpcap.buffer_size_mb --------------------------------------------
+        // --- libpcap.buffer_size_mb: <=0 rejected, >MAX -> MAX ----------------
         assert_rejects(
             "libpcap.buffer_size_mb",
-            with_libpcap(r#""buffer_size_mb":4294967296"#), // wraps to 0
+            with_libpcap(r#""buffer_size_mb":0"#),
         );
         assert_rejects(
             "libpcap.buffer_size_mb",
-            with_libpcap(&format!(r#""buffer_size_mb":{}"#, BUFFER_SIZE_MB_MAX + 1)),
+            with_libpcap(r#""buffer_size_mb":-1"#),
         );
-        let c =
-            with_libpcap(&format!(r#""buffer_size_mb":{BUFFER_SIZE_MB_MAX}"#)).expect("in range");
+        let c = with_libpcap(&format!(r#""buffer_size_mb":{}"#, BUFFER_SIZE_MB_MAX + 1))
+            .expect("clamped");
         match &c.tasks[0].capturer.kind {
             CapturerKind::Libpcap(l) => assert_eq!(l.buffer_size_mb, BUFFER_SIZE_MB_MAX as i32),
             other => panic!("expected libpcap capturer, got {other:?}"),
         }
 
-        // --- libpcap.timeout_ms -------------------------------------------------
-        assert_rejects(
-            "libpcap.timeout_ms",
-            with_libpcap(r#""timeout_ms":4294967396"#), // wraps to 100
-        );
+        // --- libpcap.timeout_ms: <0 rejected, >INT_MAX -> INT_MAX -------------
         assert_rejects("libpcap.timeout_ms", with_libpcap(r#""timeout_ms":-1"#));
-        let c = with_libpcap(&format!(r#""timeout_ms":{TIMEOUT_MS_MAX}"#)).expect("in range");
+        let c = with_libpcap(&format!(r#""timeout_ms":{}"#, TIMEOUT_MS_MAX + 1)).expect("clamped");
         match &c.tasks[0].capturer.kind {
-            CapturerKind::Libpcap(l) => assert_eq!(l.timeout_ms, TIMEOUT_MS_MAX as i32),
+            CapturerKind::Libpcap(l) => assert_eq!(l.timeout_ms, i32::MAX),
             other => panic!("expected libpcap capturer, got {other:?}"),
         }
 
-        // --- dpdk_pdump ---------------------------------------------------------
-        assert_rejects("dpdk_pdump.snaplen", with_dpdk(r#""snaplen":2147483648"#));
+        // --- dpdk_pdump: snaplen <=0 rejected, >MAX -> MAX --------------------
+        assert_rejects("dpdk_pdump.snaplen", with_dpdk(r#""snaplen":0"#));
+        assert_rejects("dpdk_pdump.snaplen", with_dpdk(r#""snaplen":-1"#));
+        let c = with_dpdk(&format!(r#""snaplen":{}"#, SNAPLEN_MAX + 1)).expect("clamped");
+        match &c.tasks[0].capturer.kind {
+            CapturerKind::DpdkPdump(d) => assert_eq!(d.snaplen, SNAPLEN_MAX as i32),
+            other => panic!("expected dpdk_pdump capturer, got {other:?}"),
+        }
+        assert_rejects("dpdk_pdump.ring_size", with_dpdk(r#""ring_size":1"#));
         assert_rejects(
             "dpdk_pdump.ring_size",
-            with_dpdk(r#""ring_size":4294967304"#), // wraps to 2048
+            with_dpdk(&format!(r#""ring_size":{}"#, RING_SIZE_MAX + 1)),
         );
-        assert_rejects("dpdk_pdump.ring_size", with_dpdk(r#""ring_size":0"#));
-        let c = with_dpdk(&format!(
-            r#""snaplen":{SNAPLEN_MAX},"ring_size":{RING_SIZE_MAX}"#
-        ))
-        .expect("in range");
+        let c = with_dpdk(&format!(r#""ring_size":{RING_SIZE_MAX}"#)).expect("in range");
         match &c.tasks[0].capturer.kind {
-            CapturerKind::DpdkPdump(d) => {
-                assert_eq!(d.snaplen, SNAPLEN_MAX as i32);
-                assert_eq!(d.ring_size, RING_SIZE_MAX as i32);
-            }
+            CapturerKind::DpdkPdump(d) => assert_eq!(d.ring_size, RING_SIZE_MAX as i32),
             other => panic!("expected dpdk_pdump capturer, got {other:?}"),
         }
 
-        // --- output: slice / rate_limit_mbps ------------------------------------
-        assert_rejects("slice", with_output(r#","slice":4294967296"#)); // wraps to 0
+        // --- output slice / rate_limit_mbps: <0 rejected, >INT_MAX -> INT_MAX --
         assert_rejects("slice", with_output(r#","slice":-1"#));
-        assert_rejects(
-            "slice",
-            with_output(&format!(r#","slice":{}"#, SLICE_MAX + 1)),
-        );
-        assert!(
-            with_output(&format!(r#","slice":{SLICE_MAX}"#)).is_ok(),
-            "SLICE_MAX is in range"
-        );
+        let c = with_output(&format!(r#","slice":{}"#, SLICE_MAX + 1)).expect("clamped");
+        assert_eq!(c.tasks[0].outputs[0].slice, i32::MAX);
         assert_rejects("rate_limit_mbps", with_output(r#","rate_limit_mbps":-1"#));
-        assert_rejects(
-            "rate_limit_mbps",
-            with_output(&format!(
-                r#","rate_limit_mbps":{}"#,
-                RATE_LIMIT_MBPS_MAX + 1
-            )),
-        );
-        assert!(
-            with_output(&format!(r#","rate_limit_mbps":{RATE_LIMIT_MBPS_MAX}"#)).is_ok(),
-            "the maximum rate limit must stay accepted (above it the token bucket overflows)"
-        );
+        let c = with_output(&format!(
+            r#","rate_limit_mbps":{}"#,
+            RATE_LIMIT_MBPS_MAX + 1
+        ))
+        .expect("clamped");
+        assert_eq!(c.tasks[0].outputs[0].rate_limit_mbps, i32::MAX as u64);
 
-        // --- pipeline.buffer_size_mb --------------------------------------------
+        // --- pipeline.buffer_size_mb: [1, SIZE_MAX/1MiB] ----------------------
         let pipeline = |mb: i64| {
             Config::parse_str(&format!(
                 r#"{{"execution_model":"pipeline","pipeline":{{"buffer_size_mb":{mb}}},"tasks":[]}}"#
             ))
         };
-        assert_rejects("pipeline.buffer_size_mb", pipeline(4294967360)); // wraps to 64
         assert_rejects("pipeline.buffer_size_mb", pipeline(0));
         assert_rejects("pipeline.buffer_size_mb", pipeline(-1));
         assert_eq!(
             pipeline(256).expect("in range").pipeline_buffer_size_mb,
             256
         );
+        assert_eq!(
+            pipeline(PIPELINE_BUFFER_MB_MAX)
+                .expect("the C bound is SIZE_MAX/1MiB")
+                .pipeline_buffer_size_mb,
+            PIPELINE_BUFFER_MB_MAX as u64
+        );
 
-        // --- rotating_file.max_file_interval ------------------------------------
+        // --- rotating_file.max_file_interval: default 60, <0 rejected ---------
         let rotating = |kv: &str| {
             Config::parse_str(&format!(
                 r#"{{"tasks":[{{
@@ -1398,22 +1491,27 @@ mod tests {
             }}]}}"#
             ))
         };
+        let interval = |c: &Config| match &c.tasks[0].outputs[0].kind {
+            OutputKind::RotatingFile(r) => r.max_file_interval,
+            other => panic!("expected rotating_file output, got {other:?}"),
+        };
+        assert_eq!(interval(&rotating("").expect("default")), 60);
         assert_rejects(
             "rotating_file.max_file_interval",
-            rotating(r#","max_file_interval":4294967356"#), // wraps to 60
+            rotating(r#","max_file_interval":-1"#),
         );
-        assert_rejects(
-            "rotating_file.max_file_interval",
-            rotating(r#","max_file_interval":-2"#),
+        assert_eq!(
+            interval(
+                &rotating(&format!(
+                    r#","max_file_interval":{}"#,
+                    MAX_FILE_INTERVAL_MAX + 1
+                ))
+                .expect("clamped")
+            ),
+            i32::MAX
         );
-        assert!(
-            rotating("").is_ok(),
-            "the default max_file_interval (-1) must stay accepted"
-        );
-        assert!(rotating(r#","max_file_interval":-1"#).is_ok());
 
-        // --- vxlan.split.max_payload_size ---------------------------------------
-        // `frag` is appended inside the `vxlan` object.
+        // --- vxlan.split.max_payload_size: [0, 65535] -------------------------
         let vxlan = |frag: &str| {
             Config::parse_str(&format!(
                 r#"{{"tasks":[{{
@@ -1424,38 +1522,33 @@ mod tests {
         };
         let split = |v: i64| format!(",\"split\":{{\"max_payload_size\":{v}}}");
         assert_rejects("max_payload_size", vxlan(&split(65536)));
-        assert_rejects("max_payload_size", vxlan(&split(4294967396))); // wraps to 100
         assert_rejects("max_payload_size", vxlan(&split(-1)));
         assert!(vxlan(&split(65535)).is_ok(), "65535 is in range");
     }
 
-    /// AUDIT4 P5-11/P3: `hwm` bounds the pending queue (hwm batches x <=1 MiB), so an
-    /// unbounded value is an unbounded memory promise and must be rejected - by
-    /// exactly one gate, whose message the user actually sees.
+    /// C's `cjson_get_integer` uses `floor(value) == value`: an integral float is
+    /// an integer (`2048.0`, `1e3`), a fraction is not, and an explicit `null` is
+    /// an error (only an *absent* key takes the default).
     #[test]
-    fn zmq_hwm_is_range_checked_by_a_single_wellformed_gate() {
-        for hwm in [0i64, 4097, -1] {
-            let err = Config::parse_str(&format!(
-                r#"{{"tasks":[{{
-                    "capturer": {{"type":"libpcap","libpcap":{{"interface":"eth0"}}}},
-                    "outputs": [{{"type":"zmq","zmq":{{
-                        "host":"10.0.0.1","port":5555,"hwm":{hwm},
-                        "uuid":"550e8400-e29b-41d4-a716-446655440000"
-                    }}}}]
-                }}]}}"#
-            ))
-            .expect_err("out of range hwm must be rejected");
-            let msg = err.to_string();
-            assert!(msg.contains("zmq.hwm"), "must name the field: {msg}");
-            assert!(
-                !msg.contains("  "),
-                "the message the user sees must not contain a run of spaces                  (the unreachable duplicate check carried one): {msg}"
-            );
+    fn integral_floats_are_accepted_like_cjson() {
+        let c = with_libpcap(r#""snaplen":2048.0"#).expect("2048.0 is an integer");
+        match &c.tasks[0].capturer.kind {
+            CapturerKind::Libpcap(l) => assert_eq!(l.snaplen, 2048),
+            other => panic!("expected libpcap capturer, got {other:?}"),
         }
+        let c = with_output(r#","slice":1e3"#).expect("1e3 is 1000");
+        assert_eq!(c.tasks[0].outputs[0].slice, 1000);
+        // The fraction/null errors come from the serde layer (before field
+        // validation), so they need not name the field - only reject.
+        assert!(with_libpcap(r#""snaplen":2048.5"#).is_err());
+        assert!(with_libpcap(r#""snaplen":null"#).is_err());
     }
 
+    /// `zmq.hwm` follows libzmq: `0` means "no limit" and is accepted, a negative
+    /// value is rejected (naming the field, with a well-formed message), and a
+    /// very large value is clamped to `INT_MAX` by the single gate.
     #[test]
-    fn zmq_hwm_is_range_checked() {
+    fn zmq_hwm_follows_libzmq() {
         let with_hwm = |hwm: i64| {
             Config::parse_str(&format!(
                 r#"{{"tasks":[{{
@@ -1467,26 +1560,22 @@ mod tests {
                 }}]}}"#
             ))
         };
-        assert!(
-            with_hwm(100).is_ok(),
-            "the default range must stay accepted"
+        let hwm_of = |c: &Config| match &c.tasks[0].outputs[0].kind {
+            OutputKind::Zmq(z) => z.hwm,
+            other => panic!("expected zmq output, got {other:?}"),
+        };
+        assert_eq!(hwm_of(&with_hwm(0).expect("0 = no limit")), 0);
+        assert_eq!(hwm_of(&with_hwm(100).expect("in range")), 100);
+        assert_eq!(
+            hwm_of(&with_hwm(i64::from(i32::MAX) + 1).expect("clamped")),
+            i32::MAX
         );
-        assert!(with_hwm(i64::from(ZMQ_HWM_MAX)).is_ok());
-        let big = with_hwm(i64::from(ZMQ_HWM_MAX) + 1)
-            .unwrap_err()
-            .to_string();
+        let err = with_hwm(-1).expect_err("negative hwm must be rejected");
+        let msg = err.to_string();
+        assert!(msg.contains("zmq.hwm"), "must name the field: {msg}");
         assert!(
-            big.contains("zmq.hwm"),
-            "error should name the field: {big}"
-        );
-        assert!(
-            with_hwm(0).is_err(),
-            "hwm 0 (infinite in libzmq) must be rejected"
-        );
-        assert!(with_hwm(-1).is_err());
-        assert!(
-            with_hwm(2_147_483_647).is_err(),
-            "i32::MAX hwm is an OOM request"
+            !msg.contains("  "),
+            "the user-visible message must be well-formed: {msg}"
         );
         // Default when absent.
         let d = Config::parse_str(
@@ -1790,13 +1879,13 @@ mod accessor_tests {
     }
 
     #[test]
-    fn rotating_file_default_interval_is_minus_one() {
+    fn rotating_file_default_interval_is_sixty() {
         let c = Config::parse_str(&task_with(
             r#"{"type":"rotating_file","rotating_file":{"file_root":"/tmp"}}"#,
         ))
         .unwrap();
         match &c.tasks[0].outputs[0].kind {
-            OutputKind::RotatingFile(r) => assert_eq!(r.max_file_interval, -1),
+            OutputKind::RotatingFile(r) => assert_eq!(r.max_file_interval, 60),
             other => panic!("expected rotating_file, got {other:?}"),
         }
     }

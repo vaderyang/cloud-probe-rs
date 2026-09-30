@@ -33,6 +33,17 @@ int main(int argc, char **argv)
         *tab2 = 0;
 
         const char *pattern = line;
+        /* Same bound as cpworker's parse_pattern (MAX_PATTERN_LEN): the parser is
+         * recursive descent and C's deep-recursion behaviour is UB, so the
+         * differential compares only the domain where both are defined. */
+        if (strlen(pattern) > 512)
+        {
+            printf("INIT_FAIL\n");
+            if (sentinel)
+                printf("@@END@@\n");
+            fflush(stdout);
+            continue;
+        }
         const char *ip_str = tab1 + 1;
         int port = atoi(tab2 + 1);
 

@@ -201,6 +201,14 @@ parity/run.sh 5000 42     # packet_split: C vs Rust
 
 以上三类输入在生成器中已规避，以保证差分对拍比较的是**有定义的行为**；其余全部输入逐字节一致。
 
+4. **`req_pattern` 超长表达式的递归深度**：C 的 `req_pattern.c` 与 Rust 端口都是递归下降
+   解析器（`parse_expression → parse_term → parse_factor → parse_expression`），且 AST 的求值/
+   析构也递归。数千层嵌套 `(` 或数千个 `and`/`or` 会耗尽栈。Rust 现在在
+   `parse_pattern` 以 `MAX_PATTERN_LEN = 512` 拒绝（`INIT_FAIL`，不会崩溃），C 侧的同一边界
+   写在 `parity/c_req_pattern.c`；真实 pattern 只有几十字节，C 的深递归本就是 UB（它只是
+   栈帧更小、撑得久一点）。由 `parity/difffuzz.sh req_pattern` 发现（ASan 在 ~3300 层嵌套处
+   报 stack-overflow），两侧现在返回相同的 accept/reject。
+
 > **由差分 fuzzing 发现并修复（同一处两次）**：`req_pattern` 的端口解析先是补齐了 C 的
 > `strtol(..., 10)` 语义（接受 `-0`、`+80`）；上游随后把规则收紧为**纯十进制**
 > （`req_pattern.c` 的 `plain_decimal` 守卫，因为 BPF 把 `010` 当八进制），Rust 未同步，
@@ -250,9 +258,18 @@ ZMQ 输出用纯 Rust ZMTP 客户端替代 libzmq，因此"C 的行为"= **libzm
 M4 的问题大多不是"移植错了"，而是"移植得比原实现更宽松、更沉默"。下面每一项都**用 oracle
 实测确认了原实现的行为**（C harness / 系统 libpcap 1.10 探针），分歧处按上表说明：
 
+> **配置数值越界已收敛（上游 #279，2026-09-30）**：本题曾列为"有意分歧（更严）"——Rust 报错、
+> C 钳位后继续跑。上游 `0.9.x` 的 #279 把数值校验统一为"归一化 / 钳位 + 明确拒绝非法值"，
+> Rust 已 1:1 移植：`libpcap.snaplen` 越界归一化到 262144（`<=0` 也等价最大值、打 info 日志）、
+> `dpdk_pdump.snaplen` `<=0` 报错、越界归一化，`libpcap.buffer_size_mb` `>2047` 归一化、`<=0`
+> 报错，`timeout_ms`/`slice`/`rate_limit_mbps`/`hwm`/`max_file_interval` 负值报错、超过
+> `INT_MAX` 钳位，端口类字段拒绝 `[1,65535]` 之外，`service_tag`/`vni` 保留完整值并告警，
+> `pipeline.buffer_size_mb` 在 pipeline 模型下必填且上界为 `SIZE_MAX/1MiB`；且**所有整数字段都
+> 接受整值浮点**（`2048.0`、`1e3`，与 cJSON 的 `floor(v)==v` 一致）。对拍由
+> `parity/verify_config.sh` 的 46 条边界向量（C/Rust 逐字节比较）与 5000 条随机配置覆盖。
+
 | 项 | C / libpcap 实测行为 | Rust 行为 | 性质 |
 |---|---|---|---|
-| 配置数值越界（`snaplen` / `buffer_size_mb` / `timeout_ms` / `ring_size` / `slice` / `pipeline.buffer_size_mb` / `max_payload_size`） | cJSON 把数字**钳位**到 `INT_MIN/INT_MAX` 后接受：实测 C harness 对 `snaplen:2147483648` 输出 `snaplen=2147483647`，对 `slice:4294967296` 输出 `slice=2147483647` | **报错**并给出字段名与允许范围，如 `invalid libpcap.snaplen 2147483648: must be between 0 and 262144` | **有意分歧（更严）**：Rust 原来是 `as i32` 截断，`2147483648` 变成 `i32::MIN`，再被 `snaplen.max(1)` 变成**每包 1 字节**——任务静默抓不到任何包；`buffer_size_mb:4294967296` 变成 `SO_RCVBUF=0`。钳位后的 C 仍带着荒谬参数继续跑 |
 | pcap 文件 linktype 非 EN10MB（`tcpdump -i any` 的 DLT_LINUX_SLL 113 / SLL2 276、DLT_NULL、DLT_RAW、radiotap） | `pcap_open_offline` **照常打开**（实测 `datalink=113` 成功），`pcap_compile` 按该 DLT 编译，`pcap_next_ex` 正常返回记录 | **明确拒绝**：`unsupported pcap linktype 113: only Ethernet (DLT_EN10MB = 1) can be replayed; produced by tcpdump -i any; re-capture on a single interface` | **有意分歧**：本项目 BPF 后端只实现 Ethernet 布局，把 SLL 帧按 Ethernet 解析会让每一帧错位 4 字节后转发进 GRE/VXLAN/ZMQ —— 静默的数据破坏，宁缺勿错 |
 | pcap 记录 `caplen > orig_len` | libpcap **不校验**：实测返回 `caplen=20 origlen=10` 并交出 20 字节 | **报错** `caplen 20 exceeds orig_len 10 (corrupt file)`，该记录不进入输出 | **有意分歧**：真实抓包不可能出现该组合，出现即文件损坏 |
 | pcap `version_major > 2` | libpcap 拒绝：`unsupported pcap savefile version 3.4` | 同样拒绝并打印版本号 | **一致**（对齐 libpcap） |
@@ -262,8 +279,8 @@ M4 的问题大多不是"移植错了"，而是"移植得比原实现更宽松�
 | `PcapWriter::flush()` | libpcap `pcap_dump_flush()` 就是 `fflush`：到 OS，不 fsync | 行为**不变**；文档改为如实描述（flush 后字节已到 OS、可被其他读者看到；不保证掉电持久） | **文档修复**：原注释"call flush to fsync"是空头承诺，现在有 grep 门禁 |
 | `cpdaemon` HTTP 端口解析 | Go 把端口字符串直接交给 `net.Listen` / `http.Server.Addr`，端口非法 → **启动失败** | 原来 `parse::<u16>().unwrap_or(9022)` 静默换端口；现返回错误并指明键名与合法范围；空值仍表示默认 9022 | **修复回归**（现在与 Go 一致）。同时接受不带引号的 `"port": 9022`：viper 默认值就是数字、官方 template.json 也这么写，serde 原本会直接拒绝该配置文件 |
 
-差分向量分配：`parity/gen_config.py` **只产生范围内的数值**——范围外两侧定义上就分歧，比较它只会重复验证
-钳位；22 条越界的合法 JSON 向量固化在 `parity/verify_config.sh` 的 "AUDIT4 P5-15" 段，断言 Rust 侧全部拒绝。
+差分向量分配：`parity/gen_config.py` 产生范围内的随机数值；越界与整值浮点等 46 条边界向量固化在
+`parity/verify_config.sh` 的 "#279" 段，**直接比较 C 与 Rust 的规范化输出**（不再是"断言 Rust 拒绝"）。
 
 ## 2.6 采集错误路径、down 接口与空转的有意分歧（AUDIT4 P5-12 / 复核 P2-6）
 

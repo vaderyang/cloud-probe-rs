@@ -381,11 +381,26 @@ fn resolve_host(value: &str) -> Result<IpAddr> {
     Err(Error::new(format!("invalid host address: {value}")))
 }
 
+/// Longest accepted custom pattern.
+///
+/// The parser is recursive descent, so an adversarial pattern with thousands of
+/// nested `(` (or `and`/`or` operators, whose AST is also walked recursively)
+/// would overflow the stack. C has the same recursion but no Rust-style bound -
+/// its deep-recursion behaviour is UB (it survives longer only because its
+/// frames are smaller) - so `parity/c_req_pattern.c` applies the same limit and
+/// the differential compares only the defined domain. Real patterns are a few
+/// dozen bytes (`host 1.2.3.4 and port 80`).
+pub const MAX_PATTERN_LEN: usize = 512;
+
 /// Parse a custom req_pattern expression into an AST.
 ///
 /// # Errors
-/// Returns an error if the expression is syntactically invalid.
+/// Returns an error if the expression is syntactically invalid or longer than
+/// [`MAX_PATTERN_LEN`].
 pub fn parse_pattern(pattern: &str) -> Result<Node> {
+    if pattern.len() > MAX_PATTERN_LEN {
+        return Err(Error::new("pattern too long"));
+    }
     let mut parser = Parser::new(pattern);
     let ast = parser.parse_expression()?;
     if parser.cur != Token::Eof {
@@ -426,6 +441,25 @@ mod tests {
         // The exact input the differential fuzzer reported (mode=req_pattern):
         // C returns INIT_FAIL, so the harness must too.
         assert_eq!(canonical_eval(" port-0 ", "127.0.0.1", 32), "INIT_FAIL");
+    }
+
+    #[test]
+    fn an_over_long_pattern_is_rejected_not_a_stack_overflow() {
+        // Found by parity/difffuzz.sh: thousands of nested `(` overflowed the
+        // recursive-descent parser (and, for operator chains, the recursive AST
+        // walk). Both the Rust parser and the C oracle now reject at the same
+        // length; C's deeper recursion is UB, so the limit is the comparison
+        // domain.
+        assert!(parse_pattern("host 127.0.0.1").is_ok());
+        let deep = format!(
+            "{}{}",
+            "(".repeat(MAX_PATTERN_LEN),
+            ")".repeat(MAX_PATTERN_LEN)
+        );
+        assert!(parse_pattern(&deep).is_err());
+        assert_eq!(canonical_eval(&deep, "127.0.0.1", 80), "INIT_FAIL");
+        let chain = "host 127.0.0.1 and ".repeat(MAX_PATTERN_LEN);
+        assert_eq!(canonical_eval(&chain, "127.0.0.1", 80), "INIT_FAIL");
     }
 
     #[test]

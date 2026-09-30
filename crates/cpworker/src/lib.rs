@@ -16,6 +16,7 @@ pub mod error;
 pub mod log;
 pub mod netns;
 pub mod netutil;
+mod num;
 pub mod output;
 pub mod packet;
 pub mod packet_split;
