@@ -14,7 +14,7 @@ weekly `verification.yml` 分 4 shard 跑全量；cargo-mutants 对存活退出 
 cargo install cargo-mutants            # 或 CI 的 taiki-e/install-action
 ./verify_mutation.sh                   # 配置范围内全量（本地/定时）
 ./verify_mutation.sh --in-diff         # 只变异相对 origin/main 的改动行（PR 用）
-./verify_mutation.sh --shard 1/4       # 分片（周任务矩阵）
+./verify_mutation.sh --shard 0/4       # 分片（周任务矩阵；cargo-mutants 的 shard 是 0 基，0/4..3/4）
 
 # 豁免清单自检（不需要构建，~1 min）：
 ./verification/mutation_config_gate.py

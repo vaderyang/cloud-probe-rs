@@ -80,7 +80,7 @@ jobs:
         run: ./verification/mutation_config_gate.py
 
   mutation:
-    name: mutation (cargo-mutants shard ${{ matrix.shard }}/4)
+    name: mutation (cargo-mutants shard ${{ matrix.shard }})
     needs: mutation-exemptions
     runs-on: ubuntu-latest
     timeout-minutes: 120
@@ -91,10 +91,16 @@ jobs:
     # mutants outside the documented `exclude_re` entries; see
     # verification/MUTATION_BASELINE.md), so every shard must stay green. Sharded
     # so a weekly run is bounded.
+    #
+    # The shards are listed as fractions because cargo-mutants shards are
+    # *0-based* (`--shard k/n` requires k < n), so the valid values are 0/4..3/4
+    # and `4/4` is rejected outright. (The first version of this job used 1..4,
+    # which failed one shard every run and silently never tested shard 0.)
+    # GitHub expressions have no arithmetic, so the fraction is spelled out.
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4]
+        shard: ["0/4", "1/4", "2/4", "3/4"]
     steps:
       - uses: actions/checkout@v7
       - name: System dependencies
@@ -107,7 +113,7 @@ jobs:
         with:
           tool: cargo-mutants
       - name: Run mutation testing
-        run: ./verify_mutation.sh --shard "${{ matrix.shard }}/4"
+        run: ./verify_mutation.sh --shard "${{ matrix.shard }}"
       - name: Upload mutation report
         if: always()
         uses: actions/upload-artifact@v4

@@ -3,7 +3,7 @@
 #
 #   ./verify_mutation.sh                 # full run over verification/mutants.toml
 #   ./verify_mutation.sh --in-diff [base]# only lines changed vs <base> (default origin/main)
-#   ./verify_mutation.sh --shard 1/4     # one shard of the weekly matrix
+#   ./verify_mutation.sh --shard 0/4     # one shard of the weekly matrix (0-based)
 #
 # Blocking since ADR-0001 stage 3/4: cargo-mutants exits non-zero when a mutant
 # survives (2) or times out (3). Every surviving mutant in scope must therefore
