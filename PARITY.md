@@ -5,6 +5,10 @@
 >
 > “纯 Rust”（去除 libpcap/libzmq）**已完成**：`cargo build`/`cargo test` 不链接任何
 > C 库，实现与取舍见 §4。
+>
+> 上游 `netis/cloud-probe@0.9.x` 是**浮动 oracle**（CI 每次实时拉取），上游前进可能在
+> 本仓库无改动时让差分/模糊门变红（先例 #279、#281、#282）。追平流程与逐提交检查清单见
+> [UPSTREAM_RUNBOOK.md](UPSTREAM_RUNBOOK.md)。
 
 ## 1. 覆盖状态
 

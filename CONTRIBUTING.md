@@ -121,6 +121,10 @@ JSON-RPC, ZMTP interop against real libzmq, and the BPF compiler against libpcap
   otherwise the harness just re-verifies the clamp.
 * New `cpworker` behaviour that diverges from C goes into `PARITY.md §2` with the
   measured oracle output on both sides.
+* The oracle is **not pinned**: CI checks out `netis/cloud-probe@0.9.x` live, so an upstream
+  advance can turn these gates red with no change in this repository (precedents: #279,
+  #281, #282). Follow [UPSTREAM_RUNBOOK.md](UPSTREAM_RUNBOOK.md) for the fetch, triage,
+  convergence and per-commit checklist.
 
 ## 6. Fuzzing
 
