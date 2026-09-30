@@ -75,3 +75,10 @@ _Add a brief overview of your project architecture_
 ## Conventions & Patterns
 
 _Add your project-specific conventions here_
+
+## Upstream oracle
+
+The reference `netis/cloud-probe@0.9.x` is a floating oracle and CI compiles it live;
+an upstream advance can turn the differential gates red with no change here. The fetch,
+triage, convergence and per-commit procedure is in
+[UPSTREAM_RUNBOOK.md](UPSTREAM_RUNBOOK.md). Precedents: upstream #279, #281, #282.

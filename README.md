@@ -4,6 +4,9 @@
 
 A standalone Rust port of Netis Cloud Probe. The original C + Go implementation lives in
 a separate checkout; set `CLOUD_PROBE_SRC` when running the differential/fuzz harnesses in `parity/`.
+That reference branch (`0.9.x`) floats on purpose, so upstream can turn the parity jobs red
+without a change here — see [UPSTREAM_RUNBOOK.md](UPSTREAM_RUNBOOK.md) for the catch-up
+procedure.
 
 ## Crates
 

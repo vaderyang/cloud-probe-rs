@@ -126,3 +126,10 @@ bd prime                # Refresh Beads context
 
 **Architecture in one line:** issues live in a local Dolt DB; sync uses `refs/dolt/data` on your git remote; `.beads/issues.jsonl` is a passive export. See https://github.com/gastownhall/beads/blob/main/docs/core-concepts/sync-concepts.md for details and anti-patterns.
 <!-- END BEADS CODEX SETUP -->
+
+## Upstream oracle
+
+The reference `netis/cloud-probe@0.9.x` is a floating oracle; CI compiles it live, so an
+upstream advance can turn the differential parity/fuzz jobs red without a change here.
+The fetch, triage, convergence and per-commit procedure is in
+[UPSTREAM_RUNBOOK.md](UPSTREAM_RUNBOOK.md). Precedents: upstream #279, #281, #282.
