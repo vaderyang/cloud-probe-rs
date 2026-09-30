@@ -6,14 +6,17 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use super::pcap_writer::PcapWriter;
 use super::{Output, PacketHeader};
-use crate::config::{CapturerKind, RotatingFileConfig};
+use crate::config::{CapturerKind, OutputConfig, RotatingFileConfig};
 use crate::error::{Error, Result};
 use crate::packet::PKT_DIR_UNKNOWN;
+use crate::ratelimit::TokenBucket;
 use crate::stats::OutputStats;
 
 /// Rotating pcap file output.
 pub struct RotatingFileOutput {
     stats: Arc<OutputStats>,
+    throttle: Option<TokenBucket>,
+    slice: i32,
     file_root: String,
     max_file_interval: i64,
     snaplen: i32,
@@ -30,6 +33,7 @@ impl RotatingFileOutput {
     /// file cannot be opened.
     pub fn new(
         cfg: &RotatingFileConfig,
+        out: &OutputConfig,
         capturer: &CapturerKind,
         stats: Arc<OutputStats>,
     ) -> Result<Self> {
@@ -42,11 +46,18 @@ impl RotatingFileOutput {
                 cfg.file_root
             )));
         }
+        let throttle = if out.rate_limit_mbps > 0 {
+            Some(TokenBucket::new(out.rate_limit_mbps * 1_000_000))
+        } else {
+            None
+        };
         Ok(RotatingFileOutput {
             stats,
+            throttle,
+            slice: out.slice,
             file_root: cfg.file_root.clone(),
             max_file_interval: cfg.max_file_interval.max(0) as i64,
-            snaplen: capturer.snaplen(),
+            snaplen: super::file::file_output_snaplen(capturer.snaplen(), out.slice),
             writer: None,
             file_time: 0,
             dumper_error: false,
@@ -107,15 +118,30 @@ impl RotatingFileOutput {
 
 impl Output for RotatingFileOutput {
     fn send_packet(&mut self, hdr: &PacketHeader, pkt: &[u8], direct: i32) -> i32 {
+        // A sliced record keeps the wire length in len, as pcap-savefile(5)
+        // describes (port of the `hdr.caplen = output->slice` step).
+        let mut caplen = hdr.caplen;
+        if self.slice > 0 && (self.slice as u32) < caplen {
+            caplen = self.slice as u32;
+        }
+
         if direct == PKT_DIR_UNKNOWN {
-            self.stats.direction_drop_bytes.add(hdr.caplen as u64);
+            self.stats.direction_drop_bytes.add(caplen as u64);
             self.stats.direction_drop_packets.add(1);
             return -1;
         }
 
+        if let Some(tb) = self.throttle.as_mut() {
+            if !tb.consume(caplen as usize, hdr.ts()) {
+                self.stats.ratelimit_drop_bytes.add(caplen as u64);
+                self.stats.ratelimit_drop_packets.add(1);
+                return -1;
+            }
+        }
+
         let now = Self::now();
         if self.dumper_error && now - self.file_time < self.max_file_interval {
-            self.stats.error_drop_bytes.add(hdr.caplen as u64);
+            self.stats.error_drop_bytes.add(caplen as u64);
             self.stats.error_drop_packets.add(1);
             return -1;
         }
@@ -126,7 +152,7 @@ impl Output for RotatingFileOutput {
                 if let Err(e) = self.create_writer() {
                     crate::log_error!("{e}");
                     self.dumper_error = true;
-                    self.stats.error_drop_bytes.add(hdr.caplen as u64);
+                    self.stats.error_drop_bytes.add(caplen as u64);
                     self.stats.error_drop_packets.add(1);
                     return -1;
                 }
@@ -139,7 +165,7 @@ impl Output for RotatingFileOutput {
                     if let Err(e) = self.create_writer() {
                         crate::log_error!("{e}");
                         self.dumper_error = true;
-                        self.stats.error_drop_bytes.add(hdr.caplen as u64);
+                        self.stats.error_drop_bytes.add(caplen as u64);
                         self.stats.error_drop_packets.add(1);
                         return -1;
                     }
@@ -148,12 +174,13 @@ impl Output for RotatingFileOutput {
             }
         }
 
+        let out_hdr = PacketHeader { caplen, ..*hdr };
         if let Some(w) = self.writer.as_mut() {
-            if let Err(e) = w.write(hdr, pkt) {
+            if let Err(e) = w.write(&out_hdr, pkt) {
                 crate::log_error!("write pcap output failed: {e}");
             }
         }
-        self.stats.fwd_bytes.add(hdr.caplen as u64);
+        self.stats.fwd_bytes.add(caplen as u64);
         self.stats.fwd_packets.add(1);
         0
     }
@@ -190,7 +217,17 @@ mod tests {
             bpf: String::new(),
         });
         let stats = Arc::new(OutputStats::default());
-        let mut out = RotatingFileOutput::new(&cfg, &capturer, stats).expect("create");
+        let mut out = RotatingFileOutput::new(
+            &cfg,
+            &OutputConfig {
+                kind: crate::config::OutputKind::RotatingFile(cfg.clone()),
+                rate_limit_mbps: 0,
+                slice: 0,
+            },
+            &capturer,
+            stats,
+        )
+        .expect("create");
 
         for bad in [i64::MAX, -8_000_000_000_000_000] {
             out.file_time = bad;
@@ -215,6 +252,11 @@ mod tests {
         let stats = Arc::new(OutputStats::default());
         let mut out = RotatingFileOutput::new(
             &cfg,
+            &OutputConfig {
+                kind: crate::config::OutputKind::RotatingFile(cfg.clone()),
+                rate_limit_mbps: 0,
+                slice: 0,
+            },
             &CapturerKind::PcapFile(PcapFileConfig {
                 file_name: String::new(),
                 bpf: String::new(),

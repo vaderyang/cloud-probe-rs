@@ -8,6 +8,7 @@
 //! 4. server replies with a JSON object (always containing `status`).
 
 use std::io::{BufRead, BufReader, Write};
+use std::os::fd::{AsRawFd, RawFd};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -22,6 +23,36 @@ use crate::task::TaskManager;
 
 /// Control protocol version string.
 pub const PROTO_VERSION_V1: &str = "v1";
+
+/// `SO_SNDTIMEO` applied to every accepted client (C: `CLIENT_SEND_TIMEOUT_SEC`).
+const CLIENT_SEND_TIMEOUT_SEC: i32 = 5;
+
+/// Apply `SO_SNDTIMEO` to `fd`. Port of `unix_manager_set_send_timeout`:
+/// a slow reader must hit `EAGAIN` instead of stalling the writer forever.
+///
+/// # Errors
+/// Returns the OS error if `setsockopt` fails.
+pub fn set_send_timeout(fd: RawFd, seconds: i32) -> std::io::Result<()> {
+    let tv = libc::timeval {
+        tv_sec: seconds as libc::time_t,
+        tv_usec: 0,
+    };
+    // SAFETY: `tv` is a valid `timeval` and `fd` a socket owned by the caller.
+    let ret = unsafe {
+        libc::setsockopt(
+            fd,
+            libc::SOL_SOCKET,
+            libc::SO_SNDTIMEO,
+            std::ptr::addr_of!(tv).cast(),
+            std::mem::size_of::<libc::timeval>() as libc::socklen_t,
+        )
+    };
+    if ret != 0 {
+        Err(std::io::Error::last_os_error())
+    } else {
+        Ok(())
+    }
+}
 
 /// Unix-domain-socket control server owning its accept thread.
 pub struct UnixManager {
@@ -53,6 +84,13 @@ impl UnixManager {
                 while running_thread.load(Ordering::Acquire) {
                     match listener.accept() {
                         Ok((stream, _)) => {
+                            // Harden each client against a slow reader (C applies
+                            // SO_SNDTIMEO right after accept).
+                            if let Err(e) =
+                                set_send_timeout(stream.as_raw_fd(), CLIENT_SEND_TIMEOUT_SEC)
+                            {
+                                crate::log_warn!("unix socket: set SO_SNDTIMEO failed: {e}");
+                            }
                             let mgr = mgr.clone();
                             // Serve each client on its own thread.
                             let _ = std::thread::Builder::new()
@@ -160,7 +198,7 @@ fn handle_client(stream: UnixStream, mgr: Arc<Mutex<TaskManager>>) {
             crate::log_error!("error: command is not a string");
             break;
         }
-        let resp = dispatch(&req, &mgr);
+        let resp = dispatch_command(&req, &mgr);
         if write_msg(&mut writer, &resp).is_err() {
             break;
         }
@@ -174,8 +212,9 @@ fn write_msg(writer: &mut UnixStream, msg: &Value) -> std::io::Result<()> {
 }
 
 /// Dispatch a single command. Mirrors `unix_command_execute` + registered
-/// command handlers.
-fn dispatch(req: &Value, mgr: &Arc<Mutex<TaskManager>>) -> Value {
+/// command handlers. Public so the RPC vectors can call the same seam the
+/// C unit tests used (the command handlers directly).
+pub fn dispatch_command(req: &Value, mgr: &Arc<Mutex<TaskManager>>) -> Value {
     let Some(cmd) = req.get("command").and_then(Value::as_str) else {
         return json!({"status": "ERROR", "message": "command is not a string"});
     };
@@ -188,7 +227,12 @@ fn dispatch(req: &Value, mgr: &Arc<Mutex<TaskManager>>) -> Value {
         "info" => {
             let g = mgr.lock();
             let now = crate::task::now_sec();
-            let uptime = now - g.started_at();
+            // C: started_at <= 0 means "unset" and reports uptime 0.
+            let uptime = if g.started_at() > 0 {
+                (now - g.started_at()).max(0)
+            } else {
+                0
+            };
             json!({
                 "version": env!("CARGO_PKG_VERSION"),
                 "pid": std::process::id(),

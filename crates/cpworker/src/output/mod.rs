@@ -91,10 +91,10 @@ pub fn new_output(
     match &cfg.kind {
         OutputKind::Null => Ok(Box::new(null::NullOutput::new(cfg, stats))),
         OutputKind::File(c) => {
-            file::FileOutput::new(c, &task.capturer.kind, stats).map(|o| Box::new(o) as _)
+            file::FileOutput::new(c, cfg, &task.capturer.kind, stats).map(|o| Box::new(o) as _)
         }
         OutputKind::RotatingFile(c) => {
-            rotating_file::RotatingFileOutput::new(c, &task.capturer.kind, stats)
+            rotating_file::RotatingFileOutput::new(c, cfg, &task.capturer.kind, stats)
                 .map(|o| Box::new(o) as _)
         }
         OutputKind::Gre(c) => gre::GreOutput::new(c, cfg, stats).map(|o| Box::new(o) as _),
