@@ -3,8 +3,8 @@ name: verification (nightly)
 # The blocking gates (line/function, critical functions, no-decrease, diff) run
 # on every PR/push in ci.yml. This workflow adds the expensive dimensions that do
 # not belong on the critical path: branch coverage (needs nightly llvm-cov),
-# mutation testing and the DST soak. All are advisory while their baselines are
-# established (VERIFICATION_COVERAGE.md §10 stages 2-4).
+# mutation testing and the soaks. Mutation and the soaks are blocking (ADR-0001
+# stage 3/4); branch coverage stays advisory while its baseline is established.
 
 on:
   schedule:
@@ -45,26 +45,51 @@ jobs:
           python3 verification/coverage_gate.py --lcov target/llvm-cov/lcov.info || true
 
   soak:
-    name: DST soak (2000 seeds)
+    name: DST soak (20000 seeds) + fd soak
     runs-on: ubuntu-latest
     timeout-minutes: 60
-    continue-on-error: true
+    # Blocking (ADR-0001 stage 4): the harness is deterministic, so a red soak is
+    # always a real regression, and 20000 seeds costs ~3 min. The fd soak guards
+    # the long-lived-daemon invariant (no leaked socket per reconnect).
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Deterministic simulation soak
         # A failure prints the offending seed; reproduce with DST_SEED=<seed>.
-        run: DST_SEED_RANGE=1-2000 cargo test -p cpsim --test dst --release
+        run: DST_SEED_RANGE=1-20000 cargo test -p cpsim --test dst --release
+      - name: Descriptor-leak soak
+        run: cargo test -p cpgolib --test fd_soak --release
+
+  mutation-exemptions:
+    name: mutation exemption hygiene
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # ADR-0001 §2.1: `exclude_re` is the only way a surviving mutant may be
+    # tolerated, so the exemption list itself is gated: every entry must still
+    # match a candidate mutant (source lines do not silently drift), carry a
+    # written reason, and be a valid regex. Listing mutants needs no build.
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-mutants
+      - name: Check exemptions
+        run: ./verification/mutation_config_gate.py
 
   mutation:
     name: mutation (cargo-mutants shard ${{ matrix.shard }}/4)
+    needs: mutation-exemptions
     runs-on: ubuntu-latest
     timeout-minutes: 120
-    # Advisory until mutation is baselined (VERIFICATION_COVERAGE.md §10 stage 3):
-    # the first measurement found the GRE output path untested
-    # (verification/MUTATION_BASELINE.md). Sharded so a weekly run is bounded.
-    continue-on-error: true
+    env:
+      # Done once, in the mutation-exemptions job.
+      SKIP_MUTATION_CONFIG_GATE: "1"
+    # Blocking (ADR-0001 stage 4): the full Tier 0/1 scope is clean (0 surviving
+    # mutants outside the documented `exclude_re` entries; see
+    # verification/MUTATION_BASELINE.md), so every shard must stay green. Sharded
+    # so a weekly run is bounded.
     strategy:
       fail-fast: false
       matrix:

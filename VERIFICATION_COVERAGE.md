@@ -117,8 +117,13 @@ PR 里若新增测试却无法指向其规范来源，视为不合格（见 §9 
 
 - **mutation testing**：`cargo-mutants`（配置见 `verification/mutants.toml`；入口 `verify_mutation.sh`）。分层阈值见 §2。
   先对 **Tier 0/1** 运行；按 crate/文件限定范围、对已知等价 mutant 用 `exclude`。首次测量与缺口见
-  [`verification/MUTATION_BASELINE.md`](verification/MUTATION_BASELINE.md)（GRE 输出 76/76 存活）；
-  每周 `verification.yml` 分 4 shard 运行，**暂 advisory**，基线建立后纳阻塞。
+  [`verification/MUTATION_BASELINE.md`](verification/MUTATION_BASELINE.md)；每周 `verification.yml` 分 4 shard
+  运行全量，PR 上 `ci.yml` 的 `mutation-diff` 只跑变更行，**两者均已阻塞**（详见 §10 阶段 3）：
+  cargo-mutants 对存活 mutant 退出 2、超时退出 3，任何未被 `exclude_re` 登记理由的存活即判失败。
+  豁免清单本身也是门禁对象：`verification/mutation_config_gate.py` 要求每条 `exclude_re` 仍命中候选
+  （行号漂移即在第一条失效条目上判红）、只覆盖存活（不吞 caught）、覆盖全部存活且带书面理由。
+  当前范围 no-exclude 基线：1519 candidates / 1305 caught（86.0%）/ 134 条逐条钉住的豁免 /
+  0 未登记存活，分文件明细见 MUTATION_BASELINE.md。
 - **poison / 故障注入**：向黄金路径注入可观测故障（截断 chunk、错误 checksum、延迟/丢包、
   半包写入、cgroup 失败），断言系统**检测并正确降级**而不是静默通过（DST 思想）。
   已有实例：`decode_chunked` 截断注入、ZMTP 短写、`P5-02` 读后清零注入。
@@ -131,7 +136,7 @@ PR 里若新增测试却无法指向其规范来源，视为不合格（见 §9 
 | E2E | mock CPM → syncer → 真 cpworker spawn（root，`live-capture` job） | ✅ 已有 |
 | Differential | `parity/all.sh`（C/Go oracle，10 步） | ✅ 已有 |
 | Performance | `bench/`（null/file/vxlan、live A/B） | ✅ 已有 |
-| Soak | 长跑内存/句柄/丢包稳定性 | 🔶 `DST_SEED_RANGE` 大范围种子扫描（weekly `soak` job，2000 seeds） |
+| Soak | 长跑内存/句柄/丢包稳定性 | ✅ `DST_SEED_RANGE=1-20000`（weekly `soak`，~3 min，阻塞）+ 句柄泄漏 soak `fd_soak`（500 次重连/失败握手/失败 dial 后 socket 集合不变） |
 | Chaos / Fault injection / DST | 接口抖动、DNS 抖动、依赖故障、时间/顺序扰动 | ✅ DST harness（`crates/sim`，ChaCha8+虚拟时钟+丢包/重复/乱序/位翻转）；weekly soak 跑 2000 seeds |
 
 系统层矩阵登记于 [`verification/system.toml`](verification/system.toml)（`dst-soak`/`live-capture`/`worker-supervision`）。
@@ -163,12 +168,13 @@ CI 门禁（`.github/workflows/ci.yml`）：
 | `tier_targets` | 阻塞（达 target 后）/ waiver | Tier0/1/2/3 line 目标 | §2 |
 | `p0_requirements` | **阻塞** | P0 scenario/state 覆盖 = 100% | §5 |
 | `p0_risks` | 阻塞 | P0 风险均有验证 | §6 |
-| `mutation` | 阻塞（Tier0/1，nightly 或 PR 限量）+ 定时全量 | mutation score ≥ 阈值 | §7 |
+| `mutation` | **阻塞**（PR 变更行 + weekly 全量分片） | Tier0/1 范围零存活（超出 `exclude_re` 即失败） | §7 |
+| `mutation_config` | **阻塞**（PR + weekly，无需构建） | 豁免清单不漂移/不过度/无遗漏/有理由 | §7 |
 | `system` | 定时（nightly/weekly） | soak / chaos / DST | §8 |
 
 > 当前落地：`.github/workflows/ci.yml` 的 `verify-coverage`（line/function、关键函数、no-decrease、
-> diff、P0 requirements）已**阻塞**；branch 与 mutation 在 `.github/workflows/verification.yml`
-> 每周运行且暂为 advisory，待基线建立后纳入阻塞。
+> diff、P0 requirements）与 `mutation-diff`（变更行零存活）已**阻塞**；branch 与 weekly soak 在
+> `.github/workflows/verification.yml` 每周运行，仍为 advisory，待基线建立后纳入阻塞。
 
 **PR 评审清单（新增）**：
 1. 新测试能指向规范来源（ADR/PARITY/requirements id）？无则不合格。
@@ -186,12 +192,16 @@ CI 门禁（`.github/workflows/ci.yml`）：
 - **阶段 2 ✅ 基本完成**：`requirements.toml` + `requirements_gate.py`（P0 场景 100%，已阻塞进 `verify-coverage`）；
   nightly `verification.yml` 跑 `cargo +nightly llvm-cov --branch`（branch 数据 + 分层报告，advisory）。
   待办：`--mcdc`（condition 门禁）与把 branch 纳入阻塞（待基线建立）。
-- **阶段 3（进行中）**：`cargo-mutants` 配置 + `verify_mutation.sh` + 每周分片 mutation job（advisory）；
-  已关闭 gre/vxlan/stats/config/packet/packet_split 缺口（见 `verification/MUTATION_BASELINE.md`）；
-  PR 上新增 `mutation-diff` job（`--in-diff --exit-code`，变更行零存活，advisory）。
-  待办：zmtp/bpf 收敛 → mutation 阈值纳阻塞。DST/poison 已由 `crates/sim` 提供。
-- **阶段 4（进行中）**：`verification/system.toml` + weekly `soak` job（`DST_SEED_RANGE` 大范围种子扫描）；
-  待办：更长时长的内存/句柄 soak 与 CI 阻塞化。
+- **阶段 3 ✅ 已完成（mutation 已阻塞）**：`cargo-mutants` 配置 + `verify_mutation.sh`；
+  已关闭 gre/vxlan/stats/config/packet/packet_split/zmtp-codec 及本轮 bpf parser·compiler·interp、
+  zmtp client、cpgolib、bpf codes/resolvers/mod 的缺口（见 `verification/MUTATION_BASELINE.md`），
+  所有存活均归零（剩余均为 `exclude_re` 登记的等价/死循环/时序边界）。
+  PR `mutation-diff`（`--in-diff`，变更行零存活）与 weekly 全量分片 job 均已移除 `continue-on-error`，**阻塞**。
+  DST/poison 已由 `crates/sim` 提供。
+- **阶段 4 ✅ 已完成**：`verification/system.toml` + weekly `soak` job（`DST_SEED_RANGE=1-20000`，已**阻塞**）；
+  新增句柄 soak `crates/cpgolib/tests/fd_soak.rs`（重连/失败握手/失败 dial 三类路径上 socket 集合不变，
+  并对注入的 `mem::forget(conn)` 泄漏会失败），随 `cargo test -p cpgolib` 进 CI。
+  待办：需 root/veth 的现场长时 soak（属 U3：只能按需触发，不进 PR 门禁）。
 
 ---
 

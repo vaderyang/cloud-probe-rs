@@ -238,8 +238,8 @@ jobs:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 60
-    # Advisory: fails (exit-code) on any surviving mutant on the changed lines.
-    continue-on-error: true
+    # Blocking (ADR-0001 stage 4): any surviving mutant on the changed lines fails
+    # the PR, unless it is justified in verification/mutants.toml `exclude_re`.
     steps:
       - uses: actions/checkout@v7
         with:

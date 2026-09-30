@@ -98,7 +98,9 @@
 | 阈值过严导致 CI 长期红 | 棘轮 + waiver（owner/到期）；目标达成前不按绝对目标阻塞 |
 | 为过门禁写"从实现出发"的测试 | spec-first 规则 + PR 清单；reviewer 可拒 |
 | mutation 过慢 | 仅 Tier 0/1；PR 用 `--in-diff`；全量放定时 |
-| 豁免滥用成盲区 | 豁免集中在 `policy.toml [exclude]`，hygiene 门禁核查其一致性 |
+| 豁免滥用成盲区 | 覆盖率豁免集中在 `policy.toml [exclude]`；mutation 豁免集中在 `mutants.toml exclude_re`，
+  由 `verification/mutation_config_gate.py` 校验：不得漂移（行号失配即失败）、不得吞掉仍被杀的 mutant、
+  不得遗漏存活、且逐条必须有书面理由 |
 | baseline 被"上调即通过" | baseline 只允许向上；diff 需 review；CI 只接受上升 |
 
 ## 5. 落地状态与分阶段
@@ -108,11 +110,15 @@
 - **阶段 2 ✅ 基本完成**：`verification/requirements.toml` + `requirements_gate.py`（P0 场景 100%）；
   CI `verify-coverage` 阻塞化（分层/关键函数/no-decrease/diff/requirements）；
   weekly `verification.yml` 跑 nightly `--branch`。待办：`--mcdc`、branch 纳入阻塞。
-- **阶段 3（进行中）**：`cargo-mutants` 配置 + `verify_mutation.sh` + 每周 4-shard mutation job（advisory）；
-  首次测量（GRE 输出 76/76 存活）记录于 `verification/MUTATION_BASELINE.md`；
-  `verification/risk.toml` + `risk_gate.py`（P0 风险 100%）已纳入 CI。待办：mutation 阈值纳阻塞；poison/DST harness。
-- **阶段 4（进行中）**：`verification/system.toml` + weekly `soak` job（`DST_SEED_RANGE` 大范围种子扫描，2000 seeds）；
-  待办：更长时长的内存/句柄 soak 与 CI 阻塞化。
+- **阶段 3 ✅ 已完成**：`cargo-mutants` 配置 + `verify_mutation.sh` + 每周 4-shard mutation job；
+  Tier 0/1 范围**零未登记存活**（1519 candidates：1305 caught / 134 条逐条钉住的豁免 / 80 unviable，
+  no-exclude sweep 见 `verification/MUTATION_BASELINE.md`）；PR `mutation-diff`（`--in-diff`）与 weekly job
+  均已**纳阻塞**，豁免清单另由 `mutation_config_gate.py` 在本期/PR 中校验（漂移·过度·遗漏·无理由）；
+  `verification/risk.toml` + `risk_gate.py`（P0 风险 100%）已纳入 CI。
+  poison/DST harness 由 `crates/sim` 提供。
+- **阶段 4 ✅ 已完成**：`verification/system.toml` + weekly `soak` job（`DST_SEED_RANGE=1-20000`，已纳阻塞）；
+  句柄泄漏 soak `crates/cpgolib/tests/fd_soak.rs`（重连 / 失败握手 / 失败 dial 三条路径上进程 socket
+  集合不变）随 `cargo test -p cpgolib` 进 CI。需 root/veth 的现场长时 soak 仍按需触发（U3）。
 
 ## 6. 被否决的备选方案（Alternatives）
 

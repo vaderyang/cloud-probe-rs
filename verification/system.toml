@@ -8,12 +8,25 @@
 id = "dst-soak"
 level = "system"
 schedule = "weekly"
-command = "DST_SEED_RANGE=1-2000 cargo test -p cpsim --test dst --release"
+command = "DST_SEED_RANGE=1-20000 cargo test -p cpsim --test dst --release"
 invariants = [
   "same seed => identical trace digest",
   "clean network: no drops, zero decode errors",
   "loss/dup/reorder/corruption accounting holds",
   "zmq batch/heartbeat and VLAN-slice integrity",
+]
+requires = "none"
+owner = "core"
+
+[[test]]
+id = "fd-soak"
+level = "system"
+schedule = "ci"
+command = "cargo test -p cpgolib --test fd_soak"
+invariants = [
+  "500 dial+close cycles leave the socket set unchanged",
+  "a rejected handshake releases its socket",
+  "a failed dial leaves no descriptor behind",
 ]
 requires = "none"
 owner = "core"
