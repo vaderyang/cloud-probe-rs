@@ -131,27 +131,11 @@ patterns = [
 # full critical function, so no critical waiver remains.
 
 # ---------------------------------------------------------------------------
-# Ratchet waivers: tiers below their target must name an owner + plan + expiry.
-# An expired waiver fails the gate. Update as the gap closes.
+# Ratchet waivers: a tier below its target must name an owner + plan + expiry.
+# An expired waiver fails the gate. As of the Tier 1/2/3 coverage lift every tier
+# now meets its target, so there are no waivers left; add one only if a tier
+# regresses below its target.
 # ---------------------------------------------------------------------------
-
-[[waiver]]
-tier = 1
-owner = "core"
-reason = "Tier 1 below the 90% line target (regions 72.6%)"
-expires = "2026-12-31"
-
-[[waiver]]
-tier = 2
-owner = "core"
-reason = "Tier 2 below the 80% line target; cpctl stats/ping/info are the main gap"
-expires = "2026-12-31"
-
-[[waiver]]
-tier = 3
-owner = "core"
-reason = "Tier 3 below the 60% line target; tooling/entrypoints are intentionally light"
-expires = "2026-12-31"
 
 # ---------------------------------------------------------------------------
 # Exclusions (path + reason + owner). Keep this the only place a blind spot can

@@ -62,9 +62,10 @@ PR 里若新增测试却无法指向其规范来源，视为不合格（见 §9 
 - 当前低于 target 的档位，必须在 `verification/policy.toml` 的 `[[waiver]]` 里登记 **owner + 计划 + 到期**；
   到期未达标 = 门禁失败。这样"目标"是硬约束，但给出可执行的收敛路径。
 
-> **现状（2026-09，llvm-cov lines）**：**Tier 0 行 95.2% / 函数 98.1% — 已达 target 且绝对强制**
-> （baseline 已抬到 target，waiver 移除，`AfPacketCapturer::open` 纳入 100% 关键函数）；
-> Tier1 73.6% / Tier2 61.1% / Tier3 52.9%，仍低于 target → 继续 no-decrease + waiver 收敛。
+> **现状（2026-09，llvm-cov lines；四个 Tier 均已达 target 且绝对强制，无 waiver）**：
+> Tier 0 **95.4% / 98.2%**、Tier 1 **92.0% / 93.4%**、Tier 2 **96.7% / 94.6%**、Tier 3 **74.0% / 84.1%**
+> （target 分别为 95/95、90/90、80/80、60/—；`verification/baseline.json` 已抬到或高于 target，
+> `[[waiver]]` 全部移除）。
 > Tier 0 的 AF_PACKET 采集器覆盖来自 `verify_coverage.sh --privileged-live`：普通测试套件跑完后，
 > 以 root 运行 `#[ignore]` 的 live 测试并把 profraw 合并进同一报告（仅有这条 root-only 路径需要提权；
 > 整个套件用 root 跑会改变很多断言 EPERM 的用例）。函数覆盖按归一化 demangled 名去重并排除
@@ -211,6 +212,9 @@ CI 门禁（`.github/workflows/ci.yml`）：
   合并进 lcov，Tier 0 行 95.2% / 函数 98.1%，baseline 抬到 target、移除 Tier 0 waiver，
   `AfPacketCapturer::open` 从 critical_waiver 提升为 100% 强制关键函数。
   函数覆盖指标同时修正为「归一化去重 + 排除 `::{closure#N}`」（原指标把同源函数按 crate 实例重复计数）。
+- **Tier 1/2/3 覆盖收敛 ✅**：Tier 1 91.99/93.45、Tier 2 96.68/94.64、Tier 3 73.98/84.09（line/function），
+  均达或超 target；`baseline.json` 抬高、`policy.toml` 的三个 `[[waiver]]` 全部移除，
+  四个 Tier 现在都是绝对强制（ADR-0001 的覆盖率收尾目标完成）。
 
 ---
 
