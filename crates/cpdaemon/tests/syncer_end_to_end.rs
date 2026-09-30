@@ -30,6 +30,33 @@ use common::MockCpm;
 
 const DAEMON_ID: i64 = 77;
 
+/// Captures `log` records so tests can assert on the emitted log lines.
+struct CaptureLogger;
+
+static CAPTURED_LOGS: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+static INSTALL_CAPTURE_LOGGER: std::sync::Once = std::sync::Once::new();
+
+impl log::Log for CaptureLogger {
+    fn enabled(&self, _metadata: &log::Metadata) -> bool {
+        true
+    }
+
+    fn log(&self, record: &log::Record) {
+        if let Ok(mut logs) = CAPTURED_LOGS.lock() {
+            logs.push(record.args().to_string());
+        }
+    }
+
+    fn flush(&self) {}
+}
+
+fn install_capture_logger() {
+    INSTALL_CAPTURE_LOGGER.call_once(|| {
+        let _ = log::set_logger(&CaptureLogger);
+        log::set_max_level(log::LevelFilter::Info);
+    });
+}
+
 fn daemon_worker_config(socket_path: &str) -> DaemonWorkerConfig {
     DaemonWorkerConfig {
         pid_file: String::new(),
@@ -161,5 +188,80 @@ async fn syncer_registers_pulls_strategy_and_pushes_metrics() {
         r.metrics_bodies[0]["metrics"].is_object(),
         "metrics body must carry a metrics object: {}",
         r.metrics_bodies[0]
+    );
+}
+
+/// Upstream `syncMetric` reports how many buffered log lines were drained and
+/// sent on the metric push (`log_count`, commit acb10f2). Preload the ring
+/// before the loop starts so the first push carries a known, non-zero count,
+/// then assert the emitted log line is observable.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn syncer_metric_log_reports_log_count() {
+    install_capture_logger();
+    CAPTURED_LOGS.lock().expect("logs lock").clear();
+
+    let mock = MockCpm::new()
+        .register_body(json!({"id": DAEMON_ID, "paUUID": "pa-77", "syncInterval": 1}))
+        .strategy_body(json!({
+            "id": 3, "daemonId": DAEMON_ID, "version": 1, "syncInterval": 1, "strategy": [],
+        }))
+        .strategy_not_modified_at("1");
+    let (url, _rec) = mock.spawn().await;
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    let sock = dir.path().join("ctl.sock");
+
+    let tool = Tool {
+        get_kvm_instances_script: "true".into(),
+        ..Default::default()
+    };
+    let client = HttpClient::new(&url, ClientConfig::default()).expect("http client");
+    let worker_mgr =
+        WorkerManager::new(daemon_worker_config(&sock.to_string_lossy()), tool.clone());
+    let reg = RegConfig {
+        name: "probe-logs".into(),
+        ..Default::default()
+    };
+    let cfg = SyncerConfig {
+        reg_retry_interval: Duration::from_millis(100),
+        sync_strategy_interval: Duration::from_millis(100),
+        sync_metric_interval: Duration::from_millis(100),
+        stop_worker_after_reg_fail_minutes: 30,
+    };
+    let syncer = Syncer::new(client, worker_mgr, tool, reg, cfg);
+
+    // Two buffered entries must be drained on the first metrics push.
+    {
+        let buf = syncer.sync_log();
+        let mut buf = buf.lock();
+        buf.write(1, 0, "INFO", "first".into());
+        buf.write(2, 0, "INFO", "second".into());
+    }
+
+    let (tx, rx) = watch::channel(false);
+    let _guard = ShutdownOnDrop(tx.clone());
+    let handle = tokio::spawn(async move { syncer.run(rx) });
+
+    let saw_log_count = wait_async(
+        || {
+            CAPTURED_LOGS
+                .lock()
+                .map(|logs| logs.iter().any(|line| line.contains("log_count=2")))
+                .unwrap_or(false)
+        },
+        Duration::from_secs(10),
+    )
+    .await;
+
+    tx.send(true).expect("send shutdown");
+    tokio::time::timeout(Duration::from_secs(5), handle)
+        .await
+        .expect("syncer did not stop within 5s")
+        .expect("syncer task panicked");
+
+    assert!(
+        saw_log_count,
+        "metric log line must report log_count=2; captured: {:?}",
+        CAPTURED_LOGS.lock().expect("logs lock")
     );
 }

@@ -225,6 +225,7 @@ impl Syncer {
             return Ok(());
         }
 
+        let begin = Instant::now();
         let now = chrono::Utc::now();
         let mut metrics = MetricsEntry {
             sampling_timestamp: now.timestamp(),
@@ -237,20 +238,37 @@ impl Syncer {
             ..Default::default()
         };
 
+        let worker_begin = Instant::now();
         if let Ok(stats) = self
             .worker_mgr
             .collect_stats_summary(Duration::from_secs(3))
         {
             metrics.set_task_stats(&stats);
         }
+        let worker_dur = worker_begin.elapsed();
 
         let logs = self.sync_log.lock().clear();
+        let log_count = logs.len();
         let req = SyncMetricsRequest {
             logs,
             metrics: Some(metrics),
             pid: Some(self.worker_mgr.pid()).filter(|p| *p > 0),
         };
-        futures_block_on(self.client.sync_metrics(daemon_id, req))
+        let sync_begin = Instant::now();
+        let result = futures_block_on(self.client.sync_metrics(daemon_id, req));
+        let sync_dur = sync_begin.elapsed();
+
+        // Parity with upstream `syncMetric` (acb10f2): report the push timings
+        // and how many buffered log lines were sent this round (`log_count`).
+        // `system_dur` is omitted because `collectSysStats` is not ported
+        // (PARITY.md §5).
+        crate::log_info!(
+            "sync metrics finished total_dur={:?} worker_dur={:?} sync_dur={:?} log_count={log_count}",
+            begin.elapsed(),
+            worker_dur,
+            sync_dur
+        );
+        result
     }
 }
 
