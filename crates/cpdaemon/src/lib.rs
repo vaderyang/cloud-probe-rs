@@ -30,3 +30,21 @@ mod common;
 mod httpmix;
 mod macros;
 mod worker_log;
+
+/// Test-only helpers shared across the crate's unit tests.
+#[cfg(test)]
+pub(crate) mod test_support {
+    use std::sync::{Mutex, MutexGuard};
+
+    /// Serializes tests that mutate the process-global `PATH` (or depend on what
+    /// `PATH` resolves to). A fake `dockerpid`/`cripid`/`virsh` installed by one
+    /// test must not leak into another running in parallel: otherwise a
+    /// container/KVM test can pick up a sibling test's fake helper and fail
+    /// (e.g. `task_builder` reading `cripid` while `tool`'s fake is on `PATH`).
+    static PATH_LOCK: Mutex<()> = Mutex::new(());
+
+    /// Acquire the shared `PATH` lock, recovering from a poisoned mutex.
+    pub(crate) fn path_lock() -> MutexGuard<'static, ()> {
+        PATH_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+    }
+}

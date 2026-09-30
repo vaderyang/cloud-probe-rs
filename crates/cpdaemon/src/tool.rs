@@ -116,19 +116,18 @@ mod tests {
     use std::fs;
     use std::os::unix::fs::PermissionsExt;
     use std::path::Path;
-    use std::sync::{Mutex, MutexGuard};
+    use std::sync::MutexGuard;
 
     use super::*;
 
-    /// Every test here either writes an executable script or spawns a process.
-    /// Those two operations must not overlap across threads: on Linux a `fork`
-    /// racing a script `write` leaves the child holding the write fd, so
-    /// executing that script fails with ETXTBSY. Serializing the whole module is
-    /// the simplest race-free fix; PATH is process-global anyway.
-    static TEST_LOCK: Mutex<()> = Mutex::new(());
-
+    /// Every test here either writes an executable script or mutates the
+    /// process-global `PATH`. Those operations must not overlap across threads:
+    /// on Linux a `fork` racing a script `write` leaves the child holding the
+    /// write fd so executing that script fails with ETXTBSY, and a fake helper on
+    /// `PATH` must not be visible to other modules' tests. The shared crate-level
+    /// lock serializes both effects; `PATH` is process-global anyway.
     fn lock() -> MutexGuard<'static, ()> {
-        TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+        crate::test_support::path_lock()
     }
 
     struct FakePath {

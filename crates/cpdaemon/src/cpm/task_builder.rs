@@ -956,6 +956,7 @@ mod tests {
 
     #[test]
     fn add_strategy_container_resolves_host_pid_and_netns() {
+        let _path_guard = crate::test_support::path_lock();
         let dir = tempfile::tempdir().expect("tempdir");
         let tool = Tool {
             get_container_host_pid_script: script(dir.path(), "pid.sh", "#!/bin/sh\nprintf 4242\n"),
@@ -986,6 +987,7 @@ mod tests {
 
     #[test]
     fn add_strategy_container_warns_on_empty_id_and_pid_failure() {
+        let _path_guard = crate::test_support::path_lock();
         let dir = tempfile::tempdir().expect("tempdir");
         let tool = Tool {
             get_container_host_pid_script: script(
@@ -1011,6 +1013,7 @@ mod tests {
 
     #[test]
     fn add_strategy_instance_uses_first_active_instance_nic() {
+        let _path_guard = crate::test_support::path_lock();
         let dir = tempfile::tempdir().expect("tempdir");
         let tool = Tool {
             get_kvm_instance_nics_script: script(
@@ -1037,6 +1040,7 @@ mod tests {
 
     #[test]
     fn add_strategy_instance_warns_for_missing_empty_or_failing_lookups() {
+        let _path_guard = crate::test_support::path_lock();
         let unknown = strategy(json!({
             "packetChannelType": "ZMQ",
             "address": "a",
@@ -1091,6 +1095,7 @@ mod tests {
 
     #[test]
     fn nofilter_validation_depends_on_channel_and_bind_device() {
+        let _path_guard = crate::test_support::path_lock();
         // Containers are exempt: the capture happens in the container netns.
         let dir = tempfile::tempdir().expect("tempdir");
         let tool = Tool {
