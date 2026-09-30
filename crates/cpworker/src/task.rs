@@ -1222,4 +1222,328 @@ mod tests {
         mgr.stop();
         assert_eq!(c.load(Ordering::SeqCst), 1);
     }
+
+    // -----------------------------------------------------------------------
+    // Tier 1 coverage: validation, output wiring and reload edge cases.
+    // -----------------------------------------------------------------------
+
+    /// Output that counts what the pipeline dispatch path delivers, so the
+    /// forwarding can be asserted rather than merely executed.
+    struct CountOutput {
+        packets: Arc<AtomicUsize>,
+        heartbeats: Arc<AtomicUsize>,
+    }
+
+    impl Output for CountOutput {
+        fn send_packet(&mut self, _hdr: &PacketHeader, _pkt: &[u8], _direct: i32) -> i32 {
+            self.packets.fetch_add(1, Ordering::SeqCst);
+            0
+        }
+        fn heartbeat(&mut self, _now: i64) {
+            self.heartbeats.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+
+    fn pipeline_cfg_json(pcap: &std::path::Path) -> String {
+        format!(
+            r#"{{"execution_model":"pipeline","pipeline":{{"buffer_size_mb":1}},"tasks":[{{
+                "capturer": {{"type":"pcap_file","pcap_file":{{"file_name":"{}"}}}},
+                "outputs": [{{"type":"null"}}]
+            }}]}}"#,
+            pcap.display()
+        )
+    }
+
+    fn pipeline_manager(dir: &std::path::Path) -> TaskManager {
+        let pcap = scratch_pcap(dir);
+        TaskManager::new(
+            Config::parse_str(&pipeline_cfg_json(&pcap)).expect("parse config"),
+            "test.json".into(),
+            dir.display().to_string(),
+        )
+        .expect("manager")
+    }
+
+    /// Every accessor that the RPC surface and the docs expose must report the
+    /// configuration the manager was built from.
+    #[test]
+    fn manager_accessors_report_the_built_configuration() {
+        let dir = tempfile::tempdir().unwrap();
+        let (mgr, _) = manager_with_spies(dir.path(), 0);
+        assert_eq!(mgr.total_tasks(), 1);
+        assert_eq!(mgr.inited_count(), 1);
+        assert_eq!(mgr.config_path(), "test.json");
+        assert_eq!(mgr.working_dir(), dir.path().display().to_string());
+        assert!(
+            mgr.started_at() > 0,
+            "started_at must be a real epoch stamp"
+        );
+        assert_eq!(mgr.execution_model(), ExecutionModel::Rtc);
+    }
+
+    /// `collect_stats_summary` must report the pipeline's ring/allocator sizes.
+    ///
+    /// NOT IMPLEMENTED as a test: exercising the `Some(pipeline)` arm deadlocks,
+    /// because the match arm locks the same `parking_lot::Mutex` twice in one
+    /// statement (`p.ring.lock().size()` and `p.ring.lock().used()`, with the
+    /// first guard's temporary alive until the `let` ends). That is a production
+    /// bug in `collect_stats_summary` (Pipeline mode hangs `cpctl stats` / the
+    /// stats RPC); it is reported, not papered over. The RTC arm is asserted
+    /// below (it reports zeroes) and the accessors are covered separately.
+    #[test]
+    fn stats_summary_reports_zeroes_for_rtc() {
+        let dir = tempfile::tempdir().unwrap();
+        let (mgr, _) = manager_with_spies(dir.path(), 0);
+        assert_eq!(mgr.execution_model(), ExecutionModel::Rtc);
+        let summary = mgr.collect_stats_summary();
+        assert_eq!(summary["pipeline_buffer"]["ring_total"], 0);
+        assert_eq!(summary["pipeline_buffer"]["mem_total"], 0);
+        assert_eq!(summary["pipeline_buffer"]["ring_used"], 0);
+        assert_eq!(summary["pipeline_buffer"]["mem_used"], 0);
+    }
+
+    /// Both execution models must drain the one-packet scratch pcap and stop when
+    /// the source is exhausted; the single-packet `poll_packets` wrapper agrees.
+    #[test]
+    fn poll_packets_batch_drains_rtc_and_pipeline() {
+        let dir = tempfile::tempdir().unwrap();
+        let (mut rtc, _) = manager_with_spies(dir.path(), 0);
+        assert_eq!(
+            rtc.poll_packets(),
+            1,
+            "the scratch pcap holds exactly one packet"
+        );
+        assert_eq!(
+            rtc.poll_packets(),
+            0,
+            "the source is exhausted after one poll"
+        );
+
+        let dir2 = tempfile::tempdir().unwrap();
+        let mut pipe = pipeline_manager(dir2.path());
+        assert_eq!(
+            pipe.poll_packets_batch(4),
+            1,
+            "the pipeline path must drain the same single packet"
+        );
+    }
+
+    /// A task that cannot be built is recorded (not fatal) and surfaced by
+    /// `print_errors` for both the fingerprint-labelled and the anonymous form.
+    #[test]
+    fn failed_task_build_is_recorded_and_printable() {
+        let dir = tempfile::tempdir().unwrap();
+        let missing = dir.path().join("missing.pcap");
+        let cfg = format!(
+            r#"{{"execution_model":"rtc","tasks":[
+                {{"fingerprint":"fp1","capturer":{{"type":"pcap_file","pcap_file":{{"file_name":"{}"}}}},"outputs":[{{"type":"null"}}]}},
+                {{"capturer":{{"type":"pcap_file","pcap_file":{{"file_name":"{}"}}}},"outputs":[{{"type":"null"}}]}}
+            ]}}"#,
+            missing.display(),
+            missing.display()
+        );
+        let mgr = TaskManager::new(
+            Config::parse_str(&cfg).expect("parse"),
+            "test.json".into(),
+            dir.path().display().to_string(),
+        )
+        .expect("a task build failure must not fail the whole manager");
+        assert_eq!(mgr.inited_count(), 0);
+        assert_eq!(mgr.total_tasks(), 2);
+        mgr.print_errors(); // covers the Some(fp) and None arms
+    }
+
+    /// The pipeline sink is the only producer into the ring; both the packet and
+    /// the heartbeat path must enqueue a message carrying the task index.
+    #[test]
+    fn pipeline_sink_enqueues_packets_and_heartbeats() {
+        let ring = Arc::new(Mutex::new(SpscRing::new(16)));
+        let alloc = Arc::new(SimpleAllocator::new(4096));
+        let mut sink = PipelineSink {
+            ring: ring.clone(),
+            alloc: alloc.clone(),
+            task_index: 3,
+        };
+        let hdr = PacketHeader {
+            ts_sec: 1,
+            ts_usec: 2,
+            caplen: 4,
+            len: 4,
+        };
+        sink.on_packet(&hdr, &[1, 2, 3, 4], 7);
+        match ring.lock().pop().expect("packet queued").as_ref() {
+            RingMsg::Packet {
+                task_index,
+                direction,
+                caplen,
+                data,
+                ..
+            } => {
+                assert_eq!(*task_index, 3);
+                assert_eq!(*direction, 7);
+                assert_eq!(*caplen, 4);
+                assert_eq!(data, &[1, 2, 3, 4]);
+            }
+            other => panic!("expected packet, got {other:?}"),
+        }
+        sink.on_heartbeat();
+        match ring.lock().pop().expect("heartbeat queued").as_ref() {
+            RingMsg::Heartbeat { task_index, .. } => assert_eq!(*task_index, 3),
+            other => panic!("expected heartbeat, got {other:?}"),
+        }
+        assert!(alloc.used() > 0, "both messages must hold allocator budget");
+    }
+
+    /// `dispatch_ring_msg` forwards to the owning task's outputs and always frees
+    /// the message, including when no task owns it (otherwise the allocator would
+    /// leak budget until the pipeline starves).
+    #[test]
+    fn dispatch_ring_msg_forwards_to_the_owning_task_and_frees() {
+        let packets = Arc::new(AtomicUsize::new(0));
+        let beats = Arc::new(AtomicUsize::new(0));
+        let out_sets = Arc::new(Mutex::new(vec![TaskOutputs {
+            outputs: vec![Box::new(CountOutput {
+                packets: packets.clone(),
+                heartbeats: beats.clone(),
+            })],
+        }]));
+        let alloc = Arc::new(SimpleAllocator::new(4096));
+
+        let msg = alloc
+            .alloc_packet(0, 5, 1, 2, &[0u8; 8])
+            .expect("alloc packet");
+        dispatch_ring_msg(&out_sets, &alloc, msg);
+        assert_eq!(packets.load(Ordering::SeqCst), 1);
+
+        let beat = alloc.alloc_heartbeat(0).expect("alloc heartbeat");
+        dispatch_ring_msg(&out_sets, &alloc, beat);
+        assert_eq!(beats.load(Ordering::SeqCst), 1);
+
+        let stray = alloc
+            .alloc_packet(9, 0, 0, 0, &[0u8; 8])
+            .expect("alloc stray");
+        let used_before = alloc.used();
+        dispatch_ring_msg(&out_sets, &alloc, stray);
+        assert!(
+            alloc.used() < used_before,
+            "an orphan message's budget must still be released"
+        );
+    }
+
+    /// `start` is a no-op for RTC and for the defensive pipeline-without-buffers
+    /// state; neither may leave a thread handle behind.
+    #[test]
+    fn start_is_a_noop_for_rtc_and_without_a_pipeline() {
+        let dir = tempfile::tempdir().unwrap();
+        let (mut rtc, _) = manager_with_spies(dir.path(), 0);
+        rtc.start();
+        assert!(rtc.output_thread.is_none(), "RTC has no output thread");
+
+        let mut pipe = pipeline_manager(dir.path());
+        pipe.pipeline = None; // defensive state the constructor never makes
+        pipe.start();
+        assert!(
+            pipe.output_thread.is_none(),
+            "no ring/alloc means no thread"
+        );
+        assert_eq!(
+            pipe.poll_packets_batch(1),
+            0,
+            "a pipeline without ring/alloc must poll nothing rather than panic"
+        );
+    }
+
+    /// Reloading a running pipeline manager rebuilds the ring/allocator and
+    /// restarts the output thread; a stopped manager must stay stopped.
+    #[test]
+    fn reload_recreates_pipeline_buffers_and_restarts_the_thread() {
+        let dir = tempfile::tempdir().unwrap();
+        let pcap = scratch_pcap(dir.path());
+        let cfg = pipeline_cfg_json(&pcap);
+        let mut mgr = TaskManager::new(
+            Config::parse_str(&cfg).expect("parse"),
+            "test.json".into(),
+            dir.path().display().to_string(),
+        )
+        .expect("manager");
+        mgr.start();
+        assert!(mgr.output_thread.is_some());
+        mgr.reload(Config::parse_str(&cfg).expect("parse"))
+            .expect("reload");
+        assert!(mgr.pipeline.is_some(), "pipeline buffers must be rebuilt");
+        assert!(
+            mgr.output_thread.is_some(),
+            "a running manager must stay started after reload"
+        );
+        mgr.stop();
+    }
+
+    /// `ReloadWorker::start` reads and parses off-thread; the plan reaches the
+    /// caller intact.
+    #[test]
+    fn reload_worker_start_reads_a_real_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("cfg.json");
+        std::fs::write(&path, r#"{"execution_model":"rtc","tasks":[]}"#).expect("write");
+        let worker = ReloadWorker::start(path.to_str().expect("utf8"));
+        while !worker.is_done() {
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        let plan = worker.take().expect("plan");
+        assert!(plan.config.tasks.is_empty());
+        assert!(plan.problems.is_empty());
+    }
+
+    /// `take` must report a missing plan rather than panic or return a default.
+    #[test]
+    fn reload_worker_take_reports_a_vanished_plan() {
+        let worker = ReloadWorker {
+            done: Arc::new(AtomicBool::new(true)),
+            plan: Arc::new(Mutex::new(None)),
+            handle: None,
+        };
+        let err = worker.take().expect_err("no plan stored");
+        assert!(err.to_string().contains("vanished"), "got {err}");
+    }
+
+    /// Dropping a worker whose lookup is still running must detach, not join.
+    #[test]
+    fn reload_worker_drop_detaches_a_running_worker() {
+        let worker = ReloadWorker::start_with(|| {
+            std::thread::sleep(std::time::Duration::from_millis(20));
+            Err(crate::error::Error::new("late"))
+        });
+        drop(worker);
+    }
+
+    /// `reload_from_file` prepares off-lock and still swaps the tasks; a config
+    /// whose filters cannot compile is reported as problems but is not fatal.
+    #[test]
+    fn reload_from_file_prepares_off_lock_and_reports_problems() {
+        let dir = tempfile::tempdir().unwrap();
+        let input = scratch_pcap(dir.path());
+        let cfg_path = dir.path().join("cfg.json");
+        let json = format!(
+            r#"{{"execution_model":"rtc","tasks":[
+                {{"capturer":{{"type":"pcap_file","pcap_file":{{"file_name":"{}"}}}},"outputs":[{{"type":"null"}}]}},
+                {{"capturer":{{"type":"libpcap","libpcap":{{"interface":"lo","bpf":"vlan 5"}}}},"outputs":[]}},
+                {{"capturer":{{"type":"libpcap","libpcap":{{"interface":"lo","bpf":"host nic.definitely_not_real0"}}}},"outputs":[]}}
+            ]}}"#,
+            input.display()
+        );
+        std::fs::write(&cfg_path, &json).expect("write config");
+        let mgr = TaskManager::new(
+            Config::parse_str(&json).expect("parse"),
+            cfg_path.display().to_string(),
+            dir.path().display().to_string(),
+        )
+        .expect("manager");
+        let mgr = Arc::new(Mutex::new(mgr));
+        reload_from_file(&mgr).expect("a reload with task build errors still returns Ok");
+        assert_eq!(
+            mgr.lock().inited_count(),
+            1,
+            "only the pcap_file task can be rebuilt"
+        );
+    }
 }

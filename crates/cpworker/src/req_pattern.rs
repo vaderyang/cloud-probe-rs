@@ -492,4 +492,207 @@ mod tests {
     fn trailing_error() {
         assert!(parse_pattern("host 10.0.0.1 port 80").is_err());
     }
+
+    /// Ethernet frame wrapping an IPv4/UDP datagram, for the direction tests.
+    fn eth_frame(ether_type: u16, body: &[u8]) -> Vec<u8> {
+        let mut f = vec![0u8; ETH_HDR_LEN];
+        f[12..14].copy_from_slice(&ether_type.to_be_bytes());
+        f.extend_from_slice(body);
+        f
+    }
+
+    fn ipv4_udp(frame_src: [u8; 4], frame_dst: [u8; 4], sport: u16, dport: u16) -> Vec<u8> {
+        let mut ip = vec![0u8; 20];
+        ip[0] = 0x45; // IPv4, IHL 5
+        ip[2..4].copy_from_slice(&28u16.to_be_bytes()); // 20 IP + 8 UDP
+        ip[9] = crate::packet::IPPROTO_UDP;
+        ip[12..16].copy_from_slice(&frame_src);
+        ip[16..20].copy_from_slice(&frame_dst);
+        let mut udp = vec![0u8; 8];
+        udp[0..2].copy_from_slice(&sport.to_be_bytes());
+        udp[2..4].copy_from_slice(&dport.to_be_bytes());
+        ip.extend_from_slice(&udp);
+        ip
+    }
+
+    fn ipv4_udp_frame(src: [u8; 4], dst: [u8; 4], sport: u16, dport: u16) -> Vec<u8> {
+        eth_frame(
+            crate::packet::ETHERTYPE_IP,
+            &ipv4_udp(src, dst, sport, dport),
+        )
+    }
+
+    /// Ethernet + two stacked VLAN tags (QinQ: 0x88a8 then 0x8100) around IPv4/UDP.
+    fn qinq_ipv4_udp_frame(src: [u8; 4], dst: [u8; 4], sport: u16, dport: u16) -> Vec<u8> {
+        let mut f = vec![0u8; ETH_HDR_LEN];
+        f[12..14].copy_from_slice(&crate::packet::ETHERTYPE_DOT1AD.to_be_bytes());
+        f.extend_from_slice(&[0x00, 0x01]); // outer tag TCI
+        f.extend_from_slice(&crate::packet::ETHERTYPE_VLAN.to_be_bytes());
+        f.extend_from_slice(&[0x00, 0x02]); // inner tag TCI
+        f.extend_from_slice(&crate::packet::ETHERTYPE_IP.to_be_bytes());
+        f.extend_from_slice(&ipv4_udp(src, dst, sport, dport));
+        f
+    }
+
+    /// Every config variant maps to its `ReqPattern`, and a bad custom pattern is
+    /// reported as such rather than silently becoming a different strategy.
+    #[test]
+    fn new_from_cfg_builds_each_variant() {
+        assert!(matches!(
+            ReqPattern::new_from_cfg(&ReqPatternConfig::None, "lo").unwrap(),
+            ReqPattern::None
+        ));
+        assert!(matches!(
+            ReqPattern::new_from_cfg(&ReqPatternConfig::Auto, "lo").unwrap(),
+            ReqPattern::Auto { .. }
+        ));
+        let custom = ReqPattern::new_from_cfg(
+            &ReqPatternConfig::Custom {
+                pattern: "port 80".into(),
+            },
+            "lo",
+        )
+        .unwrap();
+        assert!(matches!(custom, ReqPattern::Custom { .. }));
+        let err = ReqPattern::new_from_cfg(
+            &ReqPatternConfig::Custom {
+                pattern: "garbage".into(),
+            },
+            "lo",
+        )
+        .expect_err("an unparseable pattern must fail construction");
+        assert!(
+            err.to_string().contains("invalid pattern"),
+            "error must name the pattern: {err}"
+        );
+    }
+
+    /// `Auto` classifies by the frame's *source* MAC; a frame too short to hold
+    /// one is `UNKNOWN`, never a bogus direction.
+    #[test]
+    fn auto_judge_uses_the_source_mac() {
+        let mac = [0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff];
+        let p = ReqPattern::Auto { mac };
+        let mut frame = vec![0u8; ETH_HDR_LEN];
+        frame[6..12].copy_from_slice(&mac);
+        assert_eq!(p.judge_pkt_direction(&frame), PKT_DIR_OUTGOING);
+        frame[6..12].copy_from_slice(&[0x11, 0x22, 0x33, 0x44, 0x55, 0x66]);
+        assert_eq!(p.judge_pkt_direction(&frame), PKT_DIR_INCOMING);
+        assert_eq!(
+            p.judge_pkt_direction(&[0u8; 13]),
+            PKT_DIR_UNKNOWN,
+            "a truncated Ethernet header cannot carry a MAC"
+        );
+    }
+
+    /// Custom patterns judge source first (outgoing), then destination
+    /// (incoming), and leave anything that matches neither `UNKNOWN`.
+    #[test]
+    fn custom_judge_classifies_direction_and_unknown() {
+        let p = ReqPattern::new_from_cfg(
+            &ReqPatternConfig::Custom {
+                pattern: "host 10.0.0.1 and port 80".into(),
+            },
+            "lo",
+        )
+        .unwrap();
+        let outgoing = ipv4_udp_frame([10, 0, 0, 1], [10, 0, 0, 2], 80, 1234);
+        assert_eq!(p.judge_pkt_direction(&outgoing), PKT_DIR_OUTGOING);
+        let incoming = ipv4_udp_frame([10, 0, 0, 2], [10, 0, 0, 1], 1234, 80);
+        assert_eq!(p.judge_pkt_direction(&incoming), PKT_DIR_INCOMING);
+        let neither = ipv4_udp_frame([10, 0, 0, 3], [10, 0, 0, 4], 1, 2);
+        assert_eq!(p.judge_pkt_direction(&neither), PKT_DIR_UNKNOWN);
+        // A non-IP frame and a frame too short to parse are both UNKNOWN.
+        assert_eq!(
+            p.judge_pkt_direction(&eth_frame(0x0806, &[0u8; 40])),
+            PKT_DIR_UNKNOWN
+        );
+        assert_eq!(p.judge_pkt_direction(&[0u8; 5]), PKT_DIR_UNKNOWN);
+    }
+
+    /// The stacked-VLAN descent added for QinQ (`packet::extract_ipport`) must be
+    /// visible through the direction judge: the inner IPv4 address decides.
+    #[test]
+    fn custom_judge_descends_stacked_vlan() {
+        let p = ReqPattern::new_from_cfg(
+            &ReqPatternConfig::Custom {
+                pattern: "host 10.0.0.1 and port 80".into(),
+            },
+            "lo",
+        )
+        .unwrap();
+        let outgoing = qinq_ipv4_udp_frame([10, 0, 0, 1], [10, 0, 0, 2], 80, 1);
+        assert_eq!(
+            p.judge_pkt_direction(&outgoing),
+            PKT_DIR_OUTGOING,
+            "QinQ inner source must be matched"
+        );
+        let incoming = qinq_ipv4_udp_frame([10, 0, 0, 2], [10, 0, 0, 1], 1, 80);
+        assert_eq!(
+            p.judge_pkt_direction(&incoming),
+            PKT_DIR_INCOMING,
+            "QinQ inner destination must be matched"
+        );
+    }
+
+    #[test]
+    fn canonical_eval_matches_and_reports_bad_input() {
+        assert_eq!(
+            canonical_eval("host 10.0.0.1 and port 80", "10.0.0.1", 80),
+            "1"
+        );
+        assert_eq!(
+            canonical_eval("host 10.0.0.1 and port 80", "10.0.0.1", 81),
+            "0"
+        );
+        assert_eq!(canonical_eval("host ::1", "::1", 0), "1");
+        assert_eq!(
+            canonical_eval("host 10.0.0.1", "not-an-ip", 0),
+            "BAD_IP",
+            "an unparseable address is distinct from a non-matching one"
+        );
+    }
+
+    /// `type_name` is the human-readable form used in logs; each discriminant and
+    /// the unknown fallback must map to a distinct string.
+    #[test]
+    fn type_name_covers_every_discriminant() {
+        assert_eq!(type_name(REQ_PATTERN_TYPE_NONE), REQ_PATTERN_TYPE_NONE_STR);
+        assert_eq!(type_name(REQ_PATTERN_TYPE_AUTO), REQ_PATTERN_TYPE_AUTO_STR);
+        assert_eq!(
+            type_name(REQ_PATTERN_TYPE_CUSTOM),
+            REQ_PATTERN_TYPE_CUSTOM_STR
+        );
+        assert_eq!(type_name(42), "unknown");
+    }
+
+    /// `nic.<ifname>` resolves through `netutil`; a bad interface or a non-address
+    /// string is an error, never a silently zeroed address.
+    #[test]
+    fn resolve_host_accepts_interface_and_rejects_bad_values() {
+        assert_eq!(
+            resolve_host("nic.lo").expect("loopback address"),
+            IpAddr::V4([127, 0, 0, 1])
+        );
+        assert!(resolve_host("nic.definitely_not_real0").is_err());
+        assert!(resolve_host("not-an-ip").is_err());
+    }
+
+    /// The lexer's keyword guards: a keyword prefix followed by an alphanumeric
+    /// (`andrew`) is a value, not `and`; and a value running straight into
+    /// `and`/`or` must stop at the operator.
+    #[test]
+    fn lexer_handles_keyword_prefixes_and_embedded_operators() {
+        assert!(parse_pattern("andrew port 80").is_err());
+        assert!(eval("host 10.0.0.1and port 80", "10.0.0.1", 80));
+        assert!(eval("host 10.0.0.1or port 80", "10.0.0.1", 81));
+        assert!(!eval("host 10.0.0.1or port 80", "10.0.0.2", 81));
+    }
+
+    #[test]
+    fn parse_rejects_missing_operands() {
+        assert!(parse_pattern("port").is_err());
+        assert!(parse_pattern("host").is_err());
+        assert!(parse_pattern("port 80 and").is_err());
+    }
 }
