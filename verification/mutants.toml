@@ -136,9 +136,22 @@ exclude_re = [
   "cpworker/src/bpf/resolvers\\.rs:142:44: replace < with <= in <impl Resolver for CachedResolver<R>>::lookup",  # Instant equality is unreachable
 
   # cpworker/src/config.rs
-  "cpworker/src/config\\.rs:549:5: replace de_nonnull -> std::result::Result<Option<T>, D::Error> with Ok\\(None\\)",  # runner timeout: mutation loops forever, no finite test can report it
-  "cpworker/src/config\\.rs:762:8:",  # runner timeout: mutation loops forever, no finite test can report it
-  "cpworker/src/config\\.rs:1060:58:",  # runner timeout: mutation loops forever, no finite test can report it
+  "cpworker/src/config\\.rs:596:5: replace object_or_none -> Result<Option<T>> with Ok\\(None\\)",  # runner timeout: mutation loops forever, no finite test can report it
+  "cpworker/src/config\\.rs:597:9: delete match arm Some\\(v @serde_json::Value::Object\\(_\\)\\) in object_or_none",  # runner timeout: mutation loops forever, no finite test can report it
+  "cpworker/src/config\\.rs:802:5: replace int_in -> Result<i64> with Ok\\(0\\)",  # runner timeout: mutation loops forever, no finite test can report it
+  "cpworker/src/config\\.rs:822:5: replace u64_in -> Result<u64> with Ok\\(0\\)",  # runner timeout: mutation loops forever, no finite test can report it
+  "cpworker/src/config\\.rs:863:10: replace <= with > in positive_clamped",  # runner timeout: mutation loops forever, no finite test can report it
+  "cpworker/src/config\\.rs:866:10: replace > with >= in positive_clamped",  # clamp at equality is a no-op
+  "cpworker/src/config\\.rs:877:10: replace < with <= in nonneg_clamped",  # runner timeout: mutation loops forever, no finite test can report it
+  "cpworker/src/config\\.rs:877:10: replace < with == in nonneg_clamped",  # runner timeout: mutation loops forever, no finite test can report it
+  "cpworker/src/config\\.rs:943:27: replace > with >= in RawOutput::build",  # 24-bit mask at equality is a no-op (warning log only)
+  "cpworker/src/config\\.rs:988:32: replace > with < in RawOutput::build",  # warning-log gate only; no observable behaviour
+  "cpworker/src/config\\.rs:988:32: replace > with == in RawOutput::build",  # warning-log gate only; no observable behaviour
+  "cpworker/src/config\\.rs:988:32: replace > with >= in RawOutput::build",  # warning-log gate only; no observable behaviour
+  "cpworker/src/config\\.rs:1017:32: replace > with < in RawOutput::build",  # warning-log gate only; no observable behaviour
+  "cpworker/src/config\\.rs:1017:32: replace > with == in RawOutput::build",  # warning-log gate only; no observable behaviour
+  "cpworker/src/config\\.rs:1017:32: replace > with >= in RawOutput::build",  # warning-log gate only; no observable behaviour
+  "cpworker/src/config\\.rs:1171:58: replace == with != in RawConfig::build",  # runner timeout: mutation loops forever, no finite test can report it
 
   # cpworker/src/output/gre.rs
   "cpworker/src/output/gre\\.rs:114:30: replace > with >= in GreOutput::flush_error_info",  # unsigned counters: logging gate only
@@ -167,23 +180,23 @@ exclude_re = [
   "cpworker/src/packet\\.rs:195:19: replace < with <= in parse_packet",  # exact-boundary frame cannot complete the parse anyway
   "cpworker/src/packet\\.rs:201:19: replace < with <= in parse_packet",  # exact-boundary frame cannot complete the parse anyway
   "cpworker/src/packet\\.rs:201:19: replace < with == in parse_packet",  # exact-boundary frame cannot complete the parse anyway
-  "cpworker/src/packet\\.rs:214:53: replace \\+ with - in parse_packet",  # shrunk threshold still caught by the final caplen guard
-  "cpworker/src/packet\\.rs:219:32: replace \\+ with - in parse_packet",  # shrunk threshold still caught by the final caplen guard
-  "cpworker/src/packet\\.rs:237:19: replace < with <= in parse_packet",  # exact-boundary frame cannot complete the parse anyway
-  "cpworker/src/packet\\.rs:247:23: replace < with <= in parse_packet",  # exact-boundary frame cannot complete the parse anyway
+  "cpworker/src/packet\\.rs:220:53: replace \\+ with - in parse_packet",  # shrunk threshold still caught by the final caplen guard
+  "cpworker/src/packet\\.rs:225:32: replace \\+ with - in parse_packet",  # shrunk threshold still caught by the final caplen guard
+  "cpworker/src/packet\\.rs:243:19: replace < with <= in parse_packet",  # exact-boundary frame cannot complete the parse anyway
   "cpworker/src/packet\\.rs:253:23: replace < with <= in parse_packet",  # exact-boundary frame cannot complete the parse anyway
-  "cpworker/src/packet\\.rs:253:23: replace < with == in parse_packet",  # exact-boundary frame cannot complete the parse anyway
-  "cpworker/src/packet\\.rs:253:32: replace \\+ with - in parse_packet",  # shrunk threshold still caught by the final caplen guard
-  "cpworker/src/packet\\.rs:273:53: replace \\+ with - in parse_packet",  # shrunk threshold still caught by the final caplen guard
-  "cpworker/src/packet\\.rs:278:32: replace \\+ with - in parse_packet",  # shrunk threshold still caught by the final caplen guard
-  "cpworker/src/packet\\.rs:303:22: replace > with >= in parse_packet",  # clamp at equality is a no-op
-  "cpworker/src/packet\\.rs:330:23: replace < with <= in extract_ipport",  # exact-boundary frame cannot complete the parse anyway
-  "cpworker/src/packet\\.rs:340:31: replace < with <= in extract_ipport",  # exact-boundary frame cannot complete the parse anyway
-  "cpworker/src/packet\\.rs:422:40: replace \\+ with - in fill_ports",  # shrunk threshold still caught by the final caplen guard
-  "cpworker/src/packet\\.rs:422:54: replace \\+ with - in fill_ports",  # shrunk threshold still caught by the final caplen guard
+  "cpworker/src/packet\\.rs:259:23: replace < with <= in parse_packet",  # exact-boundary frame cannot complete the parse anyway
+  "cpworker/src/packet\\.rs:259:23: replace < with == in parse_packet",  # exact-boundary frame cannot complete the parse anyway
+  "cpworker/src/packet\\.rs:259:32: replace \\+ with - in parse_packet",  # shrunk threshold still caught by the final caplen guard
+  "cpworker/src/packet\\.rs:279:53: replace \\+ with - in parse_packet",  # shrunk threshold still caught by the final caplen guard
+  "cpworker/src/packet\\.rs:284:32: replace \\+ with - in parse_packet",  # shrunk threshold still caught by the final caplen guard
+  "cpworker/src/packet\\.rs:309:22: replace > with >= in parse_packet",  # clamp at equality is a no-op
+  "cpworker/src/packet\\.rs:336:23: replace < with <= in extract_ipport",  # exact-boundary frame cannot complete the parse anyway
+  "cpworker/src/packet\\.rs:354:27: replace < with <= in extract_ipport",  # exact-boundary frame cannot complete the parse anyway
+  "cpworker/src/packet\\.rs:435:40: replace \\+ with - in fill_ports",  # shrunk threshold still caught by the final caplen guard
+  "cpworker/src/packet\\.rs:435:54: replace \\+ with - in fill_ports",  # shrunk threshold still caught by the final caplen guard
 
   # cpworker/src/packet_split.rs
-  "cpworker/src/packet_split\\.rs:158:81: replace \\+ with \\* in build_fragment",  # checksum reads only ihl*4 bytes
+  "cpworker/src/packet_split\\.rs:169:81: replace \\+ with \\* in build_fragment",  # checksum reads only ihl*4 bytes
 
   # cpworker/src/zmtp/client.rs
   "cpworker/src/zmtp/client\\.rs:72:9:",  # default body: only in-memory test transports use it
