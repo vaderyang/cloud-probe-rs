@@ -6,7 +6,7 @@
 
 > 状态图例：⬜ 待确认 / ✅ 已确认（附结论）。
 
-## 1. ⬜ BPF 表达式现场分布
+## 1. ◑ BPF 表达式现场分布（能力矩阵已交付，现场样本待采）
 
 - **需要**：CPM 实际下发的 BPF 表达式样本（去敏后即可），至少覆盖出现频率最高的若干条；重点是含
   `vlan`、`greater`、`less`、`len`、算术表达式、`src tcp` 等**本移植当前不支持**的写法。
@@ -59,7 +59,7 @@
   并在物理 NIC 上断言非本机 MAC 帧在 promisc=false 下不被投递（veth 不建模 RX 过滤，不作此断言）。
   见 `PARITY.md` §2.5 的分歧记录与 `CHANGELOG.md`。
 
-## 3. ⬜ libpcap TPACKET ring 相对 `SO_RCVBUF` 的高负载容量
+## 3. ✅ libpcap TPACKET ring 相对 `SO_RCVBUF` 的高负载容量（已实测）
 
 - **需要**：高负载（如 10Gbps 镜像口）下的实测：ring 可用 MB 数、丢包率、`SO_RCVBUF` 上限。
 - **已实测（2026-10，yinjiao ↔ jinjiao 25G 直连）**：
@@ -89,7 +89,7 @@
 - **解锁决策**：`buffer_size_mb` 默认值与上限是否需要在现场硬件上重新标定；
   是否需要为高带宽口增加多 task/多队列采集。
 
-## 4. ⬜ VLAN / H3 的现场影响
+## 4. ◑ VLAN / H3 的现场影响（VLAN 已定论=promisc，H3 待样本）
 
 - **已实测（2026-10，yinjiao ↔ jinjiao 25G 直连 + `ens5f0`）**：
   - 用 Python 原始 L2 构造正确的 802.1Q（vlan 100）与 QinQ（outer 0x88a8/100 + inner 0x8100/200）
@@ -109,7 +109,7 @@
 - **如何采集**：现场抓到带标签的样本 pcap + 本移植版回放/实采的对照。
 - **解锁决策**：VLAN/H3 相关缺陷是否构成发布阻塞。
 
-## 5. ⬜ `vxlan-split` 服务器硬件复测（= `IMPROVEMENT_PLAN.md` P4.1）
+## 5. ✅ `vxlan-split` 服务器硬件复测（= `IMPROVEMENT_PLAN.md` P4.1，已实测）
 
 - **已实测（2026-10-01，yinjiao，Xeon Gold 6430 ×128、503 GiB、`scaling_governor=performance`）**：
   用 `bench/bench.py`（`N=1000000`、`REPEAT=3`、离线 pcap 回放）在同机对比 C vs Rust：
