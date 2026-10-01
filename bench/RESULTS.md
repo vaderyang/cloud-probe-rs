@@ -93,3 +93,36 @@ Raw per-run rows (the evidence behind every number above):
 * `file` / Rust: run1: 0.868s, run2: 1.028s, run3: 0.839s, run4: 0.818s, run5: 1.006s; RSS MB: 2.8, 2.7, 2.7, 2.7, 2.7
 * `vxlan-split` / C: run1: 17.109s, run2: 11.698s, run3: 12.334s, run4: 14.638s, run5: 19.494s; RSS MB: 7.3, 7.1, 7.1, 7.1, 7.1
 * `vxlan-split` / Rust: run1: 15.885s, run2: 15.926s, run3: 15.648s, run4: 15.702s, run5: 16.786s; RSS MB: 2.8, 2.9, 2.9, 2.8, 2.9
+
+## Run 2026-10-01 04:20:17
+
+Machine: yinjiao (10.0.0.11) — 128 cores, Intel(R) Xeon(R) Gold 6430, 503.5 GiB RAM, Linux 5.15.0-187-generic; scaling_governor=performance
+
+Workload: 1000000 packets (417.1 MB) replayed from a PCAP file; N=1000000, REPEAT=3 (plus one discarded warm-up per binary).
+
+
+| Scenario | Impl | Runs | Time med (s) | Time min–max (s) | stdev (ms) | pps med (M) | MB/s med | Peak RSS med (MB) |
+|---|---|---:|---:|---|---:|---:|---:|---:|
+| null | C | 3/3 | 0.174 | 0.173–0.179 | 2.6 | 5.75 | 2400.0 | 2.6 (2.6–2.6) |
+| null | Rust | 3/3 | 0.144 | 0.140–0.144 | 2.2 | 6.95 | 2897.8 | 1.1 (1.1–1.1) |
+| file | C | 3/3 | 0.405 | 0.401–0.414 | 5.5 | 2.47 | 1030.9 | 2.6 (2.6–2.7) |
+| file | Rust | 3/3 | 0.344 | 0.341–0.355 | 6.2 | 2.91 | 1212.3 | 1.1 (1.1–1.1) |
+| vxlan-split | C | 3/3 | 4.154 | 4.136–4.618 | 223.1 | 0.24 | 100.4 | 2.6 (2.6–2.6) |
+| vxlan-split | Rust | 3/3 | 4.160 | 3.940–4.686 | 313.1 | 0.24 | 100.2 | 2.9 (2.8–2.9) |
+
+C/Rust time ratio (median; the range spans the min/max of both sides, so it is the honest reading of the same 3-run sample):
+
+| Scenario | ratio (med) | ratio range over min/max | spread of the ratio |
+|---|---:|---|---|
+| null | 1.21× | 1.20×–1.28× | 0.08 |
+| file | 1.18× | 1.13×–1.21× | 0.09 |
+| vxlan-split | 1.00× | 0.88×–1.17× | 0.29 |
+
+Raw per-run rows (the evidence behind every number above):
+
+* `null` / C: run1: 0.179s, run2: 0.174s, run3: 0.173s; RSS MB: 2.6, 2.6, 2.6
+* `null` / Rust: run1: 0.144s, run2: 0.144s, run3: 0.140s; RSS MB: 1.1, 1.1, 1.1
+* `file` / C: run1: 0.414s, run2: 0.401s, run3: 0.405s; RSS MB: 2.6, 2.7, 2.6
+* `file` / Rust: run1: 0.355s, run2: 0.341s, run3: 0.344s; RSS MB: 1.1, 1.1, 1.1
+* `vxlan-split` / C: run1: 4.136s, run2: 4.618s, run3: 4.154s; RSS MB: 2.6, 2.6, 2.6
+* `vxlan-split` / Rust: run1: 4.686s, run2: 4.160s, run3: 3.940s; RSS MB: 2.9, 2.9, 2.8

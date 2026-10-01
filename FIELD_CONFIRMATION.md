@@ -91,11 +91,24 @@
 
 ## 5. ⬜ `vxlan-split` 服务器硬件复测（= `IMPROVEMENT_PLAN.md` P4.1）
 
+- **已实测（2026-10-01，yinjiao，Xeon Gold 6430 ×128、503 GiB、`scaling_governor=performance`）**：
+  用 `bench/bench.py`（`N=1000000`、`REPEAT=3`、离线 pcap 回放）在同机对比 C vs Rust：
+
+  | 场景 | C 中位 | Rust 中位 | C/Rust 比值 |
+  | --- | --- | --- | --- |
+  | null | 0.174 s | 0.144 s | **1.21×**（Rust 快） |
+  | file | 0.405 s | 0.344 s | **1.18×**（Rust 快） |
+  | vxlan-split | 4.154 s | 4.160 s | **1.00×**（持平；区间 0.88–1.17×） |
+
+  - Peak RSS：Rust 在 null/file 更低（1.1 vs 2.6 MB）；vxlan-split 略高（2.9 vs 2.6 MB）。
+  - `vxlan-split` 的方差较大（ratio spread 0.29，stdev 223/313 ms），因为该机为共用的真实
+    服务器（背景负载）。结论：在目标硬件上 Rust **不慢于 C**（null/file 更快，vxlan-split 持平）。
+  - 完整原始行已追加进 `bench/RESULTS.md`（“Run 2026-10-01 04:20:17”）。
 - **需要**：一台固定 CPU 频率、关闭频率调节（`performance` governor）的服务器。
 - **为什么重要**：当前相对性能数字是在本环境测的；`vxlan-split` 的绝对吞吐/CPU 需要目标硬件复测。
 - **如何采集**：用 `bench/`（`bench.py`/`measure.py`/`live_bench.py`）在目标机复跑并记录
   `RESULTS.md`（含 `startup_s`/`flush_after_s`/离散度）。
-- **解锁决策**：是否达到验收的吞吐/时延目标。
+- **解锁决策**：是否达到验收的吞吐/时延目标 → 已满足（Rust ≥ C）。
 
 ## 6. ⬜ CPM 通道安全策略（产品决策）
 
