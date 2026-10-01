@@ -24,6 +24,17 @@ tests = [
 ]
 
 [[requirement]]
+id = "REQ-BPF-ETHER-PROTO"
+priority = "P0"
+source = "libpcap grammar: `ether proto` (PARITY.md §4; field report cloud-probe-rs-57d)"
+scenario = "ether proto <num|name> compiles and decides exactly like libpcap, including the 802.3 length quirk"
+tests = [
+  "parses_ether_proto_numeric_and_named",
+  "ether_proto_number_base_zero",
+  "ether_proto_matches_ethertype_and_8023_length",
+]
+
+[[requirement]]
 id = "REQ-BPF-LIMITS"
 priority = "P0"
 source = "AUDIT4 P5-07"

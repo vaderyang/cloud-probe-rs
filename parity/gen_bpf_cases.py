@@ -10,7 +10,7 @@ import sys
 
 
 def mac(r):
-    return ":".join("%02x" % r.randrange(256) for _ in range(6))
+    return ":".join(f"{r.randrange(256):02x}" for _ in range(6))
 
 
 def gen_pkt(r, v4, v6, ports, macs):
@@ -70,6 +70,15 @@ def gen_pkt(r, v4, v6, ports, macs):
         arp[24:28] = r.choice(v4) if r.random() < 0.8 else r.randbytes(4)
         return bytes(eth + arp)
 
+    if roll < 0.97:  # non-IP ethertypes and 802.3 length fields
+        eth[12:14] = r.choice([0x88B5, 0x8100, 0x88A8, 0x8847, 0x0064, 0x0008]).to_bytes(
+            2, "big"
+        )
+        body = bytearray(r.randbytes(r.randrange(0, 60)))
+        if body:
+            body[0] = r.choice([100, 101, 0x42, 0xDC])
+        return bytes(eth + body)
+
     # Random / truncated frames.
     n = r.randrange(0, 70)
     return bytes(r.randbytes(n))
@@ -79,7 +88,6 @@ def gen_exprs(r, v4s, v6s, ports, macs):
     a = ipaddress.IPv4Address(r.choice(v4s)).exploded
     b = ipaddress.IPv4Address(r.choice(v4s)).exploded
     a6 = str(ipaddress.IPv6Address(r.choice(v6s)))
-    b6 = str(ipaddress.IPv6Address(r.choice(v6s)))
     p = r.choice(ports)
     p1, p2 = sorted(r.sample(ports, 2))
     m = r.choice(macs)
@@ -130,6 +138,13 @@ def gen_exprs(r, v4s, v6s, ports, macs):
         f"ip proto {r.choice([6, 17, 1, 132])}",
         f"ip6 proto {r.choice([6, 17, 58])}",
         f"ip src host {a}",
+        f"ether proto {r.choice(['0x88b5', '0x8100', '0x88a8', '0x8847', '0x0800', '0x86dd'])}",
+        "ether proto 100",
+        r"ether proto \ip",
+        r"ether proto \ip6",
+        r"ether proto \arp",
+        f"ether proto 0x88b5 or udp port {p}",
+        "ether proto 0x8100 or ether proto 0x88a8",
     ]
     return templates
 

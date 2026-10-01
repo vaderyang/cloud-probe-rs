@@ -449,7 +449,15 @@ release profile 用 `panic = "abort"`：**panic 是致命事件，不是可恢�
 * **支持**：`host`/`net`/`port`/`portrange`/`ether host`；`src`/`dst`（含 `tcp dst port 80`、
   `udp src port 53`、`ip src host X`、`ether src host MAC`）；
   `ip`/`ip6`/`arp`/`rarp`/`tcp`/`udp`/`icmp`/`icmp6`；`ip proto N`/`ip6 proto N`；
-  `and`/`or`/`not`/括号。
+  `ether proto ETHERTYPE`；`and`/`or`/`not`/括号。
+* **`ether proto ETHERTYPE`**（字段回归 `cloud-probe-rs-57d`）：接受数字（`0x` 十六进制、
+  前导 `0` 八进制、否则十进制，上限 `u32::MAX`）与 libpcap 的转义名 `\ip`/`\ip6`/`\arp`/`\rarp`。
+  数值 > 1500 编译为 `ldh [12]; jeq N`（与 libpcap 逐字节相同）；数值 ≤ 1500 时 libpcap 按 802.3
+  **长度字段**处理，改为先 `jgt 1500` 再比较偏移 14 的 LLC 字节（`ldb [14]; jeq N`），本实现照此复刻，
+  因此 `> 0xffff` 的值永不匹配，且 `ether proto 100` 不会被偏移 12 处的真实 ethertype 满足。
+  带 VLAN 标签的帧按原样匹配链路层 ethertype（`ether proto 0x8100`/`0x88a8` 匹配外层 tag），
+  不做 `vlan and ...` 的标签剥离；`ether[12:2] = N` 与 `\atalk`/`\ipx`/`\iso`/`\stp` 等
+  带 LLC 回退的名字**明确报错**（宁缺勿错）。
 * **语义对齐 tcpdump**：IPv6 分片头 `0x2c`、IPv4 分片偏移、bare `port` 含 SCTP、`net` 掩码；
   `host <name>` **与 `net <name>`** 解析出多个 A/AAAA 时按 **OR 展开全部地址**（不以首个为准；
   AUDIT4 P2-8 补齐 `net`，此前 P5-08 只做了 `host`，多宿主主机名仍会漏排除）。
@@ -462,7 +470,7 @@ release profile 用 `panic = "abort"`：**panic 是致命事件，不是可恢�
 * **长跳转**：条件跳转仅 255 指令距离，超出时由 `JA` 跳转中继（jump-around，32 位 k）
   自动处理，因此 `not host` 长链 / 多项 `port`/`host` 或链不再受此限制。
 * **不支持（明确报错）**：`vlan`/`mpls`/`pppoes`、`greater`/`less`/`len`、`protochain`、算术、
-  原始偏移（`byte`/`ether proto` 之外的偏移）、以及方向作用于 proto 之前的写法（`src tcp`）。
+  原始偏移（`ether[12:2]` 等；`ether proto` 现已支持）、以及方向作用于 proto 之前的写法（`src tcp`）。
 * **对拍**：`parity/verify_bpf.sh` 用 libpcap `pcap_offline_filter` 在同一批随机
   表达式/报文上逐包比较决策（`parity/c_bpf.c` + `bpf_eval`），生成器包含长链/方向语法用例。
 
