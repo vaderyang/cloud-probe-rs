@@ -144,6 +144,32 @@
 
 ---
 
+## 7. ✅ VM 现场验证（2026-10-01，yinjiao KVM 上的 Ubuntu 24.04 VM）
+
+为解决「本地环境无法执行」的遗留边界，在 yinjiao 的 KVM/libvirt 上建了一台 Ubuntu 24.04
+VM（8 vCPU / 16 GiB / NAT 网），串行完成四项现场验证：
+
+- **cgroup v1/v2 CPU 限额（bead `dz6`，4mv.5 遗留）**：VM 以
+  `systemd.unified_cgroup_hierarchy=0` 引导得到**纯 v1 布局**（无 `/sys/fs/cgroup/cgroup.controllers`，
+  `/sys/fs/cgroup/cpu/cpu.cfs_period_us` 存在），`cgroup_probe`（`crates/cpdaemon/examples/`）以
+  `version=auto`/`v1`/`v2` 分别建立真实 cgroup、写入 CFS 配额并启动 CPU-burner：v1 与 v2 均
+  **真实限流生效**（`cpu.cfs_period_us=100000`/`cpu.cfs_quota_us=50000`；v2 `cpu.max=50000 100000`；
+  burner 实测 ratio≈0.50–0.51，目标 0.5）。`auto` 在纯 v1 主机正确回退 v1。此前单测只覆盖
+  temp-root 布局，**从未碰过真实 cgroup 挂载**。
+- **DPDK pdump 运行时（bead `1eu`，4mv.1 遗留）**：VM 内装 DPDK 23.11.4，`cargo build
+  --features dpdk` 对 `libdpdk` **成功链接**（此前只做过 `cargo check`）；`dpdk-testpmd` 作 primary
+  （`--vdev=net_pcap0,rx_pcap=/tmp/in.pcap,infinite_rx=1`），本 port 的 `cpworker` 作 secondary，
+  `enter/exit rte_pdump_enable_bpf, port 0` → `create task-0 success` → 从 ring 出队并写出
+  **1.51 GB** pcap（magic 正确）。缺失的 `rte_ring_sc_dequeue_burst_elem`（`nm -D` 0 命中）由
+  新增 `crates/cpworker/src/capturer/dpdk_shim.c` 提供，`build.rs` 在 feature 打开时自动编译并链入。
+  （本环境无可绑定的物理口，端口用 `net_pcap` vdev；数据面、EAL、ring/mempool、pdump 协议均真实执行。）
+- **CPM mTLS 端到端（bead `1l4`，#232/§6）**：VM 内跑 `cpm_mtls`（真实 rustls 服务端
+  **要求客户端证书**，有 PKCS#12 时握手成功、无身份时被拒）与 `syncer_end_to_end`，全部通过
+  （2 + 5 tests）。
+- **H3/QUIC 现场流量（bead `mrp`，j36.4 遗留）**：VM 内用 aioquic 1.3.0 跑真实 HTTP/3
+  （`http3_server.py minimal_app:app` + `http3_client.py`，ALPN 协商为 `h3`，`GET /` 收到 11 字节响应），
+  同时用本 port 的 `cpworker` libpcap 在 `lo` 上抓 `udp port 4433`，**抓到 11 个 QUIC/UDP 帧**。
+
 ### 已闭环（无需现场，保留以备复核）
 
 - **「`af_packet_live` 特权执行」**、**「A1 loopback 重复帧」**、**「实时抓包吞吐/保真度门禁」**：

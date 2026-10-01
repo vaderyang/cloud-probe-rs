@@ -43,6 +43,14 @@ fn main() {
         Err(err) => return missing_dpdk(&err),
     };
 
+    // Compile the C shim that re-exports the DPDK helpers which exist only as
+    // `static inline` (see src/capturer/dpdk_shim.c). Emit its object *before*
+    // the DPDK libraries so the linker resolves the shim's own references to
+    // them. Only reached once `libdpdk` was found above.
+    if let Some(shim_obj) = compile_shim(libs.trim()) {
+        println!("cargo:rustc-link-arg={}", shim_obj.display());
+    }
+
     // Emit every pkg-config token as a raw linker argument, preserving order
     // (pkg-config emits `-L` before `-l`, and whole-archive wrappers in order
     // for a static link).
@@ -51,6 +59,46 @@ fn main() {
             println!("cargo:rustc-link-arg={token}");
         }
     }
+}
+
+/// Compile `src/capturer/dpdk_shim.c` into `$OUT_DIR/dpdk_shim.o` and return its
+/// path. Returns `None` (with a warning) when no C compiler is available, so a
+/// `CPRS_DPDK_ALLOW_MISSING=1` style compile check can still proceed.
+fn compile_shim(libs: &str) -> Option<std::path::PathBuf> {
+    use std::path::PathBuf;
+
+    let shim = "src/capturer/dpdk_shim.c";
+    println!("cargo:rerun-if-changed={shim}");
+    println!("cargo:rerun-if-env-changed=CC");
+
+    let out_dir = PathBuf::from(std::env::var("OUT_DIR").expect("OUT_DIR is set"));
+    let obj = out_dir.join("dpdk_shim.o");
+    let cc = std::env::var("CC").unwrap_or_else(|_| "cc".to_owned());
+    let cflags = pkg_config(&["--cflags", "libdpdk"]).unwrap_or_default();
+
+    let mut cmd = Command::new(&cc);
+    cmd.arg("-O2")
+        .arg("-fPIC")
+        .arg("-c")
+        .arg(shim)
+        .arg("-o")
+        .arg(&obj);
+    for token in cflags.split_whitespace() {
+        cmd.arg(token);
+    }
+    match cmd.status() {
+        Ok(status) if status.success() => {}
+        Ok(status) => panic!(
+            "failed to compile {shim}: `{cc}` exited with {status}. The `dpdk` \
+             feature needs a C compiler; set CC to override."
+        ),
+        Err(err) => panic!(
+            "failed to run `{cc}` to compile {shim}: {err}. The `dpdk` feature \
+             needs a C compiler; set CC to override."
+        ),
+    }
+    let _ = libs; // reserved for future link-order needs
+    Some(obj)
 }
 
 /// Run `pkg-config` and return its stdout, or an error describing why it

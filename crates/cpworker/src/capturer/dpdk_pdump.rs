@@ -31,22 +31,22 @@
 //! read it from JSON. The config surface is therefore kept *identical* to
 //! upstream — no new key is introduced.
 //!
-//! # Residual gaps (declarative port)
+//! # Runtime status (validated against real DPDK)
 //!
-//! DPDK development files are not present in the porting environment, so the
-//! `rte_*` layer could not be executed against a live device. It is written
-//! against the DPDK 21.11/22.11 ABI and compiled only with the feature on; the
-//! data path is not covered by tests and the primary-process monitor alarm is a
-//! best-effort port.
+//! The `rte_*` layer is compiled against the DPDK 21.11/22.11 ABI and has been
+//! **linked and executed against a live DPDK** (DPDK 23.11.4, Ubuntu 24.04 VM,
+//! bead `1eu`): `dpdk-testpmd` as the primary (a `net_pcap` vdev port) plus this
+//! capturer as a secondary captured through pdump into the output pcap. The
+//! primary-process monitor alarm remains a best-effort port.
 //!
-//! A direct link against a real DPDK tree is **not** possible from these
-//! declarations alone: `rte_ring_sc_dequeue_burst_elem` (like every other
-//! `rte_ring_*_dequeue_burst*` helper) is `static __rte_always_inline` in
-//! `rte_ring_elem.h` and is not exported by `librte_ring`. Running on a DPDK
-//! host additionally needs a small C shim that calls the inline helper (or an
-//! equivalent exported dequeue path). `rte_pktmbuf_pkt_len` is handled the same
-//! way by reading the documented `struct rte_mbuf` prefix directly. See
-//! `PARITY.md` §5.1 and the module tests for the exact boundaries.
+//! Direct linking is made possible by `dpdk_shim.c` (same directory), which
+//! re-exports the helpers DPDK keeps `static __rte_always_inline` — notably
+//! `rte_ring_sc_dequeue_burst_elem` (`rte_ring_elem.h`), which is not an
+//! exported `librte_ring` symbol (`nm -D`: zero hits). `build.rs` compiles the
+//! shim when the `dpdk` feature is enabled and links its object before the DPDK
+//! libraries, so `cargo build --features dpdk` links out of the box on a DPDK
+//! host. `rte_pktmbuf_pkt_len` is handled by reading the documented
+//! `struct rte_mbuf` prefix directly. See `PARITY.md` §5.1.
 
 // The pure layer is exercised by the unit tests and by the feature-gated
 // runtime. In a plain `cargo build` (no `test`, no `dpdk`) it has no caller, so

@@ -539,11 +539,14 @@ release profile 用 `panic = "abort"`：**panic 是致命事件，不是可恢�
 > `dpdk_capture_new_from_cfg`（interface/snaplen/bpf/ring_size、`pool_name`/`ring_name`、
 > `num_mbufs = 2 * ring_size`），其中 `promiscuous_mode = true` 是上游硬编码（`pdump.c:386`，
 > 即 `FIELD_CONFIRMATION.md` §2 的 promisc 结论），因此**不新增配置键**。EAL 参数、ring 2 的幂
-> 次取整、pdump flags 和错误路径为纯逻辑并有单测。**残留边界**：本环境无 DPDK 开发库，
-> `rte_*` 运行时层按 DPDK 21.11/22.11 ABI 声明（仅 feature 编译，通过 `cargo check`），
-> 数据面未在真实设备上执行；`rte_ring_sc_dequeue_burst_elem` 等 ring 出队函数在 DPDK 头文件中是
-> `static __rte_always_inline`、并非 `librte_ring` 导出符号，因此真正链接到 DPDK 主机时还需
-> 一个调用该内联函数的 C shim。上游从未调用的 `dpdk_init` 在本 port 中懒加载调用一次（否则
+> 次取整、pdump flags 和错误路径为纯逻辑并有单测。**运行时已在真实 DPDK 上验证（2026-10-01，bead `1eu`）**：
+> 在 yinjiao 的 Ubuntu 24.04 VM 装 DPDK 23.11.4，`--features dpdk` 可对 `libdpdk` **成功链接并运行**；
+> `crates/cpworker/src/capturer/dpdk_shim.c` 提供 `librte_ring` 未导出的 `static __rte_always_inline`
+> 出队符号（`rte_ring_sc_dequeue_burst_elem`，`nm -D` 实测 0 命中），`build.rs` 在 feature 打开时用
+> C 编译器编译该 shim 并置于 DPDK 库之前链入，因此 DPDK 主机上 `cargo build --features dpdk` 开箱即链。
+> 用 `dpdk-testpmd` 作 primary（`--vdev=net_pcap0,rx_pcap=...`）、本 port 的 `cpworker` 作 secondary，
+> pdump 数据面成功：`enter/exit rte_pdump_enable_bpf, port 0` → `create task-0 success`，从 ring 出队并
+> 写出 1.5 GB pcap。上游从未调用的 `dpdk_init` 在本 port 中懒加载调用一次（否则
 > secondary 进程无法工作），primary 监控 alarm 为尽力而为移植。
 
 > **已完成（bead 4mv.4）**：`ring_buffer.c` 的无锁 SPSC ring 已移植。实现用原子 `head`/`tail`

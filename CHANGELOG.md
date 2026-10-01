@@ -16,6 +16,23 @@ Two conventions worth knowing before reading:
 
 ### Added
 
+- **DPDK pdump 运行时可在真实 DPDK 上链接并运行（`cloud-probe-rs-1eu`）**：新增
+  `crates/cpworker/src/capturer/dpdk_shim.c`，以宏改名方式重导出 DPDK 头文件中
+  `static __rte_always_inline`、未被 `librte_ring` 导出的 `rte_ring_sc_dequeue_burst_elem`
+  （`nm -D` 实测 0 命中）；`crates/cpworker/build.rs` 在 `dpdk` feature 打开时用 C 编译器
+  （`CC` 可覆盖）编译该 shim 并将目标文件置于 DPDK 库之前链接，因此 DPDK 主机上
+  `cargo build --features dpdk` **开箱即链**（此前只做过 `cargo check`）。在 yinjiao 的 Ubuntu 24.04
+  VM（DPDK 23.11.4）上，用 `dpdk-testpmd` 作 primary、本 port 的 `cpworker` 作 secondary 跑通
+  pdump 数据面（`enter/exit rte_pdump_enable_bpf, port 0` → `create task-0 success`，写出 1.5 GB pcap）。
+  默认构建仍**零 DPDK 依赖**。见 `PARITY.md` §5.1、`FIELD_CONFIRMATION.md` §7。
+- **`cgroup_probe` 现场探针（`crates/cpdaemon/examples/cgroup_probe.rs`）**：对**真实** cgroup 挂载
+  按 `auto`/`v1`/`v2` 建立 cgroup、写入 CFS 配额、加进程并实测限流比，弥补既有单测只覆盖 temp-root
+  布局的空白。在 yinjiao VM（纯 cgroup v1 引导）上验证 v1/v2 均**真实限流生效**（ratio≈0.5）。
+  见 `FIELD_CONFIRMATION.md` §7。
+- **VM 现场验证（`dz6`/`1eu`/`1l4`/`mrp`）**：在 yinjiao KVM/libvirt 的 Ubuntu 24.04 VM 上完成
+  cgroup v1/v2、DPDK pdump 运行时、CPM mTLS 端到端（`cpm_mtls`+`syncer_end_to_end` 全过）、以及
+  真实 HTTP/3（aioquic，ALPN `h3`）抓包对照（cpworker 抓到 11 个 QUIC/UDP 帧）。
+
 - **混杂模式默认开启（`libpcap.promisc`，`cloud-probe-rs-sdt` / j36.2）**：新增可选
   `libpcap.promisc` 配置键，缺省 **`true`**。`AF_PACKET` 抓包器在 true 时
   `setsockopt(SOL_PACKET, PACKET_ADD_MEMBERSHIP, PACKET_MR_PROMISC)`；失败只打 WARN 并按旧的非混杂行为
