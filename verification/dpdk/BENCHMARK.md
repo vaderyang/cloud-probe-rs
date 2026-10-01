@@ -92,6 +92,31 @@ filtered in userspace. Same 64-byte flood (~117–135 Mpps on the wire):
   `AF_PACKET` socket serialises on the ring block lock (adding RX queues did not
   help — 4 queues stayed at ~2.45 Mpps).
 
+## DPDK pdump: the primary and the mempool, not just the capturer
+
+The first DPDK numbers above (4.3–5.9 Mpps) were **not** a fair measure of DPDK.
+Two things capped them:
+
+1. **The test primary was minimal** (`verification/dpdk/primary.c`): one RX queue,
+   `rte_eth_dev_configure` with `conf = {0}` (no RSS), one lcore. Without RSS the
+   PMD sends every frame to queue 0, so extra queues and lcores changed nothing.
+   With RSS enabled and one lcore per queue the primary receives **~95 Mpps** for
+   the same 64-byte flood (vs ~33 Mpps single-queue). pdump clones every frame
+   inside the RX callback, so this is what bounds a pdump secondary.
+2. **The pdump mbuf mempool was created with `ring_mp_sc`** (both here and in the
+   C upstream). `sc` is a *single-consumer* `get()`; with `RTE_PDUMP_ALL_QUEUES`
+   the primary's pdump callback allocates clones from that pool on one lcore per
+   RX queue, so several lcores `get()` concurrently and corrupt the pool —
+   handing malformed mbufs to the secondary and crashing it
+   (`SIGSEGV` in `__rte_pktmbuf_read`; the C upstream has the same latent bug).
+   DPDK's own `app/pdump` uses **`ring_mp_mc`** (`app/pdump/main.c`), which is what
+   `dpdk_pdump.rs` now uses too.
+
+With a 4-queue RSS primary and `ring_mp_mc`, cpworker's pdump secondary captures
+**~11.6 Mpps** (offered ~130 Mpps, primary RX ~50 Mpps) with no crash; the
+remaining gap is pdump's per-frame clone plus the shared ring, i.e. the
+mechanism — not DPDK's RX capability.
+
 ## Practical notes / pitfalls
 
 - The symptom "testpmd transmits N packets but tcpdump sees 0" is **not a wire

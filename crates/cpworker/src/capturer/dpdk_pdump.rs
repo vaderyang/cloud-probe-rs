@@ -434,6 +434,15 @@ mod runtime {
         let mut mp = unsafe { rte_mempool_lookup(name.as_ptr()) };
         if mp.is_null() {
             let data_room = unsafe { rte_pcapng_mbuf_size(opts.snaplen) };
+            // The pool must be multi-consumer, not `ring_mp_sc`. pdump allocates
+            // a clone (`rte_pktmbuf_copy`) for every frame inside the primary's
+            // RX callback, and with `RTE_PDUMP_ALL_QUEUES` that callback runs on
+            // one lcore per RX queue, so several lcores get() from this pool
+            // concurrently. An `sc` ring has a single-consumer get() and corrupts
+            // under that, handing malformed mbufs to this secondary (observed as
+            // a SIGSEGV in `__rte_pktmbuf_read` with a multi-queue primary). The
+            // C oracle's `ring_mp_sc` has the same latent bug; DPDK's own
+            // `app/pdump` uses `ring_mp_mc` (`app/pdump/main.c`).
             mp = unsafe {
                 rte_pktmbuf_pool_create_by_ops(
                     name.as_ptr(),
@@ -442,7 +451,7 @@ mod runtime {
                     0,
                     data_room as u16,
                     rte_socket_id() as c_int,
-                    c"ring_mp_sc".as_ptr(),
+                    c"ring_mp_mc".as_ptr(),
                 )
             };
             if mp.is_null() {
