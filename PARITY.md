@@ -536,6 +536,7 @@ release profile 用 `panic = "abort"`：**panic 是致命事件，不是可恢�
 | --- | --- | --- | --- |
 | DPDK capturer（`dpdk/pdump.c`） | C | 未 port，按类型返回不支持 | **计划移植**，仅在目标部署需要 `dpdk_pdump` 时实现；否则维持显式错误 |
 | `unix-manager` select 单线程语义 | `unix-manager.c` | 用“非阻塞 accept + 独立线程” | **计划移植**（可选）：当前与 C 行为对齐（1.5s 超时断开），仅在并发语义差异暴露时改 |
+| task reload 的 fingerprint 复用 / mailbox 协议 | `task.c` | 简化为重建全部 task | **计划移植**：行为等价但效率低；仅在 reload 抖动成为实际问题时实现 |
 | 无锁 ring buffer | `ring_buffer.c` | 语义等价的加锁实现 | **计划移植**（可选）：仅在 P3/性能复测显示锁成为瓶颈时实现 lock-free SPSC |
 | 其余 C/Go 单测移植 | 上游测试 | 部分已移植 | **持续**：随功能补齐同步移植向量 |
 

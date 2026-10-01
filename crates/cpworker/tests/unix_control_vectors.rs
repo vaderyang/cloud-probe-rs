@@ -13,16 +13,20 @@
 //! reload rebuilds the manager. The observable RPC value is covered by
 //! `test_info_command_handles_unset_config_path`.
 
+use std::io::{Read, Write};
 use std::os::fd::{AsRawFd, RawFd};
 use std::os::unix::net::UnixStream;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use parking_lot::Mutex;
 use serde_json::{json, Value};
 
 use cpworker::config::Config;
 use cpworker::task::TaskManager;
-use cpworker::unix_manager::{dispatch_command, set_send_timeout};
+use cpworker::unix_manager::{dispatch_command, set_send_timeout, UnixManager};
 
 fn manager(config_path: &str, working_dir: &str) -> Arc<Mutex<TaskManager>> {
     let cfg = Config::parse_str(r#"{"tasks":[]}"#).expect("minimal config");
@@ -206,4 +210,253 @@ fn test_send_timeout_fires_on_unread_peer() {
         timed_out,
         "send() should have returned EAGAIN once the buffer filled"
     );
+}
+
+// --- unix-manager: single-threaded poll() server semantics -------------------
+//
+// These drive a real [`UnixManager`] over a real `UnixStream` from test
+// threads. They pin the C reference's observable behaviour: one event loop
+// multiplexes every client, a newline-less command is abandoned after the
+// 1.5s window, a genuinely idle client is *kept* (C only times out partial
+// frames), and a client that stops draining its responses is dropped within
+// the 5s `SO_SNDTIMEO` budget.
+
+static SOCKET_SEQ: AtomicUsize = AtomicUsize::new(0);
+
+fn temp_socket(tag: &str) -> PathBuf {
+    let n = SOCKET_SEQ.fetch_add(1, Ordering::Relaxed);
+    let mut path = std::env::temp_dir();
+    path.push(format!(
+        "cpworker-test-{}-{tag}-{n}.sock",
+        std::process::id()
+    ));
+    path
+}
+
+/// Read exactly one newline-terminated frame, without over-buffering (a
+/// `BufReader` here could swallow the next reply).
+fn read_line(stream: &mut UnixStream) -> String {
+    let mut out = Vec::new();
+    let mut byte = [0u8; 1];
+    loop {
+        let n = stream.read(&mut byte).expect("read reply");
+        assert_ne!(n, 0, "unexpected EOF while reading a reply");
+        if byte[0] == b'\n' {
+            break;
+        }
+        out.push(byte[0]);
+    }
+    String::from_utf8(out).expect("utf8 reply")
+}
+
+fn read_reply(stream: &mut UnixStream) -> Value {
+    serde_json::from_str(&read_line(stream)).expect("json reply")
+}
+
+fn assert_ok(reply: &Value) {
+    assert_eq!(
+        reply.get("status").and_then(Value::as_str),
+        Some("OK"),
+        "reply: {reply}"
+    );
+}
+
+fn dial_and_handshake(path: &Path) -> UnixStream {
+    let mut stream = UnixStream::connect(path).expect("connect");
+    stream
+        .set_read_timeout(Some(Duration::from_secs(5)))
+        .expect("read timeout");
+    stream
+        .set_write_timeout(Some(Duration::from_secs(5)))
+        .expect("write timeout");
+    stream
+        .write_all(b"{\"version\":\"v1\"}\n")
+        .expect("handshake write");
+    assert_ok(&read_reply(&mut stream));
+    stream
+}
+
+fn start_server(tag: &str) -> (PathBuf, UnixManager) {
+    let path = temp_socket(tag);
+    let mgr = manager("", "");
+    let server = UnixManager::start(path.to_str().expect("utf8 path"), mgr).expect("start server");
+    (path, server)
+}
+
+#[test]
+fn test_server_serves_concurrent_clients() {
+    let (path, server) = start_server("concurrent");
+
+    let mut handles = Vec::new();
+    for client in 0..8u32 {
+        let path = path.clone();
+        handles.push(std::thread::spawn(move || {
+            let mut stream = dial_and_handshake(&path);
+            // Split the command across two writes: the event loop must
+            // reassemble it from its per-client buffer.
+            stream
+                .write_all(b"{\"command\":\"pi")
+                .expect("partial write");
+            std::thread::sleep(Duration::from_millis(20));
+            stream.write_all(b"ng\"}\n").expect("rest write");
+            let ping = read_reply(&mut stream);
+            assert_ok(&ping);
+            assert!(ping.get("ts_ms").is_some(), "client {client}");
+
+            stream
+                .write_all(b"{\"command\":\"info\"}\n")
+                .expect("info write");
+            assert_ok(&read_reply(&mut stream));
+        }));
+    }
+    for handle in handles {
+        handle.join().expect("client thread");
+    }
+    drop(server);
+}
+
+#[test]
+fn test_server_disconnects_partial_frame_after_idle_timeout() {
+    let (path, server) = start_server("partial");
+    let mut stream = dial_and_handshake(&path);
+
+    // A command without its terminating newline and then silence: C gives it
+    // 3 x 500ms, then closes without a reply.
+    stream
+        .write_all(b"{\"command\":\"ping\"")
+        .expect("partial command");
+    stream
+        .set_read_timeout(Some(Duration::from_secs(5)))
+        .expect("read timeout");
+
+    let start = Instant::now();
+    let mut buf = [0u8; 64];
+    let n = stream.read(&mut buf).expect("server must close, not hang");
+    assert_eq!(n, 0, "a stalled partial frame must be closed",);
+    let elapsed = start.elapsed();
+    assert!(
+        elapsed >= Duration::from_millis(1400),
+        "closed before the 1.5s window: {elapsed:?}"
+    );
+    assert!(
+        elapsed <= Duration::from_secs(3),
+        "closed far after the 1.5s window: {elapsed:?}"
+    );
+    drop(server);
+}
+
+#[test]
+fn test_server_keeps_idle_client_without_partial_frame() {
+    let (path, server) = start_server("idle");
+    let mut stream = dial_and_handshake(&path);
+
+    // No bytes at all for longer than the partial-frame window. C does not
+    // time out an idle client, and neither must the poll loop.
+    std::thread::sleep(Duration::from_millis(1800));
+    stream
+        .write_all(b"{\"command\":\"ping\"}\n")
+        .expect("ping write");
+    assert_ok(&read_reply(&mut stream));
+    drop(server);
+}
+
+#[test]
+fn test_server_disconnects_overlong_command() {
+    let (path, server) = start_server("overlong");
+    let mut stream = dial_and_handshake(&path);
+
+    // > `CLIENT_BUFFER_SIZE - 1` bytes with no newline. C disconnects rather
+    // than growing the buffer without bound.
+    let big = vec![b'A'; 5000];
+    let _ = stream.write_all(&big);
+    stream
+        .set_read_timeout(Some(Duration::from_secs(3)))
+        .expect("read timeout");
+
+    // Closing a socket with unread data makes Linux deliver ECONNRESET rather
+    // than a clean EOF; either is the required disconnect.
+    let mut buf = [0u8; 64];
+    match stream.read(&mut buf) {
+        Ok(0) => {}
+        Err(ref e) if e.kind() == std::io::ErrorKind::ConnectionReset => {}
+        other => panic!("over-long command must be closed, got {other:?}"),
+    }
+    drop(server);
+}
+
+#[test]
+fn test_server_drops_client_that_stops_reading() {
+    let (path, server) = start_server("send-timeout");
+    let mut stream = dial_and_handshake(&path);
+
+    // Shrink our receive buffer so the server's kernel send buffer fills long
+    // before the flood ends; a single small reply would otherwise be absorbed
+    // by the socket and never trip the write deadline.
+    let small: libc::c_int = 2048;
+    // SAFETY: `small` is a valid int socket option on `stream`.
+    unsafe {
+        libc::setsockopt(
+            stream.as_raw_fd(),
+            libc::SOL_SOCKET,
+            libc::SO_RCVBUF,
+            std::ptr::addr_of!(small).cast(),
+            std::mem::size_of::<libc::c_int>() as libc::socklen_t,
+        );
+    }
+
+    let mut writer = stream.try_clone().expect("clone");
+    // Flood until the server gives up; 6s bounds the test if it never does.
+    let flood = std::thread::spawn(move || {
+        writer
+            .set_write_timeout(Some(Duration::from_secs(10)))
+            .expect("write timeout");
+        let cmd = b"{\"command\":\"ping\"}\n";
+        let start = Instant::now();
+        let mut sent = 0u64;
+        while start.elapsed() < Duration::from_secs(6) {
+            match writer.write_all(cmd) {
+                Ok(()) => sent += 1,
+                // EPIPE/ECONNRESET: the server retired us.
+                Err(e) => return Some((sent, e)),
+            }
+        }
+        None
+    });
+
+    let outcome = flood.join().expect("flood thread");
+    assert!(
+        outcome.is_some(),
+        "server must drop a client that stops reading"
+    );
+    let (sent, err) = outcome.expect("checked above");
+    assert!(sent > 0, "flood should have made progress: {err}");
+
+    // The server is gone; drain the buffered replies until EOF.
+    stream
+        .set_read_timeout(Some(Duration::from_secs(5)))
+        .expect("read timeout");
+    let mut buf = [0u8; 8192];
+    let mut saw_eof = false;
+    let deadline = Instant::now() + Duration::from_secs(8);
+    while Instant::now() < deadline {
+        match stream.read(&mut buf) {
+            Ok(0) => {
+                saw_eof = true;
+                break;
+            }
+            Ok(_) => {}
+            Err(ref e)
+                if e.kind() == std::io::ErrorKind::WouldBlock
+                    || e.kind() == std::io::ErrorKind::TimedOut =>
+            {
+                break;
+            }
+            Err(_) => {
+                saw_eof = true;
+                break;
+            }
+        }
+    }
+    assert!(saw_eof, "server must have closed the connection");
+    drop(server);
 }
