@@ -20,6 +20,19 @@ evidence = [
 ]
 
 [[risk]]
+id = "RISK-CPM-MTLS"
+category = "security"
+priority = "P0"
+source = "SECURITY.md / PARITY.md §2.7 / cloud-probe-rs-ryg.2"
+description = "the probe must authenticate to a CPM that requires mutual TLS, and a wrong password/corrupt PKCS#12 must be rejected instead of silently running without an identity"
+evidence = [
+  "test:pkcs12_client_identity_is_presented_to_a_mtls_server",
+  "test:missing_client_identity_is_rejected_by_a_mtls_server",
+  "test:pkcs12_wrong_password_is_rejected",
+  "test:load_client_identity_reports_missing_file",
+]
+
+[[risk]]
 id = "RISK-UNTRUSTED-CONFIG"
 category = "security"
 priority = "P0"

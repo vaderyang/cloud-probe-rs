@@ -112,14 +112,19 @@ surface, not as tuning advice:
   certificate chains to a trusted root. Only if that is impossible should you set
   `cpm.client.tls.insecure_skip_verify: true`, which restores the MITM risk and is
   intended for test/legacy deployments.
-* **Known gap: mutual TLS (PKCS#12 client certificates) is not ported.** The keys
-  `cpm.client.tls.pkcs12_cert_file` / `pkcs12_cert_password` parse but are not yet
-  wired to reqwest/rustls (no built-in PKCS#12 decoder). Until then the CPM cannot
-  authenticate the probe with a client certificate; tracked as bead
-  `cloud-probe-rs-ryg.2`. Network-layer restrictions (dedicated management
-  network/VLAN, or a local reverse proxy that validates the upstream certificate)
-  still apply. Treat the CPM as an input source in your own threat model - its
-  responses drive task creation and BPF expressions on the probe.
+* **Mutual TLS (PKCS#12 client certificates) is supported (opt-in).** When
+  `cpm.client.tls.pkcs12_cert_file` is set, `cpdaemon` reads that PKCS#12
+  archive (`cpm.client.tls.pkcs12_cert_password` supplies the password), decodes
+  it with a pure-Rust decoder, and presents the enclosed certificate as its TLS
+  client identity - matching the Go oracle's `provider.go` behaviour
+  (`PARITY.md` §2.7). With no file configured the client sends no certificate,
+  which is the default. A wrong password or corrupt archive is a startup error,
+  not a silent fallback to an unauthenticated client. Keep the archive
+  read-only for the daemon's service account: it contains a private key.
+  Network-layer restrictions (dedicated management network/VLAN, or a local
+  reverse proxy that validates the upstream certificate) still apply. Treat the
+  CPM as an input source in your own threat model - its responses drive task
+  creation and BPF expressions on the probe.
 * `dockerpid`/`cripid` are invoked as helpers and parse container runtime state;
   they need read access to the Docker socket / CRI endpoint and nothing else.
 

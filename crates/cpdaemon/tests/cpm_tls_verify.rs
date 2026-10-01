@@ -112,6 +112,7 @@ fn client(base_url: &str, insecure_skip_verify: bool) -> HttpClient {
         ClientConfig {
             timeout: Duration::from_secs(5),
             insecure_skip_verify,
+            ..ClientConfig::default()
         },
     )
     .expect("http client")
