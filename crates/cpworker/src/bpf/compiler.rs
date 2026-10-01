@@ -25,6 +25,9 @@ const ETH_IP6: u32 = 0x86dd;
 const ETH_ARP: u32 = 0x0806;
 /// Ethernet RARP ethertype.
 const ETH_RARP: u32 = 0x8035;
+/// Largest value libpcap treats as an 802.3 *length* field rather than an
+/// ethertype (`0x05dc` = 1500). See [`Builder::emit_test`] for `EtherType`.
+const ETHERNET_8023_MAX: u32 = 0x05dc;
 /// IPv6 fragment-header next-header value.
 const IPPROTO_FRAGMENT: u32 = 0x2c;
 /// IPv4 fragment-offset mask in the flags/fragment field.
@@ -42,7 +45,7 @@ enum NExpr {
 /// A self-contained atomic packet test.
 #[derive(Debug)]
 enum Test {
-    EtherType(u16),
+    EtherType(u32),
     EtherHost {
         off: u16,
         mac: [u8; 6],
@@ -135,6 +138,7 @@ fn lower(ast: &Ast) -> Result<NExpr> {
         Ast::Or(a, b) => or(lower(a)?, lower(b)?),
         Ast::Not(a) => NExpr::Not(Box::new(lower(a)?)),
         Ast::Proto(p) => lower_proto(*p),
+        Ast::EtherProto { ethertype } => t(Test::EtherType(*ethertype)),
         Ast::IpProto { v6, num } => t(Test::L4Proto {
             v6: *v6,
             proto: *num,
@@ -154,10 +158,10 @@ fn lower(ast: &Ast) -> Result<NExpr> {
 
 fn lower_proto(p: Proto) -> NExpr {
     match p {
-        Proto::Ip => t(Test::EtherType(ETH_IP as u16)),
-        Proto::Ip6 => t(Test::EtherType(ETH_IP6 as u16)),
-        Proto::Arp => t(Test::EtherType(ETH_ARP as u16)),
-        Proto::Rarp => t(Test::EtherType(ETH_RARP as u16)),
+        Proto::Ip => t(Test::EtherType(ETH_IP)),
+        Proto::Ip6 => t(Test::EtherType(ETH_IP6)),
+        Proto::Arp => t(Test::EtherType(ETH_ARP)),
+        Proto::Rarp => t(Test::EtherType(ETH_RARP)),
         Proto::Tcp => or(
             t(Test::L4Proto {
                 v6: false,
@@ -514,7 +518,20 @@ impl Builder {
         match test {
             Test::EtherType(et) => {
                 self.emit(LD_H_ABS, 12);
-                self.jump(JMP_JEQ_K, u32::from(*et), m, n);
+                if *et > ETHERNET_8023_MAX {
+                    self.jump(JMP_JEQ_K, *et, m, n);
+                } else {
+                    // libpcap reads an `ether proto` value <= 1500 as an 802.3
+                    // *length* and compares the LLC byte at offset 14 instead of
+                    // the frame's ethertype. Reproduced here so a numeric value
+                    // decides identically to `pcap_offline_filter` (values above
+                    // 0xff can never match, exactly as in libpcap).
+                    let not_length = self.new_label();
+                    self.branch(JMP_JGT_K, ETHERNET_8023_MAX, n, not_length);
+                    self.bind(not_length);
+                    self.emit(LD_B_ABS, 14);
+                    self.jump(JMP_JEQ_K, *et, m, n);
+                }
             }
             Test::EtherHost { off, mac } => {
                 self.emit(LD_H_ABS, u32::from(*off));
@@ -1263,6 +1280,58 @@ mod tests {
             "rarp",
             "ldh 0 0 12 | jeq 0 1 32821 | ret 0 0 262144 | ret 0 0 0",
         );
+        // `ether proto N` for N > 1500 is the same straight compare libpcap emits.
+        assert_disasm(
+            "ether proto 0x88b5",
+            "ldh 0 0 12 | jeq 0 1 34997 | ret 0 0 262144 | ret 0 0 0",
+        );
+        // For N <= 1500 libpcap treats N as an 802.3 length and compares the LLC
+        // byte at offset 14; the length gate must be part of the encoding.
+        assert_disasm(
+            "ether proto 100",
+            "ldh 0 0 12 | jgt 3 0 1500 | ldb 0 0 14 | jeq 0 1 100 | ret 0 0 262144 | ret 0 0 0",
+        );
+    }
+
+    /// `ether proto` regression for the field report. The exact ethertype from
+    /// the rejected config is matched, the named escapes agree with their
+    /// numeric form, and the 802.3-length quirk decides like libpcap.
+    #[test]
+    fn ether_proto_matches_ethertype_and_8023_length() {
+        let tagged = eth(0x88b5);
+        assert!(apply("ether proto 0x88b5", &tagged));
+        assert!(!apply("ether proto 0x88b6", &tagged));
+        assert!(apply("ether proto 0x88b5 or ether proto 0x0800", &tagged));
+
+        let ip = ipv4([1, 1, 1, 1], [2, 2, 2, 2], 6, &tcp_l4(1, 2));
+        assert!(apply(r"ether proto \ip", &ip));
+        assert!(!apply(r"ether proto \ip6", &ip));
+        assert!(apply("ether proto 0x0800", &ip));
+
+        // The composite shape from the field report must compile. `qinq`
+        // ethertypes are included to pin the VLAN-tagged link-layer values.
+        let expr =
+            "ether proto 0x88b5 or ether proto 0x0800 or ether proto 0x8100 or ether proto 0x88a8";
+        assert!(apply(expr, &tagged));
+        assert!(apply(expr, &ip));
+        assert!(apply(expr, &eth(0x8100)));
+        assert!(apply(expr, &eth(0x88a8)));
+        assert!(!apply(expr, &eth(0x0806)));
+
+        // libpcap reads a value <= 1500 as an 802.3 length and compares the byte
+        // at offset 14; a real ethertype at offset 12 must not satisfy it.
+        let mut length = vec![0u8; 20];
+        length[12..14].copy_from_slice(&100u16.to_be_bytes());
+        length[14] = 100;
+        assert!(apply("ether proto 100", &length));
+        length[14] = 101;
+        assert!(!apply("ether proto 100", &length));
+        let mut not_length = vec![0u8; 20];
+        not_length[12..14].copy_from_slice(&0x88b5u16.to_be_bytes());
+        not_length[14] = 100;
+        assert!(!apply("ether proto 100", &not_length));
+        // > 0xffff can never equal a 16-bit load, exactly like libpcap.
+        assert!(!apply("ether proto 0x10000", &tagged));
     }
 
     #[test]

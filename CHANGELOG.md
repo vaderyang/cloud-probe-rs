@@ -29,6 +29,16 @@ Two conventions worth knowing before reading:
   `live_capture_promisc_joins_membership_and_takes_foreign_mac`（`IFF_PROMISC` 随 socket 建立/关闭置清，
   物理 NIC 上断言非本机 MAC 帧在非混杂下不被投递；veth 不建模 RX 过滤，已文档化）。见 `PARITY.md` §2.5、
   `FIELD_CONFIRMATION.md` §2/§4。
+- **BPF `ether proto <ethertype>`**（`cloud-probe-rs-57d`，字段回归；`PARITY.md` §4 BPF 子集）：
+  纯 Rust BPF 编译器现在接受 `ether proto 0x88b5` 这类 libpcap/`tcpdump` 语法，而不再以
+  `expected 'host' after 'ether'` 拒绝整个任务（现场发现：`bpf='ether proto 0x88b5 or ...'`
+  导致 init 0 tasks）。数字按 libpcap 规则解析为 base-0（`0x` 十六进制、前导 `0` 八进制、否则十进制，
+  上限 `u32::MAX`），并接受 `\ip`/`\ip6`/`\arp`/`\rarp` 转义名。数值 > 1500 编译为
+  `ldh [12]; jeq N`；≤ 1500 时与 libpcap 一致按 802.3 长度字段处理（先 `jgt 1500`，再比较偏移 14
+  的 LLC 字节）。测试：`bpf::parser::tests::parses_ether_proto_numeric_and_named`、
+  `ether_proto_number_base_zero`、`bpf::compiler::tests::ether_proto_matches_ethertype_and_8023_length`
+  与 golden `golden_protocol_and_ethertype`；`parity/verify_bpf.sh` 生成器新增这些表达式/帧，
+  与 libpcap `pcap_offline_filter` 逐包一致。
 
 - **CPM mTLS 客户端证书（PKCS#12）**（`cloud-probe-rs-ryg.2`，`PARITY.md` §2.7 / `SECURITY.md`）：
   当 `cpm.client.tls.pkcs12_cert_file` 非空时，用纯 Rust `p12` crate 解码 PKCS#12（仅

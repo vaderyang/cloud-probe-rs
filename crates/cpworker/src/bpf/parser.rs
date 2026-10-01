@@ -15,9 +15,10 @@
 //!                  | 'net' NET
 //!                  | 'port' NUM
 //!                  | 'portrange' NUM '-' NUM
-//!                  | 'ether' 'host' MAC )
+//!                  | 'ether' 'host' MAC | 'ether' 'proto' ETHERTYPE )
 //!              | PROTO [ 'host' ADDR | 'net' NET | 'port' NUM | 'portrange' NUM '-' NUM ]
 //! PROTO       := ip | ip6 | arp | rarp | tcp | udp | icmp | icmp6
+//! ETHERTYPE   := NUM | '\ip' | '\ip6' | '\arp' | '\rarp'
 //! ```
 
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, ToSocketAddrs};
@@ -101,6 +102,16 @@ pub enum Ast {
         dir: Dir,
         /// 6-byte MAC address.
         mac: [u8; 6],
+    },
+    /// `ether proto ETHERTYPE`
+    ///
+    /// The value is the ethertype half-word at offset 12 (or, for a value that
+    /// looks like an 802.3 length, the LLC byte at offset 14 - see
+    /// [`super::compiler`]). It is a `u32` because libpcap accepts the full
+    /// 32-bit numeric range for `ether proto`, not just 16 bits.
+    EtherProto {
+        /// Ethertype / protocol value.
+        ethertype: u32,
     },
     /// `[src|dst] [proto] host ADDR`
     Host {
@@ -403,13 +414,22 @@ impl<'a> Parser<'a> {
                 } else {
                     Dir::Either
                 };
-                if !self.eat("host") {
-                    return Err(Error::new("expected 'host' after 'ether'"));
+                if self.eat("host") {
+                    return Ok(Ast::EtherHost {
+                        dir: edir,
+                        mac: self.parse_mac()?,
+                    });
                 }
-                Ok(Ast::EtherHost {
-                    dir: edir,
-                    mac: self.parse_mac()?,
-                })
+                if self.eat("proto") {
+                    if edir != Dir::Either {
+                        // libpcap rejects `ether src proto` / `ether dst proto`.
+                        return Err(Error::new("src/dst not valid with 'ether proto'"));
+                    }
+                    return Ok(Ast::EtherProto {
+                        ethertype: self.parse_ethertype()?,
+                    });
+                }
+                Err(Error::new("expected 'host' or 'proto' after 'ether'"))
             }
             _ => {
                 let Some(proto) = proto_from_keyword(&kw) else {
@@ -534,6 +554,21 @@ impl<'a> Parser<'a> {
         parse_mac(&t)
     }
 
+    /// Parse the value of `ether proto`: a base-0 integer (hex `0x`, octal with a
+    /// leading `0`, otherwise decimal) up to `u32::MAX`, or one of the
+    /// `\ip`/`\ip6`/`\arp`/`\rarp` escapes libpcap accepts for the common named
+    /// ethertypes.
+    fn parse_ethertype(&mut self) -> Result<u32> {
+        let t = self
+            .next()
+            .ok_or_else(|| Error::new("missing ether proto value"))?;
+        if let Some(name) = t.strip_prefix('\\') {
+            return named_ethertype(name)
+                .ok_or_else(|| Error::new(format!("unknown ether proto '\\{name}'")));
+        }
+        parse_u32_base0(&t).ok_or_else(|| Error::new(format!("invalid ether proto '{t}'")))
+    }
+
     /// Resolve a token to *all* of its addresses (deduplicated, deterministic
     /// order, bounded by [`MAX_RESOLVED_ADDRS`]).
     ///
@@ -632,6 +667,43 @@ impl<'a> Parser<'a> {
             "net '{t}' needs a /prefix or an explicit 'mask'"
         )))
     }
+}
+
+/// Named ethertypes accepted after `ether proto \...`.
+///
+/// Only the names libpcap lowers to a *single* ethertype comparison are
+/// accepted. libpcap also accepts `\atalk`/`\ipx`/`\aarp`/`\iso`/`\stp`/
+/// `\netbeui`, whose lowering adds 802.3/LLC fallbacks this subset does not
+/// implement; those are refused rather than compiled to something that matches
+/// differently.
+fn named_ethertype(name: &str) -> Option<u32> {
+    Some(match name {
+        "ip" => 0x0800,
+        "ip6" => 0x86dd,
+        "arp" => 0x0806,
+        "rarp" => 0x8035,
+        _ => return None,
+    })
+}
+
+/// Parse an unsigned 32-bit integer the way libpcap does for `ether proto`:
+/// `0x`/`0X` hex, a leading `0` octal, otherwise decimal. Rejects signs, empty
+/// input, a lone `0x`, trailing garbage and values above `u32::MAX`.
+fn parse_u32_base0(t: &str) -> Option<u32> {
+    if t.is_empty() || t.starts_with(['-', '+']) {
+        return None;
+    }
+    let (digits, radix) = if let Some(h) = t.strip_prefix("0x").or_else(|| t.strip_prefix("0X")) {
+        (h, 16)
+    } else if t.len() > 1 && t.starts_with('0') {
+        (&t[1..], 8)
+    } else {
+        (t, 10)
+    };
+    if digits.is_empty() {
+        return None;
+    }
+    u32::from_str_radix(digits, radix).ok()
 }
 
 fn proto_from_keyword(kw: &str) -> Option<Proto> {
@@ -903,6 +975,64 @@ mod tests {
         assert!(parse("src ether host 00:11:22:33:44:55").is_err());
     }
 
+    /// Field regression: `ether proto 0x88b5 or ...` used to be a hard error
+    /// ("expected 'host' after 'ether'"), which rejected the whole task even
+    /// though libpcap accepts it. The value is a full 32-bit base-0 integer, and
+    /// the `\name` escapes libpcap uses for named ethertypes are accepted too.
+    #[test]
+    fn parses_ether_proto_numeric_and_named() {
+        assert!(matches!(
+            parse("ether proto 0x88b5").unwrap(),
+            Ast::EtherProto { ethertype: 0x88b5 }
+        ));
+        assert!(matches!(
+            parse("ether proto 0x88b5 or ether proto 0x0800").unwrap(),
+            Ast::Or(..)
+        ));
+        for (expr, want) in [
+            ("ether proto 0x0800", 0x0800u32),
+            ("ether proto 2048", 2048),
+            ("ether proto 010", 8), // libpcap reads a leading 0 as octal
+            ("ether proto 0X88B5", 0x88b5),
+            ("ether proto 0", 0),
+            ("ether proto 1500", 1500),
+            ("ether proto 1501", 1501),
+            ("ether proto 0xffffffff", u32::MAX),
+            (r"ether proto \ip", 0x0800),
+            (r"ether proto \ip6", 0x86dd),
+            (r"ether proto \arp", 0x0806),
+            (r"ether proto \rarp", 0x8035),
+        ] {
+            match parse(expr).unwrap() {
+                Ast::EtherProto { ethertype } => assert_eq!(ethertype, want, "{expr}"),
+                other => panic!("{expr}: expected EtherProto, got {other:?}"),
+            }
+        }
+        // Direction is not valid with `ether proto` (libpcap rejects it too).
+        assert!(parse("ether src proto 0x88b5").is_err());
+        assert!(parse("ether dst proto 0x88b5").is_err());
+        assert!(parse("src ether proto 0x88b5").is_err());
+    }
+
+    /// The base-0 numeric rule matches libpcap's `gen_ncode`: hex `0x`, a leading
+    /// `0` for octal, decimal otherwise; signs and out-of-range values rejected.
+    #[test]
+    fn ether_proto_number_base_zero() {
+        assert_eq!(parse_u32_base0("0"), Some(0));
+        assert_eq!(parse_u32_base0("10"), Some(10));
+        assert_eq!(parse_u32_base0("010"), Some(8));
+        assert_eq!(parse_u32_base0("08"), None);
+        assert_eq!(parse_u32_base0("0x10"), Some(16));
+        assert_eq!(parse_u32_base0("0X10"), Some(16));
+        assert_eq!(parse_u32_base0("0x"), None);
+        assert_eq!(parse_u32_base0("0xffffffff"), Some(u32::MAX));
+        assert_eq!(parse_u32_base0("0x100000000"), None);
+        assert_eq!(parse_u32_base0("-1"), None);
+        assert_eq!(parse_u32_base0("+1"), None);
+        assert_eq!(parse_u32_base0("1.5"), None);
+        assert_eq!(parse_u32_base0(""), None);
+    }
+
     #[test]
     fn host_name_expands_to_every_resolved_address() {
         fn collect(ast: &Ast, out: &mut Vec<IpAddr>) {
@@ -1149,6 +1279,14 @@ mod tests {
             "net 10.0.0.0/abc",
             "ether",
             "ether foo",
+            "ether proto",
+            "ether proto foo",
+            "ether proto 0x",
+            "ether proto 0x100000000",
+            "ether proto -1",
+            "ether proto 08",
+            "ether proto 1.5",
+            r"ether proto \atalk",
             "ether host 00:11:22:33:44",
             "ether host zz:11:22:33:44:55",
             "src ether host 00:11:22:33:44:55",
