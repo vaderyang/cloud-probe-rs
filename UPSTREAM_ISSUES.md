@@ -24,6 +24,14 @@
 
 （已报过的：[#231](https://github.com/Netis/cloud-probe/issues/231) ZMQ VLAN 越界。）
 
+## 已提交的上游 issue（2026-10-01，DPDK 现场测试发现）
+
+| # | 主题 | 上游链接 |
+|---|---|---|
+| S4-1 | DPDK pdump 克隆内存池用 `ring_mp_sc`（单消费者 get）：`RTE_PDUMP_ALL_QUEUES` 下多队列 primary 并发分配 → 池损坏 → 二级 `__rte_pktmbuf_read` SIGSEGV | [#286](https://github.com/Netis/cloud-probe/issues/286) |
+
+本地已修复（改用 `ring_mp_mc`，与 DPDK 自带 `app/pdump` 一致；提交 `00cf775`）。复现/实测见 `verification/dpdk/BENCHMARK.md`。
+
 ---
 
 ## 上游处置状态（核对：2026-10-01）
