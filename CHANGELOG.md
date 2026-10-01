@@ -16,6 +16,19 @@ Two conventions worth knowing before reading:
 
 ### Added
 
+- **DPDK pdump capturer（bead 4mv.1，`PARITY.md` §5.1）**：`dpdk/pdump.c` 已移植到
+  `crates/cpworker/src/capturer/dpdk_pdump.rs`，由 Cargo feature `dpdk` 门控。默认
+  `cargo build` 完全不依赖 DPDK：`dpdk_pdump` 配置照常解析，但 `open()` 返回明确的
+  「built without the `dpdk` feature」错误；`--features dpdk` 时 `build.rs` 用上游相同的
+  `pkg-config libdpdk` 检查并给出安装提示。选项映射逐字段对齐
+  `dpdk_capture_new_from_cfg`（`interface`/`snaplen`/`bpf`/`ring_size`、`pool_name`= `cpworker_capture_mbufs`、
+  `ring_name` = `cpworker_capture_ring`、`num_mbufs = 2 * ring_size`），`promiscuous_mode = true`
+  为上游硬编码（`pdump.c:386`，即 `FIELD_CONFIRMATION.md` §2 的 promisc 结论），因此**不新增
+  配置键**。EAL 参数、ring 2 的幂次取整、pdump flags、默认值与错误路径有单测
+  （`capturer::dpdk_pdump::tests`，含无 feature 的 gate 错误）。**残留边界**：本环境无 DPDK
+  开发库，`rte_*` 运行时层按 DPDK 21.11/22.11 导出符号声明（仅 feature 编译，`cargo check` /
+  `clippy --features dpdk` 通过），数据面未在真实设备上执行；上游从未调用的 `dpdk_init`
+  在本 port 懒加载调用一次，primary 监控 alarm 为尽力而为移植。
 - **CPM mTLS 客户端证书（PKCS#12）**（`cloud-probe-rs-ryg.2`，`PARITY.md` §2.7 / `SECURITY.md`）：
   当 `cpm.client.tls.pkcs12_cert_file` 非空时，用纯 Rust `p12` crate 解码 PKCS#12（仅
   `PBE-SHA1-RC2-40` / `PBE-SHA1-3DES`，与 oracle 的 `golang.org/x/crypto/pkcs12` 支持范围一致），
