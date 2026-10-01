@@ -16,6 +16,14 @@ Two conventions worth knowing before reading:
 
 ### Added
 
+- **CPM mTLS 客户端证书（PKCS#12）**（`cloud-probe-rs-ryg.2`，`PARITY.md` §2.7 / `SECURITY.md`）：
+  当 `cpm.client.tls.pkcs12_cert_file` 非空时，用纯 Rust `p12` crate 解码 PKCS#12（仅
+  `PBE-SHA1-RC2-40` / `PBE-SHA1-3DES`，与 oracle 的 `golang.org/x/crypto/pkcs12` 支持范围一致），
+  校验 MAC 后把证书链与 PKCS#8 私钥 PEM 包装成 `reqwest::Identity` 并作为客户端身份发送；密码错误 /
+  损坏档案 / 缺文件在启动时报错，不会静默回退成无客户端证书。未配置该键时行为不变（默认不发送客户端证书），
+  ryg.1 的服务端证书默认校验也保持不变。测试：`crates/cpdaemon/tests/cpm_mtls.rs` 用**要求客户端证书的
+  rustls 服务端**证明握手成功且服务端观察到该叶子证书，未配置时同一服务端拒绝握手；
+  `client.rs` 单测覆盖解码、错误密码与 PEM 包装。
 - **Verification Coverage 体系**（决策记录 [ADR-0001](docs/adr/0001-verification-coverage.md)，
   细节 [VERIFICATION_COVERAGE.md](VERIFICATION_COVERAGE.md)）：按风险分层的覆盖率策略
   （Tier 0/1/2/3 目标 line 95/90/80/60、关键函数 100% function coverage、变更行 line 90%/branch 85%、

@@ -26,6 +26,13 @@ parking_lot.workspace = true
 nix.workspace = true
 log.workspace = true
 cpgolib = { path = "../cpgolib" }
+# PKCS#12 client identity (mTLS). `p12` is the pure-Rust decoder for the legacy
+# PBE-SHA1-RC2-40 / PBE-SHA1-3DES schemes that the Go oracle's
+# `golang.org/x/crypto/pkcs12` also accepts; `base64` only wraps the decoded DER
+# into the PEM that `reqwest::Identity::from_pem` (rustls) requires. Both are
+# MIT OR Apache-2.0, so they pass the deny.toml licence allow-list.
+p12 = "0.6"
+base64 = "0.22"
 
 [dev-dependencies]
 # Drives the real `cpworker` binary from the end-to-end tests under `tests/`.

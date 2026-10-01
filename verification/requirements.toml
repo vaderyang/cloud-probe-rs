@@ -244,6 +244,21 @@ tests = [
 ]
 
 [[requirement]]
+id = "REQ-CPDAEMON-CPM-MTLS"
+priority = "P0"
+source = "SECURITY.md / PARITY.md §2.7 / cloud-probe-rs-ryg.2"
+scenario = "when cpm.client.tls.pkcs12_cert_file is set, present that PKCS#12 certificate as the mTLS client identity; no identity by default"
+state_transition = "no identity (server rejects) -> PKCS#12 configured -> identity presented and handshake accepted"
+tests = [
+  "pkcs12_client_identity_is_presented_to_a_mtls_server",
+  "missing_client_identity_is_rejected_by_a_mtls_server",
+  "pkcs12_archive_builds_client_identity",
+  "pkcs12_wrong_password_is_rejected",
+  "load_client_identity_reports_missing_file",
+  "cpm_client_pkcs12_fields_map_to_client_config",
+]
+
+[[requirement]]
 id = "REQ-CPDAEMON-WORKER"
 priority = "P0"
 source = "AUDIT4 / REVIEW_CPDAEMON_TESTS.md (DS-3)"

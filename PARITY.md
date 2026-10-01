@@ -358,10 +358,12 @@ Rust 移植**有意偏离**该行为，改为安全默认：
 | 项 | Go oracle | Rust（本仓库） | 性质 |
 |---|---|---|---|
 | CPM 服务端证书校验 | 硬编码 `InsecureSkipVerify: true`，无开关 | **默认校验**；`cpm.client.tls.insecure_skip_verify: true` 才显式关闭（映射到 reqwest `danger_accept_invalid_certs`） | **有意分歧（安全修复）**：默认即安全；需要连接不受信证书的测试/遗留环境可显式降级 |
-| mTLS 客户端证书（PKCS#12） | 配置了 `cpm.client.tls.pkcs12_cert_file` 时用 PKCS#12 做客户端证书（`provider.go:116`） | 键仍可解析但**尚未接线**（reqwest/rustls 无内建 PKCS#12 解码器），列为独立后续 `cloud-probe-rs-ryg.2` | 未移植项（见 §5.1） |
+| mTLS 客户端证书（PKCS#12） | 配置了 `cpm.client.tls.pkcs12_cert_file` 时用 PKCS#12 做客户端证书（`provider.go:116`） | **已移植**（`ryg.2`）：配置非空时用纯 Rust `p12` crate 解码 PKCS#12（仅 PBE-SHA1-RC2-40 / PBE-SHA1-3DES，与 `golang.org/x/crypto/pkcs12` 能力一致），再用 `base64` 包成 PEM 交给 `reqwest::Identity::from_pem`；未配置时**不发送**客户端证书 | 与 oracle 等价（解码器支持同一组旧 PBE 算法；无法解码现代 PBES2/AES 与 oracle 行为一致） |
 
 行为由 `crates/cpdaemon/tests/cpm_tls_verify.rs` 用**真实自签 TLS 服务端**固定：默认客户端
-握手失败（服务端未完成握手），`insecure_skip_verify = true` 时同一请求成功。
+握手失败（服务端未完成握手），`insecure_skip_verify = true` 时同一请求成功；mTLS 由
+`crates/cpdaemon/tests/cpm_mtls.rs` 用**要求客户端证书的 rustls 服务端**固定：配置 PKCS#12 时
+握手成功且服务端观察到该叶子证书，未配置时同一服务端拒绝握手。
 
 ## 3. 关键一致性向量（已通过）
 
