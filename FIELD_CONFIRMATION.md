@@ -13,6 +13,12 @@
 - **为什么重要**：决定 P5-01/P5-06（BPF 编译器覆盖面）是「发布阻塞」还是「文档说明即可」。
   目前的 tcpdump 子集已支持 `host/net/port/portrange/proto`、`[src|dst]`、`ether host`、
   `ip proto`、`and/or/not`、括号、长跳转链；不支持清单见 `PARITY.md §4`。
+  **逐条支持/缺口对照表（含 oracle 列、示例与回归用例）见
+  [`docs/BPF_COMPAT.md`](docs/BPF_COMPAT.md)**：任何现场表达式都可据此直接判定接受/拒绝，
+  无需等待去敏样本即可先给出结论。
+- **已交付（能力侧，2026-10）**：`docs/BPF_COMPAT.md` + `crates/cpworker/tests/bpf_compat.rs`
+  把矩阵固化成表驱动回归（每个支持项都有 accept/reject 报文；缺口项锁定为硬报错）。
+  现场样本到位后只需核对 §3 缺口是否被实际使用。
 - **如何采集**：向 CPM 侧取一份「策略里出现过的 bpf 字段」的去重列表 + 出现次数。
 - **解锁决策**：是否需要补齐不支持的语法，或仅在文档/启动日志中对不支持的表达式给出明确告警。
 

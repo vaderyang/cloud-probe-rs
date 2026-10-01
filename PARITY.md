@@ -471,7 +471,10 @@ release profile 用 `panic = "abort"`：**panic 是致命事件，不是可恢�
 * **长跳转**：条件跳转仅 255 指令距离，超出时由 `JA` 跳转中继（jump-around，32 位 k）
   自动处理，因此 `not host` 长链 / 多项 `port`/`host` 或链不再受此限制。
 * **不支持（明确报错）**：`vlan`/`mpls`/`pppoes`、`greater`/`less`/`len`、`protochain`、算术、
-  原始偏移（`ether[12:2]` 等；`ether proto` 现已支持）、以及方向作用于 proto 之前的写法（`src tcp`）。
+  原始偏移（`ether[..]`/`ip[..]`/`tcp[..]`）与裸 `proto N`（`ip proto N`/`ip6 proto N` 是支持的）、
+  `src or dst`/`src and dst`、无前缀的类式 `net 10.0.0.0`、`broadcast`/`multicast`，以及方向作用于
+  proto 之前的写法（`src tcp`，libpcap 同样拒绝）。（`ether proto <ethertype>` 现已支持，见上。）
+  **逐条支持/缺口对照表见 [`docs/BPF_COMPAT.md`](docs/BPF_COMPAT.md)（含 oracle 列与回归用例）。**
 * **对拍**：`parity/verify_bpf.sh` 用 libpcap `pcap_offline_filter` 在同一批随机
   表达式/报文上逐包比较决策（`parity/c_bpf.c` + `bpf_eval`），生成器包含长链/方向语法用例。
 
