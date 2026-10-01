@@ -16,6 +16,12 @@ path = "src/main.rs"
 name = "cpworker"
 path = "src/lib.rs"
 
+[features]
+# DPDK `pdump` capturer (`dpdk/pdump.c`). Off by default: the default build has
+# no DPDK dependency at all. Enabling it requires DPDK (`pkg-config libdpdk`)
+# and is checked by `build.rs`.
+dpdk = []
+
 [dependencies]
 anyhow.workspace = true
 clap.workspace = true

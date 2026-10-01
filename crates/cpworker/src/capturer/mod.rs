@@ -2,12 +2,13 @@
 
 #[cfg(target_os = "linux")]
 pub mod af_packet;
+pub mod dpdk_pdump;
 pub mod pcap_file;
 
 use std::sync::Arc;
 
 use crate::config::{CapturerKind, TaskConfig};
-use crate::error::{Error, Result};
+use crate::error::Result;
 use crate::stats::CaptureStats;
 
 pub use crate::output::PacketHeader;
@@ -47,14 +48,14 @@ pub fn new_capturer(
             #[cfg(not(target_os = "linux"))]
             {
                 let _ = (tasks, task, c, stats);
-                Err(Error::new("live capture is not supported on this platform"))
+                Err(crate::error::Error::new(
+                    "live capture is not supported on this platform",
+                ))
             }
         }
         CapturerKind::PcapFile(c) => {
             pcap_file::PcapFileCapturer::new(tasks, task, c, stats).map(|c| Box::new(c) as _)
         }
-        CapturerKind::DpdkPdump(_) => Err(Error::new(
-            "dpdk_pdump capturer is not implemented in this port (PARITY.md §5.1); use the libpcap capturer",
-        )),
+        CapturerKind::DpdkPdump(c) => dpdk_pdump::new(tasks, task, c, stats),
     }
 }

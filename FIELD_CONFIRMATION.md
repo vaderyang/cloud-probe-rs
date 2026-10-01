@@ -39,6 +39,9 @@
     只抓到 300 帧（无 VLAN），与 cpworker（不设 promisc）**完全一致**。
     → **promisc 不是纯 parity 问题，而是 trunk/SPAN 场景的功能正确性前提**：
     C libpcap 硬编码 `promisc=0`，在带 VLAN 的镜像口会**丢带标签流量**，与本移植一致但均不完整。
+  - **DPDK pdump 路径已实现（bead 4mv.1，`capturer/dpdk_pdump.rs`）**：该路径上游硬编码
+    `promiscuous_mode = true`（`dpdk/pdump.c:386`），本 port 逐字段对齐且**不新增 `promisc` 配置键**；
+    默认构建不含 DPDK，需 `--features dpdk` 开启（见 `PARITY.md` §5.1 / `README.md`）。
 - **为什么重要**：直接决定采集面等价性（三篇审计均未定论）。本移植的 AF_PACKET 路径当前
   **不设** `PACKET_MR_PROMISC`。
 - **如何采集**：现场以镜像口/SPAN 部署时，对比同一镜像流量下 C 版与本移植版抓到的帧数/流量

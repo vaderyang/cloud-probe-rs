@@ -77,6 +77,25 @@ sudo apt-get install -y protobuf-compiler
 # sudo apt-get install -y libpcap-dev libzmq3-dev
 ```
 
+### DPDK `pdump` capturer (optional, off by default)
+
+`cpworker` ports the upstream DPDK `pdump` capturer (`dpdk/pdump.c`), but DPDK
+is **never** a dependency of the default build. The `dpdk_pdump` capturer type
+always parses; without the feature it fails at `open()` with
+"built without the `dpdk` feature". To compile it in:
+
+```bash
+# DPDK 22.11 (upstream's pin) or a compatible install exposing `pkg-config libdpdk`
+cargo build -p cpworker --release --locked --features dpdk
+```
+
+`crates/cpworker/build.rs` runs the same `pkg-config libdpdk` check as upstream
+CMake and prints install instructions if DPDK is missing. For a compile-only
+check without DPDK, set `CPRS_DPDK_ALLOW_MISSING=1` — it cannot produce a
+runnable binary. The captured options (`promiscuous_mode = true`, the
+`cpworker_capture_*` object names, `num_mbufs = 2 * ring_size`) and the residual
+runtime gaps are recorded in [`PARITY.md`](PARITY.md) §5.1.
+
 ## Run
 
 ```bash

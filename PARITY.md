@@ -28,7 +28,7 @@
 | `ring_buffer.c` | `ring_buffer.rs` | ⚠️ 语义等价，非无锁 |
 | `task.c` | `task.rs` | ⚠️ reload 简化为重建 |
 | `unix-manager.c` / `unix_rpc_basic.c` | `unix_manager.rs` | ✅ |
-| `dpdk/pdump.c` | — | ❌ 未 port |
+| `dpdk/pdump.c` | `capturer/dpdk_pdump.rs` | ⚠️ feature-gated（`--features dpdk`；默认构建无 DPDK 依赖，配置面不变） |
 
 ### 1.2 cpdaemon（Go → Rust）
 
@@ -531,6 +531,19 @@ release profile 用 `panic = "abort"`：**panic 是致命事件，不是可恢�
 
 ### 5.1 计划移植（有明确目标）
 
+> **已完成（bead 4mv.1）**：DPDK `pdump` capturer（`dpdk/pdump.c`）已移植到
+> `crates/cpworker/src/capturer/dpdk_pdump.rs`，由 Cargo feature `dpdk` 门控：默认
+> `cargo build` **完全不依赖 DPDK**，`dpdk_pdump` 配置照常解析，但在 `open()` 时返回明确的
+> 「built without the `dpdk` feature」错误；开启 feature 后 `build.rs` 用上游同样的
+> `pkg-config libdpdk` 检查并给出可操作的安装提示。选项映射逐字段对齐
+> `dpdk_capture_new_from_cfg`（interface/snaplen/bpf/ring_size、`pool_name`/`ring_name`、
+> `num_mbufs = 2 * ring_size`），其中 `promiscuous_mode = true` 是上游硬编码（`pdump.c:386`，
+> 即 `FIELD_CONFIRMATION.md` §2 的 promisc 结论），因此**不新增配置键**。EAL 参数、ring 2 的幂
+> 次取整、pdump flags 和错误路径为纯逻辑并有单测。**残留边界**：本环境无 DPDK 开发库，
+> `rte_*` 运行时层按 DPDK 21.11/22.11 导出符号声明（仅 feature 编译，通过 `cargo check`），
+> 数据面未在真实设备上执行；上游从未调用的 `dpdk_init` 在本 port 中懒加载调用一次（否则
+> secondary 进程无法工作），primary 监控 alarm 为尽力而为移植。
+
 > **已完成（bead 4mv.4）**：`ring_buffer.c` 的无锁 SPSC ring 已移植。实现用原子 `head`/`tail`
 > 与显式 `Acquire`/`Release` 排序（`SpscRing::split` 给出一对单生产/单消费者句柄，使得安全代码
 > 不可能拿到两个生产者）；满时 `push` 返回 `Err`、容量为 `size-1`、`used` 取值方式与 C 的
@@ -556,7 +569,6 @@ release profile 用 `panic = "abort"`：**panic 是致命事件，不是可恢�
 
 | 项 | 来源 | 现状 | 决策 / 触发条件 |
 | --- | --- | --- | --- |
-| DPDK capturer（`dpdk/pdump.c`） | C | 未 port，按类型返回不支持 | **计划移植**，仅在目标部署需要 `dpdk_pdump` 时实现；否则维持显式错误 |
 | 无锁 ring buffer | `ring_buffer.c` | 语义等价的加锁实现 | **计划移植**（可选）：仅在 P3/性能复测显示锁成为瓶颈时实现 lock-free SPSC |
 | 其余 C/Go 单测移植 | 上游测试 | 部分已移植 | **持续**：随功能补齐同步移植向量 |
 

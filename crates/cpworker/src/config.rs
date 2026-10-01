@@ -8,7 +8,7 @@ use std::path::Path;
 use crate::error::{Error, Result};
 use crate::netutil::bpf_filter_replace_nic;
 
-/// Capturer type string: DPDK pdump (not yet ported).
+/// Capturer type string: DPDK pdump (implemented behind the `dpdk` feature).
 pub const CAPTURER_TYPE_DPDK_PDUMP: &str = "dpdk_pdump";
 /// Capturer type string: libpcap live capture.
 pub const CAPTURER_TYPE_LIBPCAP: &str = "libpcap";
@@ -336,7 +336,7 @@ pub struct PcapFileConfig {
 }
 
 #[derive(Debug, Clone)]
-/// DPDK pdump capturer configuration (not yet ported).
+/// DPDK pdump capturer configuration (see `capturer::dpdk_pdump`).
 pub struct DpdkPdumpConfig {
     /// Capture interface name.
     pub interface: String,
@@ -355,7 +355,7 @@ pub enum CapturerKind {
     Libpcap(LibpcapConfig),
     /// Offline pcap file replay.
     PcapFile(PcapFileConfig),
-    /// DPDK pdump capture (not yet ported).
+    /// DPDK pdump capture (feature-gated; see `capturer::dpdk_pdump`).
     DpdkPdump(DpdkPdumpConfig),
 }
 
@@ -1543,6 +1543,20 @@ mod tests {
         let c = with_dpdk(&format!(r#""ring_size":{RING_SIZE_MAX}"#)).expect("in range");
         match &c.tasks[0].capturer.kind {
             CapturerKind::DpdkPdump(d) => assert_eq!(d.ring_size, RING_SIZE_MAX as i32),
+            other => panic!("expected dpdk_pdump capturer, got {other:?}"),
+        }
+        // Absent keys take the upstream defaults; the capturer is promiscuous
+        // by construction (not a JSON key), see `capturer::dpdk_pdump`.
+        let c = Config::parse_str(
+            r#"{"tasks":[{"capturer":{"type":"dpdk_pdump","dpdk_pdump":{"interface":"eth0"}},"outputs":[]}]}"#,
+        )
+        .expect("defaults");
+        match &c.tasks[0].capturer.kind {
+            CapturerKind::DpdkPdump(d) => {
+                assert_eq!(d.ring_size, DEFAULT_RING_SIZE as i32);
+                assert_eq!(d.snaplen, DEFAULT_SNAPLEN as i32);
+                assert_eq!(d.bpf, "");
+            }
             other => panic!("expected dpdk_pdump capturer, got {other:?}"),
         }
 
