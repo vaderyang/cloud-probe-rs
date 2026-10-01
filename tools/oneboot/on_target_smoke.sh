@@ -228,17 +228,15 @@ elif [ -z "$BIN" ]; then
 elif ! command -v ip >/dev/null 2>&1; then
   record capture SKIP "iproute2 not installed"
 else
-  # Pick an injector.  python3 sends raw UDP frames.  On distros without
-  # python3 (CentOS 7) fall back to ping, but the peer veth end must live in a
-  # network namespace: with both ends local the kernel short-circuits the
-  # traffic and nothing crosses the wire.
+  # Prefer netns+ping: no interpreter needed and the frames are spread over
+  # seconds, which tolerates the capturer attaching slightly after its control
+  # socket appears.  python3 raw injection is the fallback.
   NS=cprs-probe-ns
-  if command -v python3 >/dev/null 2>&1; then
-    INJECTOR=python; BPF=udp
-  elif command -v ping >/dev/null 2>&1 \
-       && ip netns add "$NS" 2>/dev/null; then
+  if command -v ping >/dev/null 2>&1 && ip netns add "$NS" 2>/dev/null; then
     ip netns del "$NS" 2>/dev/null
     INJECTOR=ping; BPF=icmp
+  elif command -v python3 >/dev/null 2>&1; then
+    INJECTOR=python; BPF=udp
   else
     INJECTOR=""
   fi
@@ -277,6 +275,9 @@ JSON
     ip netns exec "$NS" ip link set lo up 2>/dev/null
     ip netns exec "$NS" ip addr add 10.99.0.2/24 dev "$V1" 2>/dev/null
     ip netns exec "$NS" ip link set "$V1" up 2>/dev/null
+  else
+    # python injector: both ends stay in this namespace.
+    ip link set "$V1" up 2>/dev/null
   fi
   ip link set "$V0" up 2>/dev/null
   sleep 1
@@ -300,6 +301,8 @@ JSON
     record "capture:rpc" PASS "cpctl info/ping over unix socket"
 
     if [ "$INJECTOR" = "python" ]; then
+      # Let the capturer attach before the tight burst of raw frames.
+      sleep 2
       python3 - "$V1" "$V0" "$FRAMES" <<'PY' || true
 import socket, struct, sys
 src_if, dst_if, n = sys.argv[1], sys.argv[2], int(sys.argv[3])
