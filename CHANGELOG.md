@@ -16,6 +16,20 @@ Two conventions worth knowing before reading:
 
 ### Added
 
+- **混杂模式默认开启（`libpcap.promisc`，`cloud-probe-rs-sdt` / j36.2）**：新增可选
+  `libpcap.promisc` 配置键，缺省 **`true`**。`AF_PACKET` 抓包器在 true 时
+  `setsockopt(SOL_PACKET, PACKET_ADD_MEMBERSHIP, PACKET_MR_PROMISC)`；失败只打 WARN 并按旧的非混杂行为
+  降级（与 `SO_RCVBUFFORCE` 回退一致，不中止进程），显式 `false` 保持此前精确行为。真机 NIC 上
+  `rx-vlan-filter: on` 时非混杂会丢未注册 VLAN 的 802.1Q/QinQ 帧（现场实测 `tcpdump` 900 帧、
+  `tcpdump -p`/cpworker 300 帧），trunk/SPAN 场景下这是功能正确性修复而非 parity 细节。C 的 libpcap 路径
+  `opts.promisc = 0` 为硬编码（`libpcap.c:340`），故相对 oracle 属**有意分歧**；DPDK pdump 本就默认开。
+  `pcap_file`/`dpdk_pdump` 不接受也不使用该键。测试：配置解析单测
+  `libpcap_promisc_defaults_to_true_and_is_configurable`（缺省/显式 false/显式 true）与
+  `libpcap_promisc_rejects_null`；root-gated 实测
+  `live_capture_promisc_joins_membership_and_takes_foreign_mac`（`IFF_PROMISC` 随 socket 建立/关闭置清，
+  物理 NIC 上断言非本机 MAC 帧在非混杂下不被投递；veth 不建模 RX 过滤，已文档化）。见 `PARITY.md` §2.5、
+  `FIELD_CONFIRMATION.md` §2/§4。
+
 - **CPM mTLS 客户端证书（PKCS#12）**（`cloud-probe-rs-ryg.2`，`PARITY.md` §2.7 / `SECURITY.md`）：
   当 `cpm.client.tls.pkcs12_cert_file` 非空时，用纯 Rust `p12` crate 解码 PKCS#12（仅
   `PBE-SHA1-RC2-40` / `PBE-SHA1-3DES`，与 oracle 的 `golang.org/x/crypto/pkcs12` 支持范围一致），

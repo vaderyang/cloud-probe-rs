@@ -74,6 +74,13 @@ pub const DEFAULT_SNAPLEN: i64 = 2_048;
 pub const DEFAULT_BUFFER_SIZE_MB: i64 = 256;
 /// Default `libpcap.timeout_ms` when the key is absent (0 = no timeout).
 pub const DEFAULT_TIMEOUT_MS: i64 = 0;
+/// Default `libpcap.promisc` when the key is absent.
+///
+/// The C `libpcap` path hardcodes `pcap_set_promisc(p, 0)` (never promiscuous,
+/// not configurable); the port deliberately defaults to `true` because a capture
+/// point on a trunk/SPAN port needs it to see unregistered-VLAN and foreign-MAC
+/// frames (see `PARITY.md` §2.5 / `FIELD_CONFIRMATION.md` §2).
+pub const DEFAULT_PROMISC: bool = true;
 /// Default `dpdk_pdump.ring_size` when the key is absent.
 pub const DEFAULT_RING_SIZE: i64 = 2_048;
 /// Largest accepted `snaplen`: libpcap's own maximum snapshot length. `libpcap`
@@ -280,6 +287,13 @@ pub struct LibpcapConfig {
     pub timeout_ms: i32,
     /// Exclude task output hosts from the BPF filter.
     pub not_filter_output_hosts: bool,
+    /// Join `PACKET_MR_PROMISC` on the capture socket.
+    ///
+    /// Defaults to [`DEFAULT_PROMISC`]. Required for functional correctness on a
+    /// physical NIC with `rx-vlan-filter` enabled (unregistered 802.1Q/QinQ
+    /// frames) and on SPAN/trunk ports; the C `libpcap` oracle hardcodes this
+    /// off, so it is an intentional, documented divergence.
+    pub promisc: bool,
 }
 
 impl LibpcapConfig {
@@ -688,6 +702,8 @@ struct RawLibpcap {
     timeout_ms: Option<i64>,
     #[serde(default, deserialize_with = "de_nonnull")]
     not_filter_output_hosts: Option<bool>,
+    #[serde(default, deserialize_with = "de_nonnull")]
+    promisc: Option<bool>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1082,6 +1098,7 @@ impl RawCapturer {
                         c.timeout_ms.unwrap_or(DEFAULT_TIMEOUT_MS),
                     )?,
                     not_filter_output_hosts: c.not_filter_output_hosts.unwrap_or(false),
+                    promisc: c.promisc.unwrap_or(DEFAULT_PROMISC),
                 })
             }
             CAPTURER_TYPE_PCAP_FILE => {
@@ -1381,6 +1398,33 @@ mod tests {
         let out = bpf_filter_exclude_task_output_hosts("port 80", &c.tasks);
         assert_eq!(out, "(port 80) and not host 10.0.0.9");
     }
+
+    /// `libpcap.promisc` defaults to **true** (the intentional divergence from
+    /// the C oracle's hardcoded `promisc = 0`); an explicit `false` disables it
+    /// and an explicit `true` (redundantly) enables it. The default is the part
+    /// that matters: a config that never mentions the key must still capture
+    /// unregistered-VLAN frames on a real NIC (FIELD_CONFIRMATION.md §2).
+    #[test]
+    fn libpcap_promisc_defaults_to_true_and_is_configurable() {
+        let promisc = |kv: &str| match &with_libpcap(kv).expect("parse").tasks[0].capturer.kind {
+            CapturerKind::Libpcap(l) => l.promisc,
+            other => panic!("expected libpcap capturer, got {other:?}"),
+        };
+        assert!(promisc("\"interface\":\"eth0\""), "absent -> true");
+        assert!(promisc("\"promisc\":true"), "explicit true");
+        assert!(!promisc("\"promisc\":false"), "explicit false");
+        // The default constant is the single source of truth for the absent case.
+        assert_eq!(DEFAULT_PROMISC, promisc("\"interface\":\"eth0\""));
+    }
+
+    /// An explicit JSON `null` is rejected, matching the `de_nonnull` rule used
+    /// by every other optional libpcap field (cJSON is type-strict).
+    #[test]
+    fn libpcap_promisc_rejects_null() {
+        let e = with_libpcap("\"promisc\":null").unwrap_err().to_string();
+        assert!(e.contains("null value not allowed"), "{e}");
+    }
+
     /// Build a one-task config whose libpcap capturer carries `kv`.
     fn with_libpcap(kv: &str) -> Result<Config> {
         Config::parse_str(&format!(
@@ -1692,6 +1736,7 @@ mod accessor_tests {
             buffer_size_mb: 0,
             timeout_ms: 0,
             not_filter_output_hosts: false,
+            promisc: DEFAULT_PROMISC,
         }
     }
 

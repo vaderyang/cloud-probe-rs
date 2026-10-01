@@ -153,6 +153,17 @@ evidence = [
 ]
 
 [[risk]]
+id = "RISK-PROMISC"
+category = "data_integrity"
+priority = "P0"
+source = "FIELD_CONFIRMATION.md §2 / PARITY.md §2.5 (j36.2)"
+description = "a non-promiscuous capture on a real NIC drops unregistered-VLAN/foreign-MAC frames, silently losing the traffic the probe exists to forward; the default must join PACKET_MR_PROMISC"
+evidence = [
+  "test:libpcap_promisc_defaults_to_true_and_is_configurable",
+  "test:live_capture_promisc_joins_membership_and_takes_foreign_mac",
+]
+
+[[risk]]
 id = "RISK-DNS-FAILURE"
 category = "failure_modes"
 priority = "P0"

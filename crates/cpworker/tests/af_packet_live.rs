@@ -13,7 +13,7 @@
 
 use std::sync::Arc;
 
-use cpworker::capturer::{new_capturer, PacketSink};
+use cpworker::capturer::{new_capturer, Capturer, PacketSink};
 use cpworker::config::Config;
 use cpworker::output::PacketHeader;
 use cpworker::stats::CaptureStats;
@@ -518,9 +518,16 @@ struct VethPair {
 
 impl VethPair {
     fn new() -> Self {
+        // Process id alone is not enough: every test in this binary shares it, and
+        // the privileged job runs them in parallel. An atomic sequence keeps the
+        // names unique within the process (and the pid prefix unique across
+        // concurrently running jobs), so two `VethPair`s can never collide and
+        // delete each other's pair. The name stays well under `IFNAMSIZ` (16).
+        static VETH_SEQ: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
         let tag = std::process::id() % 0xFFFF;
-        let a = format!("cplv{tag:04x}a");
-        let b = format!("cplv{tag:04x}b");
+        let seq = VETH_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed) % 0x100;
+        let a = format!("cp{tag:04x}{seq:02x}a");
+        let b = format!("cp{tag:04x}{seq:02x}b");
         run_ok(
             "ip",
             &["link", "add", &a, "type", "veth", "peer", "name", &b],
@@ -641,6 +648,135 @@ fn live_capture_veth_delivers_exactly_n_frames() {
         (0..N).collect::<Vec<u32>>(),
         "delivered frames are not the injected frames in order"
     );
+}
+
+/// `IFF_PROMISC` (`0x100`) as reported by `/sys/class/net/<if>/flags`.
+///
+/// The flag is refcounted by the kernel: joining `PACKET_MR_PROMISC` on a socket
+/// sets it while the socket is alive and clears it again when the socket is
+/// closed, so a before/after read on a freshly created, exclusively named veth
+/// is a deterministic witness that the membership call really happened.
+fn iface_promisc_flag(ifname: &str) -> bool {
+    let raw = std::fs::read_to_string(format!("/sys/class/net/{ifname}/flags"))
+        .unwrap_or_else(|e| panic!("read flags of {ifname}: {e}"));
+    let v = u32::from_str_radix(raw.trim().trim_start_matches("0x"), 16)
+        .unwrap_or_else(|e| panic!("parse flags '{raw}' of {ifname}: {e}"));
+    v & 0x100 != 0
+}
+
+/// A physical NIC exposes a `device` symlink under sysfs; a veth does not.
+/// Used to know whether the kernel actually models a hardware RX filter, which
+/// is the only thing that can make the non-promiscuous negative assertion
+/// meaningful (`FIELD_CONFIRMATION.md` §2).
+fn is_hardware_nic(ifname: &str) -> bool {
+    std::path::Path::new(&format!("/sys/class/net/{ifname}/device")).exists()
+}
+
+fn iface_capturer(ifname: &str, promisc: bool) -> Box<dyn Capturer> {
+    let json = format!(
+        r#"{{
+            "log_level": "INFO",
+            "execution_model": "rtc",
+            "tasks": [{{
+                "capturer": {{ "type": "libpcap", "libpcap": {{
+                    "interface": "{ifname}",
+                    "promisc": {promisc},
+                    "timeout_ms": 50
+                }} }},
+                "outputs": []
+            }}]
+        }}"#
+    );
+    let cfg = Config::parse_str(&json).expect("parse config");
+    let tasks = cfg.tasks.clone();
+    new_capturer(&tasks, &tasks[0], Arc::new(CaptureStats::default())).expect("capturer")
+}
+
+/// `PACKET_MR_PROMISC` must be joined (and is observable as `IFF_PROMISC`), and
+/// a frame whose destination MAC is **neither** the local MAC **nor** broadcast
+/// must be captured when `promisc = true`.
+///
+/// The negative half - the same frame dropped when `promisc = false` - is only
+/// asserted on a real NIC: a veth does not model the hardware RX filter, so it
+/// delivers the foreign-MAC frame either way (`FIELD_CONFIRMATION.md` §2, and the
+/// veth experiment recorded there). On a veth this test therefore proves the
+/// setsockopt happened (the flag toggles) and does not pretend to prove the
+/// filter semantics.
+#[test]
+#[ignore = "requires CAP_NET_RAW + CAP_NET_ADMIN (run with sudo); creates a veth pair"]
+fn live_capture_promisc_joins_membership_and_takes_foreign_mac() {
+    assert_privileged("live_capture_promisc_joins_membership_and_takes_foreign_mac");
+    const PORT: u16 = 41249;
+    // Locally administered, not the interface MAC, not broadcast/multicast.
+    const FOREIGN_MAC: [u8; 6] = [0x02, 0x00, 0x00, 0x00, 0x00, 0x99];
+
+    let veth = VethPair::new();
+    let src_mac = iface_mac(&veth.b);
+    let tx = RawTx::new(&veth.b);
+
+    // --- promisc = true (the default) -------------------------------------
+    assert!(
+        !iface_promisc_flag(&veth.a),
+        "a fresh veth must start non-promiscuous"
+    );
+    let mut cap = iface_capturer(&veth.a, true);
+    assert!(
+        iface_promisc_flag(&veth.a),
+        "promisc=true must join PACKET_MR_PROMISC (IFF_PROMISC is set while the socket lives)"
+    );
+    tx.send(&udp_frame(
+        1,
+        &FOREIGN_MAC,
+        &src_mac,
+        [198, 51, 100, 9],
+        PORT,
+    ));
+    let mut sink = Collect::default();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while sink.pkts.is_empty() && std::time::Instant::now() < deadline {
+        cap.capture_once(&mut sink);
+    }
+    assert!(
+        !sink.pkts.is_empty(),
+        "promiscuous capture did not deliver a foreign-MAC frame on {}",
+        veth.a
+    );
+    drop(cap);
+    assert!(
+        !iface_promisc_flag(&veth.a),
+        "closing the capture socket must release PACKET_MR_PROMISC"
+    );
+
+    // --- promisc = false --------------------------------------------------
+    let mut cap = iface_capturer(&veth.a, false);
+    assert!(
+        !iface_promisc_flag(&veth.a),
+        "promisc=false must not set IFF_PROMISC"
+    );
+    tx.send(&udp_frame(
+        2,
+        &FOREIGN_MAC,
+        &src_mac,
+        [198, 51, 100, 9],
+        PORT,
+    ));
+    let mut sink = Collect::default();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_millis(500);
+    while sink.pkts.is_empty() && std::time::Instant::now() < deadline {
+        cap.capture_once(&mut sink);
+    }
+    if is_hardware_nic(&veth.a) {
+        assert!(
+            sink.pkts.is_empty(),
+            "a physical NIC must not deliver a foreign-MAC frame without promisc"
+        );
+    } else {
+        eprintln!(
+            "note: {} is a virtual device; it does not model the RX filter, so a \
+             foreign-MAC frame may be delivered with promisc=false (FIELD_CONFIRMATION.md §2)",
+            veth.a
+        );
+    }
 }
 
 /// On loopback the kernel taps every datagram twice (transmitted +

@@ -222,6 +222,52 @@ fn set_rcvbuf(fd: RawFd, requested: i32) {
     }
 }
 
+/// Join the promiscuous packet membership (`PACKET_MR_PROMISC`).
+///
+/// On a physical NIC with `rx-vlan-filter` enabled a non-promiscuous
+/// `AF_PACKET` socket does **not** see unregistered 802.1Q/QinQ frames, and on a
+/// SPAN/trunk port it may miss mirrored unicast frames addressed elsewhere. On
+/// a real host that is a capture-correctness bug, not a cosmetic difference
+/// (`FIELD_CONFIRMATION.md` §2). Joining `PACKET_MR_PROMISC` makes the driver
+/// hand every frame to the kernel, exactly like `tcpdump`'s default.
+///
+/// Failure is deliberately **not** fatal: without `CAP_NET_ADMIN`, or on a
+/// virtual device that has no promiscuous mode, capture continues with today's
+/// non-promiscuous behaviour - the same degrade-don't-abort shape as the
+/// `SO_RCVBUFFORCE` fallback.
+fn add_promisc_membership(fd: RawFd, interface: &str) -> std::io::Result<()> {
+    let ifindex = match interface_index(interface) {
+        Ok(idx) => i32::try_from(idx).unwrap_or(i32::MAX),
+        Err(e) => {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                e.to_string(),
+            ))
+        }
+    };
+    let mreq = libc::packet_mreq {
+        mr_ifindex: ifindex,
+        mr_type: libc::PACKET_MR_PROMISC as libc::c_ushort,
+        mr_alen: 0,
+        mr_address: [0; 8],
+    };
+    // SAFETY: `mreq` is a valid `struct packet_mreq` and the size matches it.
+    let rc = unsafe {
+        libc::setsockopt(
+            fd,
+            libc::SOL_PACKET,
+            libc::PACKET_ADD_MEMBERSHIP,
+            std::ptr::addr_of!(mreq).cast::<libc::c_void>(),
+            std::mem::size_of::<libc::packet_mreq>() as libc::socklen_t,
+        )
+    };
+    if rc != 0 {
+        Err(std::io::Error::last_os_error())
+    } else {
+        Ok(())
+    }
+}
+
 /// Create the capture socket with protocol 0. Packets only start flowing after
 /// `bind(ETH_P_ALL, ifindex)`, which lets us attach the BPF filter first and
 /// avoids an unfiltered window (P5-09).
@@ -260,7 +306,7 @@ fn interface_is_loopback(name: &str) -> bool {
 ///
 /// Returns `true` when outgoing (`PACKET_OUTGOING`) frames must still be dropped
 /// in userspace (loopback with no `PACKET_IGNORE_OUTGOING` support).
-fn configure_socket(fd: RawFd, buffer_size: i32, interface: &str) -> bool {
+fn configure_socket(fd: RawFd, buffer_size: i32, interface: &str, promisc: bool) -> bool {
     set_rcvbuf(fd, buffer_size);
     if let Err(e) = setsockopt_i32(fd, libc::SOL_SOCKET, libc::SO_TIMESTAMPNS, 1) {
         crate::log_warn!(
@@ -269,6 +315,22 @@ fn configure_socket(fd: RawFd, buffer_size: i32, interface: &str) -> bool {
     }
     if let Err(e) = setsockopt_i32(fd, libc::SOL_PACKET, libc::PACKET_AUXDATA, 1) {
         crate::log_warn!("enable PACKET_AUXDATA failed: {e}; VLAN tags may be missing");
+    }
+
+    // Promiscuous mode is the difference between seeing only the frames the NIC
+    // additionally filters by VLAN membership (or by destination MAC on a mirror
+    // port) and seeing the whole link. It is on by default; a failure only
+    // degrades the capture surface, never the process.
+    if promisc {
+        match add_promisc_membership(fd, interface) {
+            Ok(()) => {
+                crate::log_info!("promiscuous mode enabled on {interface} (PACKET_MR_PROMISC)")
+            }
+            Err(e) => crate::log_warn!(
+                "enable promiscuous mode (PACKET_MR_PROMISC) on {interface} failed: {e}; \
+                 continuing non-promiscuous"
+            ),
+        }
     }
 
     // On loopback the kernel delivers each frame twice: once as the transmitted
@@ -575,7 +637,8 @@ impl AfPacketCapturer {
         };
 
         let fd = create_socket()?;
-        let drop_outgoing = configure_socket(fd.as_raw_fd(), buffer_size, &cfg.interface);
+        let drop_outgoing =
+            configure_socket(fd.as_raw_fd(), buffer_size, &cfg.interface, cfg.promisc);
 
         // Install the filter in the kernel when possible (before the bind, so no
         // unfiltered packet slips in). A program over the kernel's instruction
