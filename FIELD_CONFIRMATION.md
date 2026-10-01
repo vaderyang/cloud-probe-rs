@@ -169,7 +169,8 @@ VM（8 vCPU / 16 GiB / NAT 网），串行完成四项现场验证：
     `b8:00.0`）可用**：为避免影响该 PF 上的 NFS，用 SR-IOV VF（`b8:00.1`）给 DPDK，在 VF 上以 mlx5
     PMD 跑 primary + 本 port pdump secondary，从 PF 发 2000 帧到 VF MAC，**抓到 2000/2000 帧**（零丢失）；
     (3) **DPDK 25.11 的双向 pdump 握手**要求 secondary 先调 `rte_pdump_init()`（旧版本不需要）——本
-    port 已补上该调用（对 21.11-24.11 安全）。
+    port 已补上该调用（对 21.11-24.11 安全）。**可复现脚本**：`verification/dpdk/`
+    （`field_test.sh` 编排 + `primary.c` 精简 DPDK primary，见其 `README.md`）。
 - **CPM mTLS 端到端（bead `1l4`，#232/§6）**：VM 内跑 `cpm_mtls`（真实 rustls 服务端
   **要求客户端证书**，有 PKCS#12 时握手成功、无身份时被拒）与 `syncer_end_to_end`，全部通过
   （2 + 5 tests）。

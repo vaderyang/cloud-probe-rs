@@ -216,3 +216,15 @@ priority = "P1"
 source = "PARITY.md §2.6"
 description = "capture interface going down should be handled (Rust keeps the task and backs off)"
 evidence = ["path:PARITY.md"]
+
+[[risk]]
+id = "RISK-DPDK-NBL-SECONDARY"
+category = "failure_modes"
+priority = "P1"
+source = "PARITY.md §5.1 / FIELD_CONFIRMATION.md §7 / cloud-probe-rs-1eu"
+description = "the DPDK pdump capturer is a secondary process; the Nebulamatrix nbl PMD (the product's own NIC) rejects secondary processes so pdump cannot run on nbl, and DPDK >= 25.11 additionally requires the secondary to call rte_pdump_init()"
+evidence = [
+  "path:verification/dpdk/README.md",
+  "path:verification/dpdk/field_test.sh",
+  "path:crates/cpworker/src/capturer/dpdk_pdump.rs",
+]
