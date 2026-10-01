@@ -657,7 +657,12 @@ impl Ring {
             tp_sizeof_priv: 0,
             tp_feature_req_word: 0,
         };
-        setsockopt_raw(fd, libc::SOL_PACKET, libc::PACKET_VERSION, &TPACKET_V3_VERSION)?;
+        setsockopt_raw(
+            fd,
+            libc::SOL_PACKET,
+            libc::PACKET_VERSION,
+            &TPACKET_V3_VERSION,
+        )?;
         setsockopt_raw(fd, libc::SOL_PACKET, libc::PACKET_RX_RING, &req)?;
         let map_len = block_size * block_nr;
         // SAFETY: `map_len` is the length the kernel just accepted for this fd;
@@ -719,7 +724,12 @@ impl Ring {
                 break;
             }
             // SAFETY: the kernel filled these fields before setting the status.
-            let (num_pkts, first) = unsafe { ((*bh1).num_pkts as usize, (*bh1).offset_to_first_pkt as usize) };
+            let (num_pkts, first) = unsafe {
+                (
+                    (*bh1).num_pkts as usize,
+                    (*bh1).offset_to_first_pkt as usize,
+                )
+            };
             let block_start = self.next * self.block_size;
             let mut off = first;
             for _ in 0..num_pkts {
@@ -736,7 +746,8 @@ impl Ring {
                 let avail = want.min(self.block_size.saturating_sub(off + mac_off));
                 if avail > 0 {
                     // SAFETY: `off + mac_off + avail <= block_size`.
-                    let data = unsafe { std::slice::from_raw_parts(ph.cast::<u8>().add(mac_off), avail) };
+                    let data =
+                        unsafe { std::slice::from_raw_parts(ph.cast::<u8>().add(mac_off), avail) };
                     visit(hdr, data);
                     delivered += 1;
                 }
@@ -1272,7 +1283,10 @@ mod tests {
     fn write_block_desc(buf: &mut [u8], block_off: usize, num_pkts: u32, first_off: u32) {
         // SAFETY: `block_off` is a block boundary in `buf`.
         unsafe {
-            let bd = buf.as_mut_ptr().add(block_off).cast::<libc::tpacket_block_desc>();
+            let bd = buf
+                .as_mut_ptr()
+                .add(block_off)
+                .cast::<libc::tpacket_block_desc>();
             let bh1 = std::ptr::addr_of_mut!((*bd).hdr).cast::<libc::tpacket_hdr_v1>();
             (*bh1).block_status = libc::TP_STATUS_USER;
             (*bh1).num_pkts = num_pkts;
@@ -1283,7 +1297,10 @@ mod tests {
     fn block_status(buf: &[u8], block_off: usize) -> u32 {
         // SAFETY: `block_off` is a block boundary in `buf`.
         unsafe {
-            let bd = buf.as_ptr().add(block_off).cast::<libc::tpacket_block_desc>();
+            let bd = buf
+                .as_ptr()
+                .add(block_off)
+                .cast::<libc::tpacket_block_desc>();
             let bh1 = std::ptr::addr_of!((*bd).hdr).cast::<libc::tpacket_hdr_v1>();
             std::ptr::read_volatile(std::ptr::addr_of!((*bh1).block_status))
         }
