@@ -1,0 +1,53 @@
+{
+  "_comment": [
+    "Machine inventory for the OneBoot release-verification pipeline.",
+    "Copy to inventory.json (git-ignored) and fill in your lab. Secrets are",
+    "never inlined: point at environment variables instead (github secrets).",
+    "Each target maps one OS image to one physical/VM machine.",
+    "boot_style: 'redhat' for CentOS/RHEL/Kylin/UOS/OpenEuler/NeoKylin/Rocky,",
+    "            'casper' for Ubuntu live-server (autoinstall).",
+    "artifact:   the release target whose tarball runs on this machine.",
+    "bmc:        optional; omit and use --trigger manual to pick the menu by hand.",
+    "ssh:        optional but strongly recommended - it is the most reliable way",
+    "            to pull result.json back when the lab cannot reach the runner."
+  ],
+  "oneboot": "https://oneboot.netisdev.com",
+  "targets": [
+    {
+      "name": "centos7-x86_64",
+      "source": "centos_7_9_x86_64_dvd_2009",
+      "boot_style": "redhat",
+      "artifact": "x86_64-unknown-linux-gnu",
+      "mac": "52:54:00:11:22:33",
+      "bmc": { "host": "10.40.8.173", "user": "Administrator", "pass_env": "LAB_BMC_PASS", "interface": "lanplus", "efi": false },
+      "ssh": { "host": "10.40.1.240", "user": "root", "key_env": "LAB_SSH_KEY" }
+    },
+    {
+      "name": "rhel9-x86_64",
+      "source": "rhel_9_5_x86_64_dvd",
+      "boot_style": "redhat",
+      "artifact": "x86_64-unknown-linux-gnu",
+      "mac": "52:54:00:11:22:34",
+      "bmc": { "host": "10.40.8.174", "user": "Administrator", "pass_env": "LAB_BMC_PASS", "interface": "lanplus", "efi": true },
+      "ssh": { "host": "10.40.1.241", "user": "root", "key_env": "LAB_SSH_KEY" }
+    },
+    {
+      "name": "kylin-v10-arm64",
+      "source": "kylin_server_10_sp3_2403_halberd_release_20240426_arm64",
+      "boot_style": "redhat",
+      "artifact": "aarch64-unknown-linux-gnu",
+      "mac": "52:54:00:11:22:35",
+      "bmc": { "host": "10.40.8.175", "user": "Administrator", "pass_env": "LAB_BMC_PASS", "interface": "lanplus", "efi": true },
+      "ssh": { "host": "10.40.1.242", "user": "root", "key_env": "LAB_SSH_KEY" }
+    },
+    {
+      "name": "ubuntu2404-x86_64",
+      "source": "ubuntu_24_04_3_live_server_amd64",
+      "boot_style": "casper",
+      "artifact": "x86_64-unknown-linux-gnu",
+      "mac": "52:54:00:11:22:36",
+      "bmc": { "host": "10.40.8.176", "user": "Administrator", "pass_env": "LAB_BMC_PASS", "interface": "lanplus", "efi": true },
+      "ssh": { "host": "10.40.1.243", "user": "root", "key_env": "LAB_SSH_KEY" }
+    }
+  ]
+}
