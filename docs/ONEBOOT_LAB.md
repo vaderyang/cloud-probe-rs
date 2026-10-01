@@ -233,6 +233,18 @@ python3。首次运行会把 ISO 缓存到 `--workdir`（默认 `/tmp/cprs-vm`�
 **实测（CentOS 7.9, glibc 2.17）**：安装成功，5 个二进制全部加载运行，
 `capture:fidelity captured 4000 >= injected 2000 icmp frames`，`ok=true`。
 
+**已支持的 boot_style**：
+
+| boot_style | OS | VM 引导方式 | 状态 |
+| --- | --- | --- | --- |
+| `redhat` | CentOS/RHEL/Kylin/UOS/openEuler/Rocky | 挂载 ISO 树，`inst.repo=` + `inst.ks=` | ✅ 实测 CentOS 7.9 |
+| `casper` | Ubuntu (live-server Autoinstall) | 服务原始 ISO，`url=` + `autoinstall ds=nocloud-net;s=` | ✅ 实测 Ubuntu 20.04.6 |
+
+> **OneBoot 自身的坑**：`http://10.40.1.254:8080/iso/Ubuntu/` 下所有 Ubuntu ISO 返回
+> **403**（CentOS 等目录 200），而 OneBoot 生成的 Ubuntu 引导脚本正是
+> `url=http://…/iso/Ubuntu/<iso>` —— 也就是说**经此服务器的 Ubuntu PXE 装机很可能是坏的**。
+> VM 驱动因此允许 `--iso <本地ISO>`；用公开镜像下载即可（如 huaweicloud/tuna）。
+
 > 注：目标机无 python3 时（CentOS 7），`on_target_smoke.sh` 用 netns + ping 注入
 > ICMP 帧并用 awk 写 `result.json`，不再依赖解释器。
 
@@ -279,6 +291,8 @@ macOS 保持现状（OneBoot 只做 x86/ARM/LoongArch 的 Linux PXE，无法验�
 4. **构建网络**：内网 runner 若无法访问 crates.io，需要内网镜像或 vendored 依赖。
 5. **安全**：self-hosted runner **只应响应 `workflow_dispatch` / tag**，绝不跑
    未审 PR；本仓库 `lab-verify.yml` 已按此约束编写。
+6. **OneBoot `/iso/Ubuntu/` 返回 403**（见 §4.6）：需 OneBoot 侧修权限，否则 Ubuntu 既
+   不能用它的 PXE 装，也不能从它的 HTTP 直接拉 ISO；暂用公开镜像 + `--iso` 绕过。
 
 ---
 

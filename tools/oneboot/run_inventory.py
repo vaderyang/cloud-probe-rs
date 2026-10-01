@@ -103,7 +103,12 @@ def build_argv(entry: dict[str, Any], args: argparse.Namespace,
 
 def build_vm_argv(entry: dict[str, Any], args: argparse.Namespace,
                   artifact: pathlib.Path, junit_dir: pathlib.Path) -> list[str]:
-    """QEMU/KVM driver: install the source in a local VM and verify there."""
+    """QEMU/KVM driver: install the source in a local VM and verify there.
+
+    Resources can be overridden per target via the inventory's ``vm`` block
+    (``cpus``, ``mem``, ``disk``, ``iso``, ``dist_host``).
+    """
+    vm = entry.get("vm") or {}
     workdir = pathlib.Path(args.vm_workdir) / entry["name"]
     argv = [
         sys.executable, str(VM_VERIFY),
@@ -114,15 +119,18 @@ def build_vm_argv(entry: dict[str, Any], args: argparse.Namespace,
         "--junit-out", str(junit_dir / f"{entry['name']}.junit.xml"),
         "--result-out", str(junit_dir / f"{entry['name']}.result.json"),
         "--workdir", str(workdir),
-        "--vm-cpus", str(args.vm_cpus),
-        "--vm-mem", str(args.vm_mem),
+        "--vm-cpus", str(vm.get("cpus", args.vm_cpus)),
+        "--vm-mem", str(vm.get("mem", args.vm_mem)),
+        "--vm-disk-size", str(vm.get("disk", args.vm_disk_size)),
     ]
     if args.oneboot:
         argv += ["--oneboot", args.oneboot]
-    if entry.get("iso"):
-        argv += ["--iso", str(entry["iso"])]
-    if entry.get("dist_host"):
-        argv += ["--dist-host", str(entry["dist_host"])]
+    iso = entry.get("iso") or vm.get("iso")
+    if iso:
+        argv += ["--iso", str(iso)]
+    dist_host = entry.get("dist_host") or vm.get("dist_host")
+    if dist_host:
+        argv += ["--dist-host", str(dist_host)]
     if entry.get("frames"):
         argv += ["--frames", str(entry["frames"])]
     return argv
@@ -144,6 +152,7 @@ def main(argv: list[str] | None = None) -> int:
                    help="per-target VM workdir (also caches the ISO)")
     p.add_argument("--vm-cpus", type=int, default=4)
     p.add_argument("--vm-mem", type=int, default=6144)
+    p.add_argument("--vm-disk-size", default="20G")
     p.add_argument("--apply", action="store_true",
                    help="actually provision; without it every run is a dry run")
     p.add_argument("--trigger", choices=["manual", "ipmi", "none"])
