@@ -16,7 +16,7 @@
 - **如何采集**：向 CPM 侧取一份「策略里出现过的 bpf 字段」的去重列表 + 出现次数。
 - **解锁决策**：是否需要补齐不支持的语法，或仅在文档/启动日志中对不支持的表达式给出明确告警。
 
-## 2. ⬜ 混杂模式（promisc）意图
+## 2. ✅ 混杂模式（promisc）意图（已实现：默认开启）
 
 - **需要**：确认原 C 实现是否有意设置混杂模式；镜像口/SPAN 场景下的预期采集面。
 - **已核实（2026-10，上游源码 + yinjiao 内核实验）**：
@@ -40,6 +40,15 @@
 - **解锁决策**：若现场确为 SPAN/trunk 且网卡在非 promisc 下丢 VLAN 帧（已实测成立），
   则**必须新增** `promisc` 配置项并**默认开启**（相对 oracle 的功能修复；DPDK pdump 本就默认开）。
   这是当前唯一同时影响 parity 与功能正确性的现场项。
+- **已实现（j36.2，`cloud-probe-rs-sdt`）**：`libpcap.promisc` 可选键，缺省 **`true`**；
+  `AF_PACKET` 在 true 时 `setsockopt(SOL_PACKET, PACKET_ADD_MEMBERSHIP, PACKET_MR_PROMISC)`，
+  失败只打 WARN 并按旧的非混杂行为降级（与 `SO_RCVBUFFORCE` 回退同形，不中止进程）；
+  显式 `false` 保持此前的精确行为。`pcap_file`/`dpdk_pdump` 不接受、也不使用该键。
+  单测 `libpcap_promisc_defaults_to_true_and_is_configurable` 固定“缺省 true / 显式 false / 显式 true”
+  三种解析；root-gated 实测 `live_capture_promisc_joins_membership_and_takes_foreign_mac` 断言
+  `IFF_PROMISC` 随抓包 socket 建立而置、随关闭而清（veth 上即可判定 setsockopt 确实发生），
+  并在物理 NIC 上断言非本机 MAC 帧在 promisc=false 下不被投递（veth 不建模 RX 过滤，不作此断言）。
+  见 `PARITY.md` §2.5 的分歧记录与 `CHANGELOG.md`。
 
 ## 3. ⬜ libpcap TPACKET ring 相对 `SO_RCVBUF` 的高负载容量
 
@@ -83,6 +92,8 @@
   - 再用 **`tcpdump -p`（关混杂）** 复测，同样只得 300 帧 → **根因是 promisc，不是 VLAN 处理**。
   - **结论**：VLAN 帧丢失源于**非混杂模式下 NIC 的 VLAN 过滤**（j36.2），而非 P5-03 重插缺陷；
     修 j36.2（加 `promisc` 并默认开）即可同时解决 VLAN 场景。H3 未涉及（无对应头样本）。
+  - **已实现（j36.2，`cloud-probe-rs-sdt`）**：`libpcap.promisc` 默认 `true`（见 §2）。现场需在真实
+    trunk/镜像口回归确认 900/900（含 600 带标签）恢复；本环境的 veth 无法复现硬件 RX 过滤。
 - **需要**：在 trunk 口 / 镜像口实测带 802.1Q（含 QinQ）与 H3 扩展头的流量。
 - **为什么重要**：评估 VLAN 重插与 H3 相关处理在现场的严重度（P5-03 已实现 AUXDATA VLAN 重插，
   但现场量级未知）。

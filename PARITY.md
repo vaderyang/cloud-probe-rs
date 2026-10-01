@@ -300,6 +300,7 @@ M4 的问题大多不是"移植错了"，而是"移植得比原实现更宽松�
 | `nic.<ifname>` 过滤器替换（`bpf_filter_replace_nic`） | C 按 `char *` 逐字节处理，UTF-8 序列**原样透传** | 曾用 `bytes[i] as char` 逐字节重编码，非 ASCII 过滤器被改成 Latin-1 乱码；现按**字节切片复制**，非 ASCII 空白（U+3000）也能正确结束接口名 | **修复回归**（现在与 C 一致） |
 | `PcapWriter::flush()` | libpcap `pcap_dump_flush()` 就是 `fflush`：到 OS，不 fsync | 行为**不变**；文档改为如实描述（flush 后字节已到 OS、可被其他读者看到；不保证掉电持久） | **文档修复**：原注释"call flush to fsync"是空头承诺，现在有 grep 门禁 |
 | `cpdaemon` HTTP 端口解析 | Go 把端口字符串直接交给 `net.Listen` / `http.Server.Addr`，端口非法 → **启动失败** | 原来 `parse::<u16>().unwrap_or(9022)` 静默换端口；现返回错误并指明键名与合法范围；空值仍表示默认 9022 | **修复回归**（现在与 Go 一致）。同时接受不带引号的 `"port": 9022`：viper 默认值就是数字、官方 template.json 也这么写，serde 原本会直接拒绝该配置文件 |
+| `libpcap.promisc`（混杂模式） | `pcap_set_promisc(p, opts.promisc)`（`libpcap.c:154`）但 `opts.promisc = 0` 是**硬编码**（`libpcap.c:340`）、不从 JSON 读取 → C 的 libpcap 路径**永不混杂且不可配置**；DPDK pdump 则 `promiscuous_mode = true`（`dpdk/pdump.c:386`） | 新增可选 `libpcap.promisc`，**默认 `true`**；AF_PACKET 在 true 时 `setsockopt(SOL_PACKET, PACKET_ADD_MEMBERSHIP, PACKET_MR_PROMISC)`（失败仅 WARN、降级为非混杂，不中止）；显式 `false` 保持旧行为 | **有意分歧（功能修复）**：真机 NIC `rx-vlan-filter: on` 时，非混杂 AF_PACKET 会丢未注册 VLAN 的 802.1Q/QinQ 帧（现场实测 `tcpdump` 900 帧 / `tcpdump -p` 300 帧、cpworker 300 帧），trunk/SPAN 场景下混杂是采集正确性的前提而不仅是 parity 细节。`pcap_file`/`dpdk_pdump` 不接受也不使用该键（前者无网卡、后者未移植） |
 
 差分向量分配：`parity/gen_config.py` 产生范围内的随机数值；越界与整值浮点等 46 条边界向量固化在
 `parity/verify_config.sh` 的 "#279" 段，**直接比较 C 与 Rust 的规范化输出**（不再是"断言 Rust 拒绝"）。

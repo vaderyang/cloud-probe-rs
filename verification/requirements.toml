@@ -94,6 +94,17 @@ tests = [
 ]
 
 [[requirement]]
+id = "REQ-CAPTURE-PROMISC"
+priority = "P0"
+source = "FIELD_CONFIRMATION.md §2 / PARITY.md §2.5 (j36.2)"
+scenario = "libpcap.promisc defaults to true, is configurable, and joins PACKET_MR_PROMISC when true"
+tests = [
+  "libpcap_promisc_defaults_to_true_and_is_configurable",
+  "libpcap_promisc_rejects_null",
+  "live_capture_promisc_joins_membership_and_takes_foreign_mac",
+]
+
+[[requirement]]
 id = "REQ-PCAP-READER"
 priority = "P0"
 source = "AUDIT4 P5-20"
