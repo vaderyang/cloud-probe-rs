@@ -128,6 +128,24 @@ Two conventions worth knowing before reading:
 
 ### Changed
 
+- **Reload now reuses unchanged tasks (bead 4mv.2, PARITY.md §5.1).**
+  `TaskManager::reload` used to rebuild every task, recompiling each BPF filter and
+  recreating every capture socket / output connection. It now matches old tasks to
+  the new config by their non-empty config fingerprint (`find_reusable`), moving an
+  unchanged task's capturer and outputs into the new task set untouched; only added
+  or changed tasks are built, and removed/changed ones have their outputs destroyed
+  at the same single `destroy()` call point. Tasks without a fingerprint (hand-written
+  configs; the daemon always computes one) are rebuilt as before, so no external
+  behaviour changes. The C `task.c` thread/mailbox protocol is collapsed into the
+  existing single manager mutex: the shared output thread is joined before the swap,
+  so no in-flight ring message can be delivered to a reordered task slot and the
+  reload path cannot nest the `out_sets`/ring locks. Proven by
+  `reload_reuses_unchanged_tasks_and_rebuilds_only_the_rest` (add/remove/change/
+  unchanged in one reload, with destroy spies and a per-task build generation),
+  `repeated_reload_keeps_reusing_the_same_task`,
+  `reload_rebuilds_a_task_without_a_fingerprint`, and the bounded
+  `reload_and_stats_summary_run_without_deadlock` watchdog.
+
 - Parity/oracle tooling moved out of `cpworker/src/bin` into a new
   `cpworker-parity` crate (P5-29): `cargo build -p cpworker` no longer compiles
   the differential harnesses, the seven `parity/*.sh` callers now use
