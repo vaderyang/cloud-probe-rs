@@ -540,8 +540,10 @@ release profile 用 `panic = "abort"`：**panic 是致命事件，不是可恢�
 > `num_mbufs = 2 * ring_size`），其中 `promiscuous_mode = true` 是上游硬编码（`pdump.c:386`，
 > 即 `FIELD_CONFIRMATION.md` §2 的 promisc 结论），因此**不新增配置键**。EAL 参数、ring 2 的幂
 > 次取整、pdump flags 和错误路径为纯逻辑并有单测。**残留边界**：本环境无 DPDK 开发库，
-> `rte_*` 运行时层按 DPDK 21.11/22.11 导出符号声明（仅 feature 编译，通过 `cargo check`），
-> 数据面未在真实设备上执行；上游从未调用的 `dpdk_init` 在本 port 中懒加载调用一次（否则
+> `rte_*` 运行时层按 DPDK 21.11/22.11 ABI 声明（仅 feature 编译，通过 `cargo check`），
+> 数据面未在真实设备上执行；`rte_ring_sc_dequeue_burst_elem` 等 ring 出队函数在 DPDK 头文件中是
+> `static __rte_always_inline`、并非 `librte_ring` 导出符号，因此真正链接到 DPDK 主机时还需
+> 一个调用该内联函数的 C shim。上游从未调用的 `dpdk_init` 在本 port 中懒加载调用一次（否则
 > secondary 进程无法工作），primary 监控 alarm 为尽力而为移植。
 
 > **已完成（bead 4mv.4）**：`ring_buffer.c` 的无锁 SPSC ring 已移植。实现用原子 `head`/`tail`

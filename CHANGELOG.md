@@ -50,9 +50,11 @@ Two conventions worth knowing before reading:
   为上游硬编码（`pdump.c:386`，即 `FIELD_CONFIRMATION.md` §2 的 promisc 结论），因此**不新增
   配置键**。EAL 参数、ring 2 的幂次取整、pdump flags、默认值与错误路径有单测
   （`capturer::dpdk_pdump::tests`，含无 feature 的 gate 错误）。**残留边界**：本环境无 DPDK
-  开发库，`rte_*` 运行时层按 DPDK 21.11/22.11 导出符号声明（仅 feature 编译，`cargo check` /
-  `clippy --features dpdk` 通过），数据面未在真实设备上执行；上游从未调用的 `dpdk_init`
-  在本 port 懒加载调用一次，primary 监控 alarm 为尽力而为移植。
+  开发库，`rte_*` 运行时层按 DPDK 21.11/22.11 ABI 声明（仅 feature 编译，`cargo check` /
+  `clippy --features dpdk` 通过），数据面未在真实设备上执行；`rte_ring_sc_dequeue_burst_elem` 等
+  ring 出队函数在 DPDK 头文件中是 `static __rte_always_inline`、非 `librte_ring` 导出符号，真正链接
+  DPDK 主机时还需一个 C shim。上游从未调用的 `dpdk_init` 在本 port 懒加载调用一次，primary 监控
+  alarm 为尽力而为移植。
 - **CPM mTLS 客户端证书（PKCS#12）**（`cloud-probe-rs-ryg.2`，`PARITY.md` §2.7 / `SECURITY.md`）：
   当 `cpm.client.tls.pkcs12_cert_file` 非空时，用纯 Rust `p12` crate 解码 PKCS#12（仅
   `PBE-SHA1-RC2-40` / `PBE-SHA1-3DES`，与 oracle 的 `golang.org/x/crypto/pkcs12` 支持范围一致），

@@ -35,10 +35,18 @@
 //!
 //! DPDK development files are not present in the porting environment, so the
 //! `rte_*` layer could not be executed against a live device. It is written
-//! against the exported DPDK 21.11/22.11 ABI and compiled only with the feature
-//! on; the data path is not covered by tests and the primary-process monitor
-//! alarm is a best-effort port. See `PARITY.md` §5.1 and the module tests for
-//! the exact boundaries.
+//! against the DPDK 21.11/22.11 ABI and compiled only with the feature on; the
+//! data path is not covered by tests and the primary-process monitor alarm is a
+//! best-effort port.
+//!
+//! A direct link against a real DPDK tree is **not** possible from these
+//! declarations alone: `rte_ring_sc_dequeue_burst_elem` (like every other
+//! `rte_ring_*_dequeue_burst*` helper) is `static __rte_always_inline` in
+//! `rte_ring_elem.h` and is not exported by `librte_ring`. Running on a DPDK
+//! host additionally needs a small C shim that calls the inline helper (or an
+//! equivalent exported dequeue path). `rte_pktmbuf_pkt_len` is handled the same
+//! way by reading the documented `struct rte_mbuf` prefix directly. See
+//! `PARITY.md` §5.1 and the module tests for the exact boundaries.
 
 // The pure layer is exercised by the unit tests and by the feature-gated
 // runtime. In a plain `cargo build` (no `test`, no `dpdk`) it has no caller, so
@@ -218,11 +226,15 @@ mod runtime {
     use crate::stats::CaptureStats;
 
     // Direct bindings to the parts of the DPDK 21.11/22.11 ABI this capturer
-    // uses. Only *exported* symbols are declared: functions that are `static
-    // inline` in the DPDK headers (`rte_pktmbuf_read`,
-    // `rte_ring_sc_dequeue_burst`, the `rte_pktmbuf_*_len` accessors) are not
-    // linkable and are replaced by their documented lower-level equivalents /
-    // the `rte_mbuf` prefix below.
+    // uses. Symbols that are `static inline` in the DPDK headers
+    // (`rte_pktmbuf_read`, `rte_pktmbuf_pkt_len`, and every
+    // `rte_ring_*_dequeue_burst*` helper, including the `_elem` variant) are not
+    // exported by the DPDK libraries, so a direct link would fail. The
+    // declarations below are a *declarative* ABI mapping that compiles and
+    // type-checks with `--features dpdk`; a live DPDK tree additionally needs a
+    // C shim wrapping the static-inline `rte_ring_sc_dequeue_burst` (see the
+    // module-level "Residual gaps" note), and the `rte_mbuf` prefix below
+    // replaces the `rte_pktmbuf_pkt_len` accessor.
     unsafe extern "C" {
         fn rte_eal_init(argc: c_int, argv: *mut *mut c_char) -> c_int;
         fn rte_socket_id() -> c_uint;
