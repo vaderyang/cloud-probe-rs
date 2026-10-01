@@ -523,6 +523,260 @@ unsafe fn parse_control(msg: &libc::msghdr) -> (Option<(i64, i64)>, Option<VlanT
     (ts, vlan)
 }
 
+// ---------------------------------------------------------------------------
+// `TPACKET_V3` receive ring
+// ---------------------------------------------------------------------------
+//
+// The default (`recvmsg`) path costs one syscall per frame; on a 64-byte 100G
+// flood the profile is ~94% inside `packet_recvmsg` (skb copy, skb free, the
+// socket lock), which caps capture at ~0.5 Mpps. A `PACKET_RX_RING` mmap lets
+// the kernel write frames straight into userspace, removing that syscall. The
+// ring is set up on a best-effort basis after the bind: if the kernel, the
+// container policy or the buffer size rejects it, the capturer keeps using
+// `recvmsg` unchanged.
+
+/// `enum tpacket_versions::TPACKET_V3`, the value written to `PACKET_VERSION`.
+const TPACKET_V3_VERSION: libc::c_int = 2;
+/// Target ring block size; the effective size is rounded up to a page-aligned
+/// multiple of the frame size.
+const RING_BLOCK_TARGET: usize = 1 << 20;
+/// Upper bound on the number of blocks, so a huge `buffer_size_mb` cannot ask
+/// for an absurd mapping.
+const RING_MAX_BLOCKS: usize = 1024;
+/// `tp_retire_blk_tov`: retire a partially-filled block after this many
+/// milliseconds so low-rate links do not wait for a block to fill.
+const RING_BLK_TOV_MS: u32 = 1;
+/// `mmap` on a `PACKET_RX_RING` maps from offset 0.
+const RING_MMAP_OFFSET: libc::off_t = 0;
+
+/// Frame slot size for `snaplen`: the per-frame header plus the snap length,
+/// rounded up to `TPACKET_ALIGNMENT` (the kernel requires the alignment).
+fn ring_frame_size(snaplen: usize) -> usize {
+    let raw = libc::TPACKET3_HDRLEN + snaplen;
+    (raw + libc::TPACKET_ALIGNMENT - 1) & !(libc::TPACKET_ALIGNMENT - 1)
+}
+
+/// Greatest common divisor (Euclid).
+fn gcd(mut a: usize, mut b: usize) -> usize {
+    while b != 0 {
+        let t = b;
+        b = a % b;
+        a = t;
+    }
+    a
+}
+
+/// Least common multiple; `frame_size` and the page size are both non-zero.
+fn lcm(a: usize, b: usize) -> usize {
+    a / gcd(a, b) * b
+}
+
+/// Ring block size in bytes.
+///
+/// The kernel requires `tp_block_size` to be a multiple of `PAGE_SIZE`, and for
+/// `TPACKET_V3` the block holds `tp_block_size / tp_frame_size` frames, so the
+/// size is chosen as a page-aligned multiple of `frame_size`: the smallest such
+/// multiple of `RING_BLOCK_TARGET` (but never more than `buffer_size`).
+fn ring_block_size(frame_size: usize, buffer_size: usize) -> usize {
+    let unit = lcm(frame_size, 4096);
+    let target = RING_BLOCK_TARGET.max(unit);
+    let size = target.div_ceil(unit) * unit;
+    if buffer_size >= unit && size > buffer_size {
+        unit * (buffer_size / unit).max(1)
+    } else {
+        size
+    }
+}
+
+/// Number of blocks for `buffer_size` bytes, clamped to `RING_MAX_BLOCKS` and
+/// at least 1.
+fn ring_block_nr(block_size: usize, buffer_size: usize) -> usize {
+    (buffer_size / block_size).clamp(1, RING_MAX_BLOCKS)
+}
+
+/// `setsockopt` for an arbitrary option payload.
+fn setsockopt_raw<T>(fd: RawFd, level: i32, name: i32, value: &T) -> std::io::Result<()> {
+    // SAFETY: `value` is a live, correctly-sized `T` for this optname.
+    let rc = unsafe {
+        libc::setsockopt(
+            fd,
+            level,
+            name,
+            std::ptr::from_ref(value).cast::<libc::c_void>(),
+            std::mem::size_of::<T>() as libc::socklen_t,
+        )
+    };
+    if rc == 0 {
+        Ok(())
+    } else {
+        Err(std::io::Error::last_os_error())
+    }
+}
+
+/// The 802.1Q tag the kernel reports in a `TPACKET_V3` frame header.
+fn ring_vlan(hdr: &libc::tpacket3_hdr) -> Option<VlanTag> {
+    if hdr.tp_status & libc::TP_STATUS_VLAN_VALID == 0 {
+        return None;
+    }
+    let tpid = if hdr.tp_status & libc::TP_STATUS_VLAN_TPID_VALID != 0 {
+        hdr.hv1.tp_vlan_tpid
+    } else {
+        DEFAULT_VLAN_TPID
+    };
+    Some(VlanTag {
+        tci: u16::try_from(hdr.hv1.tp_vlan_tci).unwrap_or(0),
+        tpid,
+    })
+}
+
+/// A mapped `PACKET_RX_RING` in `TPACKET_V3` mode.
+struct Ring {
+    /// Mapping base (`mmap`); `map_len == 0` marks a test buffer that must not
+    /// be unmapped.
+    base: *mut u8,
+    map_len: usize,
+    block_size: usize,
+    block_nr: usize,
+    /// Next block to hand back to the kernel (round-robin).
+    next: usize,
+}
+
+impl Ring {
+    /// Configure and map the ring on an already-bound socket.
+    fn new(fd: RawFd, snaplen: usize, buffer_size: usize) -> std::io::Result<Self> {
+        let frame_size = ring_frame_size(snaplen);
+        let block_size = ring_block_size(frame_size, buffer_size);
+        let block_nr = ring_block_nr(block_size, buffer_size);
+        let block_frames = block_size / frame_size;
+        let req = libc::tpacket_req3 {
+            tp_block_size: u32::try_from(block_size).unwrap_or(u32::MAX),
+            tp_block_nr: u32::try_from(block_nr).unwrap_or(u32::MAX),
+            tp_frame_size: u32::try_from(frame_size).unwrap_or(u32::MAX),
+            tp_frame_nr: u32::try_from(block_nr * block_frames).unwrap_or(u32::MAX),
+            tp_retire_blk_tov: RING_BLK_TOV_MS,
+            tp_sizeof_priv: 0,
+            tp_feature_req_word: 0,
+        };
+        setsockopt_raw(fd, libc::SOL_PACKET, libc::PACKET_VERSION, &TPACKET_V3_VERSION)?;
+        setsockopt_raw(fd, libc::SOL_PACKET, libc::PACKET_RX_RING, &req)?;
+        let map_len = block_size * block_nr;
+        // SAFETY: `map_len` is the length the kernel just accepted for this fd;
+        // the flags are the documented ones for a `PACKET_RX_RING` mapping.
+        let base = unsafe {
+            libc::mmap(
+                std::ptr::null_mut(),
+                map_len,
+                libc::PROT_READ | libc::PROT_WRITE,
+                libc::MAP_SHARED,
+                fd,
+                RING_MMAP_OFFSET,
+            )
+        };
+        if base == libc::MAP_FAILED {
+            return Err(std::io::Error::last_os_error());
+        }
+        Ok(Ring {
+            base: base.cast::<u8>(),
+            map_len,
+            block_size,
+            block_nr,
+            next: 0,
+        })
+    }
+
+    /// A ring over a caller-owned buffer, for tests (never unmapped).
+    #[cfg(test)]
+    fn over_buffer(base: *mut u8, block_size: usize, block_nr: usize) -> Self {
+        Ring {
+            base,
+            map_len: 0,
+            block_size,
+            block_nr,
+            next: 0,
+        }
+    }
+
+    fn block_ptr(&self, index: usize) -> *mut libc::tpacket_block_desc {
+        // SAFETY: index < block_nr, so `index * block_size` is inside the map.
+        unsafe { self.base.add(index * self.block_size) }.cast::<libc::tpacket_block_desc>()
+    }
+
+    /// Visit every frame the kernel has queued, returning them to the kernel
+    /// block by block. Stops at the first block that is not `TP_STATUS_USER`.
+    fn drain(&mut self, mut visit: impl FnMut(&libc::tpacket3_hdr, &[u8])) -> u64 {
+        let mut delivered = 0u64;
+        for _ in 0..self.block_nr {
+            let bd = self.block_ptr(self.next);
+            // The block descriptor is a union whose only member (`bh1`) starts
+            // at the block base.
+            // SAFETY: `bd` points at one mapped block.
+            let bh1 = unsafe { std::ptr::addr_of_mut!((*bd).hdr) }.cast::<libc::tpacket_hdr_v1>();
+            // Volatile: the kernel publishes `block_status` concurrently.
+            // SAFETY: `bh1` points inside the mapped block.
+            let status =
+                unsafe { std::ptr::read_volatile(std::ptr::addr_of!((*bh1).block_status)) };
+            if status & libc::TP_STATUS_USER == 0 {
+                break;
+            }
+            // SAFETY: the kernel filled these fields before setting the status.
+            let (num_pkts, first) = unsafe { ((*bh1).num_pkts as usize, (*bh1).offset_to_first_pkt as usize) };
+            let block_start = self.next * self.block_size;
+            let mut off = first;
+            for _ in 0..num_pkts {
+                if off >= self.block_size {
+                    break;
+                }
+                // SAFETY: `off` is inside the block (checked above).
+                let ph = unsafe { self.base.add(block_start + off) }.cast::<libc::tpacket3_hdr>();
+                // SAFETY: `ph` is inside the mapped block.
+                let hdr = unsafe { &*ph };
+                let mac_off = usize::from(hdr.tp_mac);
+                let want = usize::try_from(hdr.tp_snaplen).unwrap_or(0);
+                // Never read past the end of the block, whatever the header says.
+                let avail = want.min(self.block_size.saturating_sub(off + mac_off));
+                if avail > 0 {
+                    // SAFETY: `off + mac_off + avail <= block_size`.
+                    let data = unsafe { std::slice::from_raw_parts(ph.cast::<u8>().add(mac_off), avail) };
+                    visit(hdr, data);
+                    delivered += 1;
+                }
+                let step = usize::try_from(hdr.tp_next_offset).unwrap_or(0);
+                if step == 0 {
+                    break;
+                }
+                off += step;
+            }
+            // Hand the whole block back to the kernel.
+            // SAFETY: `bh1` points at a live block desc we own while
+            // `block_status == TP_STATUS_USER`.
+            unsafe {
+                std::ptr::write_volatile(
+                    std::ptr::addr_of_mut!((*bh1).block_status),
+                    libc::TP_STATUS_KERNEL,
+                );
+            }
+            self.next = (self.next + 1) % self.block_nr;
+        }
+        delivered
+    }
+}
+
+impl Drop for Ring {
+    fn drop(&mut self) {
+        if self.map_len != 0 {
+            // SAFETY: `base`/`map_len` came from a successful `mmap` in `new`.
+            unsafe {
+                libc::munmap(self.base.cast::<libc::c_void>(), self.map_len);
+            }
+        }
+    }
+}
+
+/// The ring owns its mapping and is only ever touched from the capturer's own
+/// thread, but a raw pointer makes it `!Send`; it is uniquely owned, so moving
+/// it between threads is sound (the `Capturer` trait requires `Send`).
+unsafe impl Send for Ring {}
+
 /// Live capture from a network interface via `AF_PACKET`.
 pub struct AfPacketCapturer {
     stats: Arc<CaptureStats>,
@@ -541,6 +795,10 @@ pub struct AfPacketCapturer {
     /// Drop `PACKET_OUTGOING` frames in userspace (loopback without kernel
     /// `PACKET_IGNORE_OUTGOING` support).
     drop_outgoing: bool,
+    /// `TPACKET_V3` mmap ring, when it could be set up. When present,
+    /// [`AfPacketCapturer::capture_once`] drains it instead of calling
+    /// `recvmsg` once per frame.
+    ring: Option<Ring>,
 
     drops: DropCounter,
     backoff: ErrorBackoff,
@@ -667,6 +925,35 @@ impl AfPacketCapturer {
         bind_socket(fd.as_raw_fd(), &cfg.interface)?;
 
         let snaplen = cfg.snaplen.max(1) as usize;
+
+        // Try to replace the per-frame `recvmsg` with a `TPACKET_V3` mmap ring.
+        // A ring carries no `sll_pkttype`, so when the loopback outgoing copy
+        // still has to be dropped in userspace, or when the config disables the
+        // ring (`libpcap.ring: false`), keep the `recvmsg` path. Any failure here
+        // is non-fatal: the capturer keeps working via `recvmsg`.
+        let ring = if drop_outgoing || !cfg.ring {
+            None
+        } else {
+            match Ring::new(fd.as_raw_fd(), snaplen, buffer_size.max(0) as usize) {
+                Ok(r) => {
+                    crate::log_info!(
+                        "capture ring: TPACKET_V3 on {}, {} blocks x {} bytes",
+                        cfg.interface,
+                        r.block_nr,
+                        r.block_size
+                    );
+                    Some(r)
+                }
+                Err(e) => {
+                    crate::log_warn!(
+                        "PACKET_RX_RING unavailable on {} ({e}); using recvmsg",
+                        cfg.interface
+                    );
+                    None
+                }
+            }
+        };
+
         Ok(AfPacketCapturer {
             stats,
             fd,
@@ -678,6 +965,7 @@ impl AfPacketCapturer {
             buf: vec![0u8; snaplen + VLAN_HDR_LEN],
             userspace_filter,
             drop_outgoing,
+            ring,
             drops: DropCounter::default(),
             backoff: ErrorBackoff::default(),
             next_error: None,
@@ -737,7 +1025,7 @@ impl AfPacketCapturer {
     /// reinserting any stripped VLAN tag. `Ok(None)` means "would block".
     fn recv_matching(&mut self) -> std::io::Result<Option<RecvMeta>> {
         loop {
-            let Some(mut meta) = self.recv_into_buf()? else {
+            let Some(meta) = self.recv_into_buf()? else {
                 return Ok(None);
             };
             // Userspace fallback for the loopback outgoing copy (when the kernel
@@ -753,16 +1041,6 @@ impl AfPacketCapturer {
                 .is_none_or(|p| p.apply(&self.buf[..meta.caplen as usize]));
             if !matched {
                 continue;
-            }
-            if let Some(v) = meta.vlan {
-                if let Some(new_caplen) =
-                    insert_vlan(&mut self.buf, meta.caplen as usize, v, self.snaplen)
-                {
-                    meta.caplen = new_caplen as u32;
-                    // The on-wire frame carried the tag, so the original length
-                    // grows by it even when `caplen` was clamped to `snaplen`.
-                    meta.len += VLAN_HDR_LEN as u32;
-                }
             }
             return Ok(Some(meta));
         }
@@ -799,10 +1077,104 @@ impl AfPacketCapturer {
         let add = self.drops.update(now, sample);
         self.stats.drop_packets.add(add);
     }
+
+    /// Reinsert a stripped VLAN tag, compute the direction, account the frame
+    /// and hand it to `sink`. Shared by the `recvmsg` and ring paths.
+    fn deliver_matching(&mut self, mut meta: RecvMeta, sink: &mut dyn PacketSink) {
+        if let Some(v) = meta.vlan {
+            if let Some(new_caplen) =
+                insert_vlan(&mut self.buf, meta.caplen as usize, v, self.snaplen)
+            {
+                meta.caplen = new_caplen as u32;
+                // The on-wire frame carried the tag, so the original length
+                // grows by it even when `caplen` was clamped to `snaplen`.
+                meta.len += VLAN_HDR_LEN as u32;
+            }
+        }
+        let hdr = PacketHeader {
+            ts_sec: meta.ts_sec,
+            ts_usec: meta.ts_usec,
+            caplen: meta.caplen,
+            len: meta.len,
+        };
+        let caplen = meta.caplen as usize;
+        let direction = match &self.req_pattern {
+            None => PKT_DIR_NONCHECK,
+            Some(rp) => rp.judge_pkt_direction(&self.buf[..caplen]),
+        };
+        self.stats.cap_bytes.add(u64::from(meta.caplen));
+        self.stats.cap_packets.add(1);
+        sink.on_packet(&hdr, &self.buf[..caplen], direction);
+    }
+
+    /// `capture_once` for the mmap ring: drain every queued block and, when the
+    /// ring was empty, wait for readability once and drain again.
+    fn capture_once_ring(&mut self, sink: &mut dyn PacketSink) -> u64 {
+        // Take the ring out of `self` so the closure can borrow the rest of it.
+        let mut ring = self.ring.take().expect("ring path requires a ring");
+        let mut n = ring.drain(|hdr, data| self.consume_ring_frame(hdr, data, sink));
+        if n == 0 {
+            let mut pfd = libc::pollfd {
+                fd: self.fd.as_raw_fd(),
+                events: libc::POLLIN,
+                revents: 0,
+            };
+            // SAFETY: single valid pollfd.
+            let r = unsafe { libc::poll(&mut pfd, 1, readability_wait_ms(self.timeout_ms)) };
+            if r > 0 && (pfd.revents & libc::POLLIN) != 0 {
+                n = ring.drain(|hdr, data| self.consume_ring_frame(hdr, data, sink));
+            }
+        }
+        self.ring = Some(ring);
+
+        let now = now_sec();
+        if n == 0 {
+            sink.on_heartbeat();
+        }
+        self.backoff.reset();
+        self.update_drop_stats(now);
+        n
+    }
+
+    /// Turn one ring frame into a delivery (the ring counterpart of
+    /// `recv_matching` + `deliver_matching`).
+    fn consume_ring_frame(
+        &mut self,
+        hdr: &libc::tpacket3_hdr,
+        data: &[u8],
+        sink: &mut dyn PacketSink,
+    ) {
+        // `TP_STATUS_COPY` means the frame did not fit and must be read with
+        // `recvmsg`; a large enough frame size avoids it, so skipping is safe.
+        if hdr.tp_status & libc::TP_STATUS_COPY != 0 {
+            return;
+        }
+        let caplen = data.len().min(self.snaplen);
+        self.buf[..caplen].copy_from_slice(&data[..caplen]);
+        let matched = self
+            .userspace_filter
+            .as_ref()
+            .is_none_or(|p| p.apply(&self.buf[..caplen]));
+        if !matched {
+            return;
+        }
+        let meta = RecvMeta {
+            ts_sec: i64::from(hdr.tp_sec),
+            ts_usec: i64::from(hdr.tp_nsec / 1000),
+            caplen: u32::try_from(caplen).unwrap_or(u32::MAX),
+            len: hdr.tp_len,
+            vlan: ring_vlan(hdr),
+            pkt_type: 0,
+        };
+        self.deliver_matching(meta, sink);
+    }
 }
 
 impl Capturer for AfPacketCapturer {
     fn capture_once(&mut self, sink: &mut dyn PacketSink) -> u64 {
+        if self.ring.is_some() {
+            return self.capture_once_ring(sink);
+        }
         // Try to receive first (the socket is always non-blocking); only when it
         // would block do we wait for readability.
         let mut res = self.recv_matching();
@@ -824,20 +1196,7 @@ impl Capturer for AfPacketCapturer {
         match res {
             Ok(Some(meta)) => {
                 self.backoff.reset();
-                let hdr = PacketHeader {
-                    ts_sec: meta.ts_sec,
-                    ts_usec: meta.ts_usec,
-                    caplen: meta.caplen,
-                    len: meta.len,
-                };
-                let caplen = meta.caplen as usize;
-                let direction = match &self.req_pattern {
-                    None => PKT_DIR_NONCHECK,
-                    Some(rp) => rp.judge_pkt_direction(&self.buf[..caplen]),
-                };
-                self.stats.cap_bytes.add(u64::from(meta.caplen));
-                self.stats.cap_packets.add(1);
-                sink.on_packet(&hdr, &self.buf[..caplen], direction);
+                self.deliver_matching(meta, sink);
                 num_pkts = 1;
                 // The 2-second cadence below is compared against this value, so it
                 // must be the same clock in every branch: packet timestamps can be
@@ -886,6 +1245,146 @@ impl Capturer for AfPacketCapturer {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ---- TPACKET_V3 ring helpers -----------------------------------------
+
+    /// Lay out one `TPACKET_V3` frame at `off` in `buf`, returning the offset
+    /// just past it (16-byte aligned).
+    fn write_ring_frame(buf: &mut [u8], off: usize, payload: &[u8], next_off: u32) -> usize {
+        let mac_off = libc::TPACKET3_HDRLEN;
+        // SAFETY: `buf` is 8-aligned and `off + header + payload` is in range
+        // for the test layout below.
+        unsafe {
+            let h = buf.as_mut_ptr().add(off).cast::<libc::tpacket3_hdr>();
+            h.write(std::mem::zeroed());
+            (*h).tp_snaplen = u32::try_from(payload.len()).unwrap();
+            (*h).tp_len = u32::try_from(payload.len()).unwrap();
+            (*h).tp_mac = u16::try_from(mac_off).unwrap();
+            (*h).tp_next_offset = next_off;
+            (*h).tp_status = libc::TP_STATUS_USER;
+        }
+        let data = off + mac_off;
+        buf[data..data + payload.len()].copy_from_slice(payload);
+        (data + payload.len() + 15) & !15
+    }
+
+    /// Publish a block descriptor as ready (`TP_STATUS_USER`).
+    fn write_block_desc(buf: &mut [u8], block_off: usize, num_pkts: u32, first_off: u32) {
+        // SAFETY: `block_off` is a block boundary in `buf`.
+        unsafe {
+            let bd = buf.as_mut_ptr().add(block_off).cast::<libc::tpacket_block_desc>();
+            let bh1 = std::ptr::addr_of_mut!((*bd).hdr).cast::<libc::tpacket_hdr_v1>();
+            (*bh1).block_status = libc::TP_STATUS_USER;
+            (*bh1).num_pkts = num_pkts;
+            (*bh1).offset_to_first_pkt = first_off;
+        }
+    }
+
+    fn block_status(buf: &[u8], block_off: usize) -> u32 {
+        // SAFETY: `block_off` is a block boundary in `buf`.
+        unsafe {
+            let bd = buf.as_ptr().add(block_off).cast::<libc::tpacket_block_desc>();
+            let bh1 = std::ptr::addr_of!((*bd).hdr).cast::<libc::tpacket_hdr_v1>();
+            std::ptr::read_volatile(std::ptr::addr_of!((*bh1).block_status))
+        }
+    }
+
+    #[test]
+    fn ring_frame_size_is_aligned_and_fits_the_snap_len() {
+        let frame = ring_frame_size(2048);
+        assert_eq!(frame % libc::TPACKET_ALIGNMENT, 0);
+        assert!(frame >= libc::TPACKET3_HDRLEN + 2048);
+        assert!(frame - (libc::TPACKET3_HDRLEN + 2048) < libc::TPACKET_ALIGNMENT);
+    }
+
+    #[test]
+    fn gcd_and_lcm_are_correct() {
+        assert_eq!(gcd(2128, 4096), 16);
+        assert_eq!(lcm(2128, 4096), 544_768);
+        assert_eq!(gcd(4096, 4096), 4096);
+    }
+
+    #[test]
+    fn ring_block_size_is_page_aligned_and_a_multiple_of_the_frame() {
+        let frame = ring_frame_size(2048);
+        let size = ring_block_size(frame, 256 * 1024 * 1024);
+        assert_eq!(size % 4096, 0);
+        assert_eq!(size % frame, 0);
+        assert!(size >= RING_BLOCK_TARGET);
+        // A buffer smaller than one unit still yields a valid (unit-sized) block.
+        let small = ring_block_size(frame, 4096);
+        assert_eq!(small % 4096, 0);
+        assert_eq!(small % frame, 0);
+    }
+
+    #[test]
+    fn ring_block_nr_is_bounded() {
+        assert_eq!(ring_block_nr(1 << 20, 0), 1);
+        assert_eq!(ring_block_nr(1 << 20, 8 << 20), 8);
+        assert_eq!(ring_block_nr(1, usize::MAX / 2), RING_MAX_BLOCKS);
+    }
+
+    #[test]
+    fn ring_drain_visits_every_frame_and_returns_the_block() {
+        let block_size = 1 << 16;
+        let block_nr = 2;
+        let total = block_size * block_nr;
+        // `Vec<u64>` keeps the mapping 8-aligned for `tpacket_hdr_v1`.
+        let mut storage = vec![0u64; total / std::mem::size_of::<u64>()];
+        let base = storage.as_mut_ptr().cast::<u8>();
+        // SAFETY: `storage` outlives `ring`; `over_buffer` never unmaps it.
+        let mut ring = Ring::over_buffer(base, block_size, block_nr);
+
+        // Block 0 holds two frames; block 1 stays kernel-owned (empty).
+        // `offset_to_first_pkt` must clear the block descriptor at offset 0.
+        // SAFETY: `base` is valid for `total` bytes.
+        let buf = unsafe { std::slice::from_raw_parts_mut(base, total) };
+        let first = 64usize;
+        let f2 = first + 128;
+        write_ring_frame(buf, first, b"AAAAAAAA", u32::try_from(f2 - first).unwrap());
+        write_ring_frame(buf, f2, b"BBBBBBBB", 0);
+        write_block_desc(buf, 0, 2, u32::try_from(first).unwrap());
+
+        let mut seen: Vec<Vec<u8>> = Vec::new();
+        let n = ring.drain(|_hdr, data| seen.push(data.to_vec()));
+        assert_eq!(n, 2);
+        assert_eq!(seen, vec![b"AAAAAAAA".to_vec(), b"BBBBBBBB".to_vec()]);
+        // The block was handed back to the kernel.
+        assert_eq!(block_status(buf, 0), libc::TP_STATUS_KERNEL);
+        // Round-robin moved to block 1, which has no data.
+        assert_eq!(ring.drain(|_, _| {}), 0);
+        // A block the kernel later republishes is drained again.
+        write_ring_frame(buf, block_size + first, b"CCCCCCCC", 0);
+        write_block_desc(buf, block_size, 1, u32::try_from(first).unwrap());
+        let mut again = Vec::new();
+        assert_eq!(ring.drain(|_hdr, data| again.push(data.to_vec())), 1);
+        assert_eq!(again, vec![b"CCCCCCCC".to_vec()]);
+    }
+
+    #[test]
+    fn ring_vlan_reads_the_valid_tag() {
+        // SAFETY: all fields are integers.
+        let mut h: libc::tpacket3_hdr = unsafe { std::mem::zeroed() };
+        assert_eq!(ring_vlan(&h), None);
+        h.tp_status = libc::TP_STATUS_VLAN_VALID | libc::TP_STATUS_VLAN_TPID_VALID;
+        h.hv1.tp_vlan_tci = 0x64;
+        h.hv1.tp_vlan_tpid = 0x88a8;
+        assert_eq!(
+            ring_vlan(&h),
+            Some(VlanTag {
+                tci: 0x64,
+                tpid: 0x88a8
+            })
+        );
+        h.tp_status = libc::TP_STATUS_VLAN_VALID;
+        assert_eq!(
+            ring_vlan(&h),
+            Some(VlanTag {
+                tci: 0x64,
+                tpid: DEFAULT_VLAN_TPID
+            })
+        );
+    }
 
     #[test]
     fn drop_counter_adds_read_cleared_samples() {

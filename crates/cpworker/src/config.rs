@@ -81,6 +81,12 @@ pub const DEFAULT_TIMEOUT_MS: i64 = 0;
 /// point on a trunk/SPAN port needs it to see unregistered-VLAN and foreign-MAC
 /// frames (see `PARITY.md` §2.5 / `FIELD_CONFIRMATION.md` §2).
 pub const DEFAULT_PROMISC: bool = true;
+
+/// Default `libpcap.ring`: use the `TPACKET_V3` mmap ring.
+///
+/// Set `libpcap.ring: false` to force the per-frame `recvmsg` path (a fallback
+/// for kernels/filesystems where `PACKET_RX_RING` is unavailable or undesirable).
+pub const DEFAULT_RING: bool = true;
 /// Default `dpdk_pdump.ring_size` when the key is absent.
 pub const DEFAULT_RING_SIZE: i64 = 2_048;
 /// Largest accepted `snaplen`: libpcap's own maximum snapshot length. `libpcap`
@@ -294,6 +300,13 @@ pub struct LibpcapConfig {
     /// frames) and on SPAN/trunk ports; the C `libpcap` oracle hardcodes this
     /// off, so it is an intentional, documented divergence.
     pub promisc: bool,
+    /// Use a `TPACKET_V3` `PACKET_RX_RING` mmap instead of one `recvmsg` per
+    /// frame.
+    ///
+    /// Defaults to [`DEFAULT_RING`]. The ring removes the per-packet syscall
+    /// (measured ~5x capture throughput and ~14x less process CPU on a 64-byte
+    /// 100G flood). `false` forces the `recvmsg` fallback.
+    pub ring: bool,
 }
 
 impl LibpcapConfig {
@@ -704,6 +717,8 @@ struct RawLibpcap {
     not_filter_output_hosts: Option<bool>,
     #[serde(default, deserialize_with = "de_nonnull")]
     promisc: Option<bool>,
+    #[serde(default, deserialize_with = "de_nonnull")]
+    ring: Option<bool>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1099,6 +1114,7 @@ impl RawCapturer {
                     )?,
                     not_filter_output_hosts: c.not_filter_output_hosts.unwrap_or(false),
                     promisc: c.promisc.unwrap_or(DEFAULT_PROMISC),
+                    ring: c.ring.unwrap_or(DEFAULT_RING),
                 })
             }
             CAPTURER_TYPE_PCAP_FILE => {
@@ -1423,6 +1439,20 @@ mod tests {
     fn libpcap_promisc_rejects_null() {
         let e = with_libpcap("\"promisc\":null").unwrap_err().to_string();
         assert!(e.contains("null value not allowed"), "{e}");
+    }
+
+    /// `libpcap.ring` defaults to **true** (use the `TPACKET_V3` mmap ring);
+    /// `false` forces the per-frame `recvmsg` fallback.
+    #[test]
+    fn libpcap_ring_defaults_to_true_and_is_configurable() {
+        let ring = |kv: &str| match &with_libpcap(kv).expect("parse").tasks[0].capturer.kind {
+            CapturerKind::Libpcap(l) => l.ring,
+            other => panic!("expected libpcap capturer, got {other:?}"),
+        };
+        assert!(ring("\"interface\":\"eth0\""), "absent -> true");
+        assert!(ring("\"ring\":true"), "explicit true");
+        assert!(!ring("\"ring\":false"), "explicit false");
+        assert_eq!(DEFAULT_RING, ring("\"interface\":\"eth0\""));
     }
 
     /// Build a one-task config whose libpcap capturer carries `kv`.
@@ -1751,6 +1781,7 @@ mod accessor_tests {
             timeout_ms: 0,
             not_filter_output_hosts: false,
             promisc: DEFAULT_PROMISC,
+            ring: DEFAULT_RING,
         }
     }
 

@@ -4,10 +4,10 @@ Real-hardware comparison of the two cpworker capture backends in this port, on
 the 100 GbE Mellanox ConnectX‑6 Dx link between **laojun** (`10.2.0.12`,
 traffic generator) and **yinjiao** (`10.2.0.11`, capture host).
 
-- **AF_PACKET** — the `libpcap` capturer type is implemented as a plain
-  `AF_PACKET`/`SOCK_RAW` socket with a large `SO_RCVBUF` and one `recvmsg` per
-  packet (`crates/cpworker/src/capturer/af_packet.rs`). It is **not** libpcap's
-  TPACKET_V3 mmap ring.
+- **AF_PACKET** — the `libpcap` capturer type is implemented as an
+  `AF_PACKET` socket (`crates/cpworker/src/capturer/af_packet.rs`), now backed by
+  a **`TPACKET_V3` `PACKET_RX_RING` mmap** (with a `recvmsg`-per-packet fallback).
+  It is **not** libpcap itself.
 - **DPDK pdump** — an external DPDK primary (`verification/dpdk/primary.c`,
   `rte_pdump_init()` + `rte_eth_rx_burst`) plus cpworker as a DPDK secondary that
   drains the pdump ring (`crates/cpworker/src/capturer/dpdk_pdump.rs`), DPDK 25.11.
@@ -65,6 +65,32 @@ congestion back-pressures the generator and caps the offered load).
   primaries and multiple cpworker tasks were not tested.
 - Measured on kernel 5.15 with DPDK 25.11, `--iova-mode=va`, bifurcated mlx5
   (kernel netdev kept up during the DPDK runs).
+
+## AF_PACKET ring improvement (cloud-probe-rs-c7o)
+
+`af_packet.rs` originally read **one frame per `recvmsg` call**. A `perf` profile
+of the 64-byte flood put ~94% of the capture CPU inside `packet_recvmsg` (skb
+copy + skb free + the socket lock) — that, not userspace, is what capped it at
+~0.47 Mpps.
+
+The capturer now sets up a **`TPACKET_V3` `PACKET_RX_RING` mmap** after the bind
+and drains whole blocks per `capture_once`; it falls back to `recvmsg` if the
+kernel rejects the ring, or on loopback when the outgoing copy still has to be
+filtered in userspace. Same 64-byte flood (~117–135 Mpps on the wire):
+
+| version | captured | cap % of wire | cpworker CPU |
+|---|---:|---:|---:|
+| `recvmsg` (before) | 0.47 Mpps | 0.36 % | 100 % |
+| `TPACKET_V3` ring (after) | **2.5 Mpps** | 1.9 % | **~7 %** |
+| `tcpdump` / libpcap V3 (reference) | 1.93 Mpps | — | — |
+
+- **~5× more frames captured, ~14× less process CPU.**
+- The ring is **faster than libpcap's own `TPACKET_V3`** (2.57 vs 1.93 Mpps at the
+  same offered load). The residual loss is the kernel/NIC interface
+  (`rx_out_of_buffer`, tcpdump's "dropped by interface"), not the capturer.
+- Going further needs `PACKET_FANOUT` with one socket per NIC RX queue: a single
+  `AF_PACKET` socket serialises on the ring block lock (adding RX queues did not
+  help — 4 queues stayed at ~2.45 Mpps).
 
 ## Practical notes / pitfalls
 

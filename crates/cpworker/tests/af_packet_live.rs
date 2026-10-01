@@ -267,6 +267,60 @@ fn live_capture_on_loopback_with_filter() {
     assert!(stats.cap_packets.load().0 >= 1);
 }
 
+/// `libpcap.ring: false` must force the per-frame `recvmsg` fallback and still
+/// capture. This keeps the fallback path exercised: the `TPACKET_V3` ring is the
+/// default, so without this test the whole `recvmsg` path is dead in coverage.
+#[test]
+#[ignore = "requires CAP_NET_RAW (run with sudo) on lo"]
+fn live_capture_recvmsg_fallback_without_ring() {
+    assert_privileged("live_capture_recvmsg_fallback_without_ring");
+    const PORT: u16 = 41235;
+    let json = format!(
+        r#"{{
+            "log_level": "INFO",
+            "execution_model": "rtc",
+            "tasks": [{{
+                "capturer": {{ "type": "libpcap", "libpcap": {{
+                    "interface": "lo",
+                    "bpf": "udp and port {PORT}",
+                    "timeout_ms": 200,
+                    "ring": false
+                }} }},
+                "outputs": []
+            }}]
+        }}"#
+    );
+    let cfg = Config::parse_str(&json).expect("parse config");
+    let tasks = cfg.tasks.clone();
+    let stats = Arc::new(CaptureStats::default());
+    let mut cap = new_capturer(&tasks, &tasks[0], stats.clone()).expect("capturer");
+
+    let sender = std::thread::spawn(move || {
+        let sock = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
+        let dst = format!("127.0.0.1:{PORT}");
+        for _ in 0..200 {
+            let _ = sock.send_to(b"hello-cpworker", &dst);
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+    });
+
+    let mut sink = Collect::default();
+    for _ in 0..50 {
+        cap.capture_once(&mut sink);
+        if !sink.pkts.is_empty() {
+            break;
+        }
+    }
+    sender.join().unwrap();
+
+    assert!(
+        !sink.pkts.is_empty(),
+        "no packets captured on lo via the recvmsg fallback (heartbeats={})",
+        sink.heartbeats
+    );
+    assert!(stats.cap_packets.load().0 >= 1);
+}
+
 /// Create a veth pair and check that a stripped 802.1Q tag is re-inserted
 /// (`PACKET_AUXDATA`), matching what libpcap does.
 #[test]
