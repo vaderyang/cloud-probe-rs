@@ -82,6 +82,7 @@ oracle · — not applicable.
 | ether host | `ether host 00:11:22:33:44:55` | ✅ | ✅ | ✅ | either direction |
 | ether src/dst | `ether src host …`, `ether dst host …` | ✅ | ✅ | ✅ | colon or dash separators |
 | MAC with dash | `ether host aa-bb-cc-dd-ee-ff` | ✅ | ✅ | ✅ | |
+| ether proto | `ether proto 0x0800`, `ether proto 2048`, `ether proto \ip` | ✅ | ✅ | ✅ | value > 1500 → `ldh [12]; jeq N`; value ≤ 1500 is treated as an 802.3 length (compares the LLC byte at offset 14), exactly like libpcap. Named escapes `\ip`/`\ip6`/`\arp`/`\rarp` supported (bead **57d**). |
 
 ### 2.6 `nic.<ifname>` tokens (pre-processing, not grammar)
 
@@ -98,8 +99,7 @@ is the to-do list.
 
 | Construct | Syntax example | Rust | Oracle | Notes / impact |
 |---|---|---|---|---|
-| VLAN | `vlan`, `vlan 100`, `vlan and tcp` | ❌ | ✅ | **field-relevant**: trunk/SPAN captures. Tracks bead **57d** for `ether proto`; VLAN is the same family. |
-| EtherType by value | `ether proto 0x0800`, `ether proto 2048` | ❌ | ✅ | bead **57d**. `ether proto ip` is rejected by both. |
+| VLAN | `vlan`, `vlan 100`, `vlan and tcp` | ❌ | ✅ | **field-relevant**: trunk/SPAN captures. Note: on a real NIC, non-promiscuous capture already *drops* unregistered-VLAN frames before BPF (`FIELD_CONFIRMATION.md` §2/§4). |
 | MPLS | `mpls`, `mpls and ip` | ❌ | ✅ | |
 | PPPoE session | `pppoes` | ❌ | ✅ | |
 | Length comparisons | `greater 64`, `less 64`, `len > 64`, `len >= 64`, `len = 64`, `len != 64` | ❌ | ✅ | |
