@@ -1,0 +1,25 @@
+{
+  "time": "2026-10-01T20:59:38.862244+00:00",
+  "hosts": {
+    "yinjiao": {
+      "sriov_numvfs": 0,
+      "pause": "Pause parameters for ens8np0:\nAutonegotiate:\toff\nRX:\t\ton\nTX:\t\ton\n\n",
+      "test_processes": "",
+      "dpdk_runtime_entries": [],
+      "core_files": [],
+      "hugepages": [
+        628,
+        396
+      ],
+      "nfs_statfs": "  File: \"/cold\"\n    ID: 0        Namelen: 255     Type: nfs\nBlock size: 1048576    Fundamental block size: 1048576\nBlocks: Total: 75990947   Free: 57283059   Available: 53468260\nInodes: Total: 1220730880 Free: 1210803555\n",
+      "nfs_mount": "TARGET SOURCE\n/cold  10.2.0.12:/cold\n"
+    },
+    "laojun": {
+      "sriov_numvfs": 0,
+      "pause": "Pause parameters for ens72np0:\nAutonegotiate:\toff\nRX:\t\ton\nTX:\t\ton\n\n",
+      "test_processes": "",
+      "dpdk_runtime_entries": [],
+      "core_files": []
+    }
+  }
+}

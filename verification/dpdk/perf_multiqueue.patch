@@ -1,0 +1,81 @@
+--- a/crates/cpworker/src/capturer/dpdk_pdump.rs
++++ b/crates/cpworker/src/capturer/dpdk_pdump.rs
+@@ -397,9 +397,9 @@
+     }
+ 
+     /// `cleanup_pdump_resources`: only reached for a successfully-enabled port.
+-    fn cleanup_pdump_resources(port: u16, promiscuous_mode: bool) {
++    fn cleanup_pdump_resources(port: u16, queue: u16, promiscuous_mode: bool) {
+         unsafe {
+-            rte_pdump_disable(port, ALL_QUEUES, RTE_PDUMP_FLAG_RXTX);
++            rte_pdump_disable(port, queue, RTE_PDUMP_FLAG_RXTX);
+             if promiscuous_mode {
+                 rte_eth_promiscuous_disable(port);
+             }
+@@ -469,6 +469,7 @@
+         stats: Arc<CaptureStats>,
+         req_pattern: ReqPattern,
+         port: u16,
++        queue: u16,
+         promiscuous_mode: bool,
+         snaplen: u32,
+         bpf_prm: *mut c_void,
+@@ -500,7 +501,14 @@
+             unsafe {
+                 rte_pdump_init();
+             }
+-            let opts = DpdkPdumpOptions::from_config(cfg)?;
++            let mut opts = DpdkPdumpOptions::from_config(cfg)?;
++            static NEXT_QUEUE: std::sync::atomic::AtomicU16 = std::sync::atomic::AtomicU16::new(0);
++            let queue = if std::env::var_os("PERF_PDUMP_QUEUES").is_some() || std::env::var_os("PERF_PDUMP_QUEUE").is_some() {
++                let queue = std::env::var("PERF_PDUMP_QUEUE").ok().and_then(|s| s.parse::<u16>().ok()).unwrap_or_else(|| NEXT_QUEUE.fetch_add(1, Ordering::Relaxed));
++                opts.pool_name = format!("cpworker_capture_mbufs_q{queue}");
++                opts.ring_name = format!("cpworker_capture_ring_q{queue}");
++                queue
++            } else { ALL_QUEUES };
+             let req_pattern = ReqPattern::new_from_cfg(&task.req_pattern, &opts.interface)
+                 .map_err(|e| Error::new(format!("create req_pattern_t error: {e}")))?;
+ 
+@@ -549,7 +557,7 @@
+                 }
+             };
+ 
+-            if let Err(e) = enable_pdump(port, &opts, ring, mp, bpf_prm) {
++            if let Err(e) = enable_pdump(port, queue, &opts, ring, mp, bpf_prm) {
+                 unsafe {
+                     rte_free(bpf_prm);
+                     rte_ring_free(ring);
+@@ -565,6 +573,7 @@
+                 stats,
+                 req_pattern,
+                 port,
++                queue,
+                 promiscuous_mode: opts.promiscuous_mode,
+                 snaplen: opts.snaplen,
+                 bpf_prm,
+@@ -577,6 +586,7 @@
+ 
+     fn enable_pdump(
+         port: u16,
++        queue: u16,
+         opts: &DpdkPdumpOptions,
+         ring: *mut c_void,
+         mp: *mut c_void,
+@@ -591,7 +601,7 @@
+         let ret = unsafe {
+             rte_pdump_enable_bpf(
+                 port,
+-                ALL_QUEUES,
++                queue,
+                 pdump_flags(false),
+                 opts.snaplen,
+                 ring,
+@@ -616,7 +626,7 @@
+             // The primary's RX/TX callbacks still use the shared ring and
+             // clone pool until pdump is disabled. Unregister them before
+             // returning either allocation to EAL, including on task reload.
+-            cleanup_pdump_resources(self.port, self.promiscuous_mode);
++            cleanup_pdump_resources(self.port, self.queue, self.promiscuous_mode);
+             unsafe {
+                 if !self.bpf_prm.is_null() {
+                     rte_free(self.bpf_prm);

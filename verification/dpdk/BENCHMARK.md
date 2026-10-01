@@ -4,6 +4,10 @@ Real-hardware comparison of the two cpworker capture backends in this port, on
 the 100 GbE Mellanox ConnectX‑6 Dx link between **laojun** (`10.2.0.12`,
 traffic generator) and **yinjiao** (`10.2.0.11`, capture host).
 
+The historical measurements below are retained. The latest multi-queue,
+NUMA, producer-statistics and zero-copy investigation is in
+[Architecture investigation](#architecture-investigation-2026-10-01).
+
 - **AF_PACKET** — the `libpcap` capturer type is implemented as an
   `AF_PACKET` socket (`crates/cpworker/src/capturer/af_packet.rs`), now backed by
   a **`TPACKET_V3` `PACKET_RX_RING` mmap** (with a `recvmsg`-per-packet fallback).
@@ -129,3 +133,265 @@ mechanism — not DPDK's RX capability.
 - testpmd needs ≥2 lcores (master + forward) and `--txq`/`--nb-cores` set to use
   more than one TX queue; `--no-huge -m 4096 --total-num-mbufs=131072` on hosts
   without hugepages.
+
+## Architecture investigation (2026-10-01)
+
+**Result:** pdump is useful for compatibility, but is unsuitable for minimum-frame
+100G capture on this host. The retained cpworker changes plus NUMA-local placement
+and a 65536-entry ring delivered **28.89–29.01 Mpps**. An experimental cache
+override reached **31.71 Mpps**; four independent per-queue cpworker processes
+reached **54.11 Mpps**. Hardware mirroring worked, but plateaued at **66.48 Mpps
+per VF copy**. Direct in-primary RX with mlx5 MPRQ reached **139.31 Mpps**.
+
+### Conditions and evidence
+
+The capture NIC is ConnectX-6 Dx, PCIe Gen4 x16, NUMA node 1. The primary used
+node-1 CPUs 32 onward, one poller per RSS queue; the local secondary used CPU 48.
+DPDK was 25.11.0, firmware 22.45.1020, kernel 5.15. cpworker/cpctl were rebuilt
+from this working tree against the testbed's DPDK. The existing `ring_mp_mc`
+fix was present throughout. Outputs were `null`, without BPF or rate limits.
+
+Tests were serialized. Traffic bursts lasted roughly 8–11 seconds, with
+5–7-second measurement windows. Every rate uses its own counter interval:
+physical TX/RX counters, cpctl capture counters, and cumulative primary counters
+published once per second. These intervals are close but not identical, so
+small discrepancies between offered, wire, primary and captured rates are
+sampling effects. No confidence interval or sustained endurance result is claimed.
+
+Raw snapshots, case parameters and process CPU times are in
+[performance-2026-10-01.jsonl](performance-2026-10-01.jsonl) (66 cases, including
+failed probes). Flow results, NFS connectivity checks, and live shutdown evidence
+are in [performance-2026-10-01-mirror.json](performance-2026-10-01-mirror.json).
+Early sweeps used the original benchmark RX counter layout; later `padded-*`
+and MPRQ cases used separate cache lines per queue. Padding alone did not remove
+the standard-RX queue-count cliff.
+
+The generator's nominal `--txpkts=64` yielded **68 physical bytes per packet**,
+including FCS, as measured by packet/byte counters. With preamble and IFG its
+100G ceiling is about **142.05 Mpps**, rather than 148.81 Mpps. Thus 139.31 Mpps
+is about 98% of line rate for this traffic. Additional `--txpkts=60` tests
+produced true 64-byte Ethernet frames including FCS, but the generator delivered
+only 126.23 Mpps at its best tested setting. Loss-free 148.81 Mpps is unproven.
+
+### Pdump sweep
+
+Each row below changes only the named setting from the initial baseline unless
+marked local or combined. Baseline: 4 primary queues, snaplen 2048, ring 2048,
+pool `2 * ring_size`, cache 32, secondary/default EAL CPU and pool on node 0.
+All rates are Mpps. Offered load was near 130 Mpps; actual load is shown because
+the generator varied, especially with different TX queue counts.
+
+| Setting | Offered | Primary RX | Captured | pdump ringfull | pdump nombuf |
+|---|---:|---:|---:|---:|---:|
+| Baseline, snaplen 2048 | 131.42 | 45.24 | 8.74 | 36.24 | 0 |
+| Baseline repeat | 132.76 | 51.16 | 9.62 | 41.54 | 0 |
+| snaplen 512 | 129.74 | 50.92 | 8.18 | 42.77 | 0 |
+| snaplen 128 | 131.92 | 50.68 | 8.77 | 42.01 | 0 |
+| ring 65536 | 132.26 | 51.29 | 10.47 | 40.88 | 0 |
+| ring 262144, extra hugepages | 122.21 | 53.74 | 11.70 | 42.06 | 0 |
+| RX queues 2 | 116.27 | 8.76 | 8.54 | 0.17 | 0 |
+| cache 0 | 133.79 | 4.98 | 4.96 | 0.003 | 0 |
+| cache 64 | 131.21 | 49.58 | 9.37 | 40.22 | 0 |
+| cache 256 | 133.07 | 50.77 | 10.01 | 40.75 | 0 |
+| cache 512 | 132.89 | 48.35 | 9.53 | 38.68 | 0.016 |
+| pool 1 × ring | 132.66 | 17.11 | 8.71 | 0 | 8.41 |
+| pool 4 × ring | 133.63 | 51.45 | 9.38 | 42.02 | 0 |
+| pool 8 × ring | 133.81 | 54.93 | 9.15 | 45.76 | 0 |
+| Pin secondary locally; automatic local pool | 130.66 | 71.61 | 17.11 | 54.52 | 0 |
+| Local pool only, remote consumer | 122.98 | 50.18 | 10.20 | 40.31 | 0 |
+| Local consumer + explicit local pool | 133.06 | 71.87 | 19.54 | 52.58 | 0 |
+| Local consumer/pool, RX queues 2 | 126.66 | 24.97 | 18.34 | 6.56 | 0 |
+| Local, ring 65536, cache 32, before batching | 137.42 | 79.64 | 22.06 | 57.58 | 0 |
+| Local, ring 65536, cache 256, before batching | 137.55 | 79.68 | 23.04 | 56.60 | 0 |
+| Previous row repeat | 137.19 | 83.53 | 23.85 | 59.64 | 0 |
+| Retained batching, default placement/settings | 128.46 | 43.66 | 10.95 | 32.69 | 0 |
+| Retained batching, local, ring 65536, cache 32 | 139.13 | 73.64 | **28.89** | 44.73 | 0 |
+| Previous row repeat | 138.95 | 69.10 | **29.01** | 40.11 | 0 |
+| Retained batching, local, ring 65536, cache 256 override | 139.11 | 74.28 | **31.71** | 42.50 | 0 |
+
+Smaller snaplen shrinks the clone data room, but all these packets already fit
+and their copied payload remains 64 bytes. It gave no reliable gain. Larger
+rings improved the remote-consumer case modestly (8.74 → 10.47 → 11.70 Mpps),
+without removing steady-state loss. A 262144 ring with full snaplen required
+additional hugepages; a local allocation attempt and a four-worker large-pool
+attempt exceeded available memory. Those failed cases are not throughput results.
+
+Pool expansion from 2× to 4× or 8× did not improve capture. Shrinking to 1×
+shifted loss from ring overflow to failed clone allocation. Disabling caches
+made allocation/recycling contention the dominant producer cost. Cache 256 gave
+a modest gain, including 29.01 → 31.71 Mpps after batching, but is an experimental
+override: cache occupancy and pool sizing need broader workload validation.
+
+**Placement and per-packet bookkeeping moved the needle most.** The existing
+`cpu_affinity` configuration can place both consumer and newly allocated clone
+pool on the NIC's NUMA node. With that placement and ring 65536, publishing
+capture counters once per burst increased 22.06 to 28.89–29.01 Mpps (about 31%).
+The deployment recommendation for this host is `cpu_affinity: "48"`, full
+snaplen 2048 and ring 65536. Product defaults remain unchanged.
+
+### Producers versus consumer
+
+`primary.c` now calls the public **`rte_pdump_stats()`** API inside the primary.
+In DPDK 25.11, `accepted` counts successful clones **before ring enqueue**:
+successful delivery is approximately `accepted - ringfull`; allocation failures
+are `nombuf`. `filtered` was zero. Consequently the baseline's ~45–51 Mpps
+successful copies include ~36–42 Mpps that were immediately discarded because
+the single consumer could not drain fast enough. Baseline `nombuf` was zero.
+There is additional loss before primary RX; physical-port arrival is not the
+same as application delivery, and PMD `imissed` is not a complete end-to-end
+loss accounting by itself.
+
+| Consumer experiment | Offered Mpps | Primary RX Mpps | Captured Mpps | ringfull Mpps |
+|---|---:|---:|---:|---:|
+| Minimal C drain, one shared-ring consumer | 133.50 | 38.12 | 37.81 | 0.001 |
+| Minimal C drain, four shared-ring consumers | 132.49 | 37.36 | 37.13 | 0 |
+| Minimal C drain, four queue-specific rings/pools, cache 32 | 124.30 | 46.26 | 45.67 | 0 |
+| Minimal C drain, four queue-specific rings/pools, cache 256 | 105.48 | 54.21 | 54.61 | 0 |
+| Four real cpworkers, queue-specific rings/pools, cache 32 | 121.26 | 46.61 | 46.60 | ~0 |
+| Four real cpworkers, queue-specific rings/pools, cache 256 | 137.38 | 54.16 | **54.11** | 0.001 |
+
+Adding readers to one shared ring did not help the minimal drain. Partitioning
+by RX queue removed almost all ring loss and reached 54.11 Mpps with real
+cpworker pipelines. At that point four primary pollers consumed about four CPU
+cores, while the four secondaries together used about 2.56 cores. Clone creation,
+copying and recycling on the producer path then set the limit. The minimal C
+drain is a control, not a product throughput claim.
+
+`perf_multiqueue.patch` demonstrates queue-specific pdump callbacks and private
+rings/pools in a separate laboratory binary. It preserves the per-packet
+pipeline but uses four independent processes for the measurement. DPDK rejects
+SP/SC ring creation flags in pdump, so even private rings were created MP/MC.
+This is not retained product configuration: deploying parallel capture tasks
+must preserve global counters, output rate limits and other task semantics.
+
+### Zero-copy alternatives
+
+The following are primary-side C benchmark results, not full Rust telemetry
+pipeline results. "Touch" reads one byte per eight packet bytes; it is a minimal
+memory-access control, not a parser. RX mbufs are consumed in the receiving
+process without pdump cloning.
+
+| Direct primary mode | Offered Mpps | RX / capture Mpps |
+|---|---:|---:|
+| Standard mlx5 RX, 4 queues | 137.42 | 94.76 |
+| Standard mlx5 RX, 8 queues | 137.44 | 113.51 |
+| Standard mlx5 RX, 16 queues | 137.40 | 4.49 |
+| Standard RX, 4 queues, byte touch | 127.83 | 92.67 |
+| Standard RX, 4 queues, buffered pcap → `/dev/null` | 125.21 | 69.91 |
+| Standard RX, 4 queues, buffered pcap → local filesystem | 122.75 | 32.27 |
+| MPRQ, 8 queues | 139.31 | **139.31** |
+| MPRQ, 8 queues, byte touch | 137.85 | **138.75** |
+| MPRQ, 8 queues, buffered pcap → `/dev/null` | 139.17 | 105.59 |
+| MPRQ, 16 queues | 138.49 | 138.70 |
+| MPRQ, 8 queues, external-buffer inspection | 127.65 | 127.67 |
+| MPRQ, true 64-byte frames, touch + inspection | 126.23 | 126.21 |
+
+Merely increasing standard RX queues to 16 caused a reproducible ~4–5 Mpps
+cliff. More mbufs, smaller descriptors and padded counters did not resolve it.
+mlx5 MPRQ did. The successful devargs were:
+
+```text
+mprq_en=1,rxqs_min_mprq=4,mprq_max_memcpy_len=0,mprq_log_stride_num=6,mprq_log_stride_size=8
+```
+
+Setting `mprq_max_memcpy_len=0` matters: default MPRQ copies small packets.
+The inspection runs verified essentially **100% externally attached buffers**
+and zero scattered packets at up to 127.67 Mpps; the separately measured peak
+without inspection was 139.31 Mpps. This supports a no-payload-copy RX path for
+these cases, while buffer exhaustion or unsuitable packet/stride sizing can
+still cause PMD fallback copies. See the official
+[mlx5 MPRQ documentation](https://doc.dpdk.org/guides-25.11/nics/mlx5.html#multi-packet-rx-queue).
+
+The in-primary pcap writer uses original mbufs, separate per-queue buffered
+writers and one timestamp per burst. It avoids the pdump copy/ring, but
+`fwrite`/filesystem writes still copy and serialize data. Four standard queues
+lost ~25% of their raw RX rate writing to `/dev/null`; eight MPRQ queues lost
+~24% (139.31 → 105.59 Mpps). The filesystem result is a short buffered page-cache
+test, **not sustained or durable storage throughput**. Its temporary files were
+removed. No loss-free full-packet 100G storage claim follows from these tests.
+
+#### NIC mirror to a second VF
+
+**The ConnectX-6 Dx can perform this mirror.** A legacy-mode VF transfer rule
+was rejected with `ENOTSUP`. In switchdev mode the PF was probed with
+`representor=[0,1],dv_flow_en=1`. The PF proxy was isolated before configure/start,
+then both VF representors were started. A transfer-domain rule matched the
+uplink `REPRESENTED_PORT` plus the test destination MAC, used `SAMPLE` ratio 1
+with a `REPRESENTED_PORT` destination for VF1, and sent the original to VF0.
+The explicit uplink match and started PF proxy were necessary for delivery.
+Only the two VFs were unbound for the switchdev transition; no PF unbind,
+firmware change or driver reset was needed. Unmatched traffic stayed with the
+kernel. See [mlx5 flow support](https://doc.dpdk.org/guides-25.11/nics/mlx5.html).
+
+Both receiving VFs had independent primary RX processes, so the copy on the
+capture VF involved no pdump. NFS connectivity checks passed before, during and
+after the switchdev/flow tests.
+
+| Mirror configuration | Offered Mpps | Original VF Mpps | Capture VF Mpps |
+|---|---:|---:|---:|
+| Standard RX, 4 queues each, descriptors 4096 | 124.21 | 58.05 | 58.06 |
+| Standard RX, 4 queues each, descriptors 1024 | 133.49 | 59.42 | 59.42 |
+| MPRQ, 4 queues each, flow COUNT | 106.52 | ~66.41 | 66.41 |
+| MPRQ, 8 queues each, flow COUNT | 109.51 | ~66.13 | 66.13 |
+| MPRQ, 8 queues each, no flow COUNT | 127.41 | 66.48 | **66.48** |
+| Original standard RX 4 queues; capture MPRQ 8 queues | 127.32 | 65.34 | 65.35 |
+
+Standard RX with eight queues per VF collapsed to 2.7–6.8 Mpps per copy; MPRQ
+removed that cliff. MPRQ mirror runs also verified external buffers and zero
+scatter. Removing the diagnostic flow counter did not improve the ~66.5 Mpps
+plateau. The evidence points to the shared NIC duplication/delivery path rather
+than pdump or a single capture consumer; the exact eSwitch/DMA/PCIe constraint
+was not isolated. Firmware-specific mirror performance may differ. On this
+hardware, mirroring offers process isolation but does not deliver line-rate
+minimum-packet capture.
+
+### Retained changes, validation and recommendation
+
+Only two production changes were retained in `dpdk_pdump.rs`:
+
+* Publish capture packet/byte counters once per burst, retaining the same
+  per-packet headers, sink calls, direction checks and invalid-mbuf exclusions.
+  All four post-change windows had exactly equal captured/forwarded packet and
+  byte totals with the null sink. The task polling lock keeps control snapshots
+  outside an incomplete burst.
+* Disable primary pdump callbacks before freeing the shared ring, clone pool
+  and BPF parameters on shutdown/reload. A live SIGTERM test left the primary
+  alive, stopped its pdump accepted counter, and let primary RX continue at
+  about 96 Mpps under traffic, without a core dump.
+
+Snaplen, ring, pool multiplier and cache defaults were left unchanged. The pool
+override and multi-queue patch are explicit benchmark controls. The primary,
+flow controller and harnesses provide repeatable evidence rather than a new
+production capture backend.
+
+Validation passed: testbed DPDK release build of cpworker/cpctl; nine pdump
+module unit tests and two stats tests; touched Rust file formatting; Python
+syntax checks; C helper compilation; `git diff --check`; laboratory patch
+applicability. Repository-wide `cargo fmt --all -- --check` reported existing
+formatting differences in unrelated `capturer/af_packet.rs`, which was preserved.
+
+Both hosts were restored: VFs removed, PAUSE RX/TX enabled, generator/primary/
+secondary/flow processes stopped, DPDK runtime directories and core dumps
+removed, temporary VF TX-rate cap cleared, switchdev returned to legacy, and
+yinjiao hugepages returned to the original 628/396 pages on nodes 0/1. NFS
+connectivity and an NFS `statfs` request were healthy. The final privileged audit
+is in [performance-2026-10-01-restoration.json](performance-2026-10-01-restoration.json).
+Runtime cleanup expands wildcards inside the privileged shell so root-owned
+directories are removed correctly. No changes were committed or pushed.
+
+**Recommendation:** implement capture directly in the process owning the RX
+queues, using one telemetry worker per RSS queue and batched counters/output.
+For this mlx5 deployment, use NUMA-local 8–16 queues and MPRQ external-buffer
+attachment with explicit buffer-lifetime handling. A product-owned primary on
+an exclusive port/VF is the cleanest deployment; integration into an existing
+primary is more intrusive but avoids another payload copy and duplicate NIC DMA.
+The generic primary RX architecture is portable across DPDK PMDs; the MPRQ
+settings and switchdev mirror implementation are mlx5-specific. Keep pdump as a
+best-effort compatibility backend, and offer hardware mirroring only where its
+measured capacity meets the workload.
+
+Raw RX at 139 Mpps demonstrates the architectural headroom, not production
+telemetry or durable pcap at true minimum-frame line rate. Bead
+`cloud-probe-rs-9jo` tracks the primary telemetry backend and sustained 100G
+acceptance gates, including parsing, filtering, global rate-limit/counter
+semantics, external-buffer lifetimes and real outputs.

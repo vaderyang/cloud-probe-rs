@@ -29,6 +29,10 @@
  *                 remainder in a round-robin loop.
  *   PRIMARY_MBUF  mbuf pool size (default 65536).
  *   PRIMARY_DESC  RX descriptors per queue (default 4096).
+ *   PRIMARY_STATS Write cumulative RX/pdump counters to this JSON path.
+ *   PRIMARY_TOUCH Read packet bytes in the RX worker (presence enables it).
+ *   PRIMARY_PCAP  In-process pcap writer: /dev/null or a local file prefix.
+ *   PRIMARY_INSPECT Count external-buffer and multi-segment packets.
  *
  * It prints the probed port's driver and MAC, per-second RX totals while it
  * polls, and a final `rx total` on SIGINT/SIGTERM.
@@ -42,10 +46,13 @@
 #include <rte_pdump.h>
 
 #include <signal.h>
+#include <stdatomic.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <sys/time.h>
 
 #define BURST 64
 #define MAX_LQUEUE 256
@@ -53,9 +60,92 @@
 static volatile int g_stop = 0;
 static void on_sig(int s) { (void)s; g_stop = 1; }
 
-/* Per-queue RX totals; only ever incremented by the queue's own lcore, read by
- * the master for the periodic report (a benign data race for diagnostics). */
-static volatile unsigned long g_rx[MAX_LQUEUE];
+/* Per-queue RX totals, sampled by the master without racing queue workers. */
+/* Keep diagnostic writes from bouncing one cache line between RX lcores. */
+struct rx_counter {
+    _Alignas(64) _Atomic unsigned long packets;
+    _Atomic unsigned long external;
+    _Atomic unsigned long scattered;
+};
+static struct rx_counter g_rx[MAX_LQUEUE];
+static FILE *g_pcap[MAX_LQUEUE];
+static int g_touch;
+static int g_inspect;
+static volatile uint64_t g_checksums[MAX_LQUEUE];
+
+/* Validate that MPRQ delivered externally attached DMA buffers, rather than
+ * its optional small-packet memcpy path. Opt in with PRIMARY_INSPECT=1. */
+static void inspect_burst(uint16_t q, struct rte_mbuf **bufs, uint16_t n) {
+    unsigned external = 0, scattered = 0;
+    for (uint16_t i = 0; i < n; i++) {
+        external += RTE_MBUF_HAS_EXTBUF(bufs[i]) != 0;
+        scattered += bufs[i]->nb_segs != 1;
+    }
+    atomic_fetch_add_explicit(&g_rx[q].external, external, memory_order_relaxed);
+    atomic_fetch_add_explicit(&g_rx[q].scattered, scattered, memory_order_relaxed);
+}
+
+/* Optional in-process capture: original RX mbufs, no pdump clone or ring.
+ * Each queue owns its writer. PRIMARY_PCAP=/dev/null measures serialization;
+ * a filename prefix measures buffered filesystem writes (not durable I/O).
+ * PRIMARY_TOUCH=1 reads packet bytes without writing them. */
+static void capture_burst(uint16_t q, struct rte_mbuf **bufs, uint16_t n) {
+    struct timeval tv;
+    if (g_pcap[q] != NULL) gettimeofday(&tv, NULL);
+    uint64_t sum = g_checksums[q];
+    for (uint16_t i = 0; i < n; i++) {
+        struct rte_mbuf *m = bufs[i];
+        if (g_touch) {
+            const unsigned char *p = rte_pktmbuf_mtod(m, const unsigned char *);
+            for (uint16_t j = 0; j < m->data_len; j += 8) sum += p[j];
+        }
+        if (g_pcap[q] != NULL) {
+            uint32_t hdr[4] = {tv.tv_sec, tv.tv_usec, m->pkt_len, m->pkt_len};
+            if (fwrite(hdr, sizeof(hdr), 1, g_pcap[q]) != 1) g_stop = 1;
+            for (struct rte_mbuf *seg = m; seg != NULL; seg = seg->next) {
+                if (fwrite(rte_pktmbuf_mtod(seg, void *), seg->data_len, 1,
+                           g_pcap[q]) != 1) g_stop = 1;
+            }
+        }
+    }
+    if (g_touch) g_checksums[q] = sum;
+}
+
+/* Atomic file replacement gives the controller a consistent cumulative
+ * snapshot. DPDK accepted counts successful copies before ring enqueue;
+ * delivered = accepted - ringfull, not accepted itself. */
+static void report_stats(uint16_t nq) {
+    const char *path = getenv("PRIMARY_STATS");
+    if (path == NULL) return;
+    char tmp[1024];
+    if (snprintf(tmp, sizeof(tmp), "%s.tmp", path) >= (int)sizeof(tmp)) return;
+    FILE *f = fopen(tmp, "w");
+    if (f == NULL) return;
+    struct rte_pdump_stats pd = {0};
+    struct rte_eth_stats eth = {0};
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    rte_pdump_stats(0, &pd);
+    rte_eth_stats_get(0, &eth);
+    unsigned long total = 0, external = 0, scattered = 0;
+    for (uint16_t q = 0; q < nq; q++) {
+        total += atomic_load(&g_rx[q].packets);
+        external += atomic_load(&g_rx[q].external);
+        scattered += atomic_load(&g_rx[q].scattered);
+    }
+    fprintf(f, "{\"time\":%.9f,\"rx\":%lu,\"accepted\":%lu,"
+            "\"ringfull\":%lu,\"nombuf\":%lu,\"filtered\":%lu,"
+            "\"imissed\":%lu,\"rx_nombuf\":%lu,\"external\":%lu,\"scattered\":%lu,\"queues\":[",
+            ts.tv_sec + ts.tv_nsec / 1e9, total,
+            (unsigned long)pd.accepted, (unsigned long)pd.ringfull,
+            (unsigned long)pd.nombuf, (unsigned long)pd.filtered,
+            (unsigned long)eth.imissed, (unsigned long)eth.rx_nombuf, external, scattered);
+    for (uint16_t q = 0; q < nq; q++)
+        fprintf(f, "%s%lu", q ? "," : "", atomic_load(&g_rx[q].packets));
+    fprintf(f, "]}\n");
+    fclose(f);
+    rename(tmp, path);
+}
 
 static int rx_worker(void *arg) {
     uint16_t q = (uint16_t)(uintptr_t)arg;
@@ -63,7 +153,9 @@ static int rx_worker(void *arg) {
     while (!g_stop) {
         uint16_t n = rte_eth_rx_burst(0, q, bufs, BURST);
         if (n != 0) {
-            g_rx[q] += n;
+            atomic_fetch_add_explicit(&g_rx[q].packets, n, memory_order_relaxed);
+            if (g_inspect) inspect_burst(q, bufs, n);
+            if (g_touch || g_pcap[q] != NULL) capture_burst(q, bufs, n);
             rte_pktmbuf_free_bulk(bufs, n);
         }
     }
@@ -72,7 +164,7 @@ static int rx_worker(void *arg) {
 
 static unsigned long rx_sum(uint16_t nq) {
     unsigned long s = 0;
-    for (uint16_t q = 0; q < nq; q++) s += g_rx[q];
+    for (uint16_t q = 0; q < nq; q++) s += atomic_load_explicit(&g_rx[q].packets, memory_order_relaxed);
     return s;
 }
 
@@ -87,6 +179,21 @@ int main(int argc, char **argv) {
     uint16_t nq = getenv("PRIMARY_RXQ") ? (uint16_t)atoi(getenv("PRIMARY_RXQ")) : 1;
     if (nq < 1) nq = 1;
     if (nq > MAX_LQUEUE) nq = MAX_LQUEUE;
+    g_touch = getenv("PRIMARY_TOUCH") != NULL;
+    g_inspect = getenv("PRIMARY_INSPECT") != NULL;
+    const char *pcap = getenv("PRIMARY_PCAP");
+    if (pcap != NULL) {
+        for (uint16_t q = 0; q < nq; q++) {
+            char path[1024];
+            if (strcmp(pcap, "/dev/null") == 0) snprintf(path, sizeof(path), "%s", pcap);
+            else snprintf(path, sizeof(path), "%s-q%u.pcap", pcap, q);
+            g_pcap[q] = fopen(path, "wb");
+            if (g_pcap[q] == NULL) { perror(path); return 1; }
+            setvbuf(g_pcap[q], NULL, _IOFBF, 1024 * 1024);
+            const uint32_t header[6] = {0xa1b2c3d4, 0x00040002, 0, 0, 65535, 1};
+            if (fwrite(header, sizeof(header), 1, g_pcap[q]) != 1) return 1;
+        }
+    }
     unsigned nb_mbuf = getenv("PRIMARY_MBUF") ? (unsigned)atol(getenv("PRIMARY_MBUF")) : 65536;
     uint16_t rx_desc = getenv("PRIMARY_DESC") ? (uint16_t)atoi(getenv("PRIMARY_DESC")) : 4096;
 
@@ -181,7 +288,9 @@ int main(int argc, char **argv) {
             uint16_t n = rte_eth_rx_burst(port, q, bufs, BURST);
             if (n != 0) {
                 master_total += n;
-                g_rx[q] += n;
+                atomic_fetch_add_explicit(&g_rx[q].packets, n, memory_order_relaxed);
+                if (g_inspect) inspect_burst(q, bufs, n);
+                if (g_touch || g_pcap[q] != NULL) capture_burst(q, bufs, n);
                 rte_pktmbuf_free_bulk(bufs, n);
             }
             if (++q >= nq) q = (uint16_t)nw;
@@ -195,6 +304,7 @@ int main(int argc, char **argv) {
             fprintf(stderr, "dpdk_primary: rx %lu pps (rx total %lu)\n",
                     s - last_sum, s);
             fflush(stderr);
+            report_stats(nq);
             last = now;
             last_sum = s;
         }
@@ -202,6 +312,8 @@ int main(int argc, char **argv) {
 
     g_stop = 1;
     rte_eal_mp_wait_lcore();
+    report_stats(nq);
+    for (uint16_t i = 0; i < nq; i++) if (g_pcap[i] != NULL) fclose(g_pcap[i]);
     fprintf(stderr, "dpdk_primary: rx total %lu (master %lu)\n", rx_sum(nq),
             master_total);
 

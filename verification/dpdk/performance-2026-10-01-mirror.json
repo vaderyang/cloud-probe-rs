@@ -1,0 +1,1024 @@
+{
+  "standard_unpadded": {
+    "health_before": "1 packets transmitted, 1 received, 0% packet loss, time 0ms\nrtt min/avg/max/mdev = 0.363/0.363/0.363/0.000 ms\nTARGET SOURCE\n/cold  10.2.0.12:/cold",
+    "legacy": "port=0 name=0000:b8:00.1 flags=75\nport=1 name=0000:b8:00.2 flags=75\nmirror validate=-95 errno=95 type=1 message=none",
+    "switchdev": "",
+    "ports": "pci/0000:b8:00.0/65535: type eth netdev ens8np0 flavour physical port 0 splittable false\npci/0000:b8:00.0/1: type eth netdev ens8npf0vf0 flavour pcivf controller 0 pfnum 0 vfnum 0 external false splittable false\n  function:\n    hw_addr 00:00:00:00:00:00\npci/0000:b8:00.0/2: type eth netdev ens8npf0vf1 flavour pcivf controller 0 pfnum 0 vfnum 1 external false splittable false\n  function:\n    hw_addr 00:00:00:00:00:00\npci/0000:3a:00.0/0: type eth netdev ens5f0 flavour physical port 0 splittable false\npci/0000:3a:00.1/512: type eth netdev ens5f1 flavour physical port 1 splittable false\npci/0000:b8:00.1/65536: type eth netdev ens8v0 flavour virtual splittable false\npci/0000:b8:00.2/131072: type eth netdev ens8v1 flavour virtual splittable false\nlo               UNKNOWN        00:00:00:00:00:00 <LOOPBACK,UP,LOWER_UP> \nens8np0          UP             b8:ce:f6:91:37:66 <BROADCAST,MULTICAST,UP,LOWER_UP> \nenxdae3cfe3cb5d  DOWN           da:e3:cf:e3:cb:5d <BROADCAST,MULTICAST> \nens5f0           UP             68:be:49:28:20:d2 <BROADCAST,MULTICAST,UP,LOWER_UP> \nens5f1           DOWN           68:be:49:28:20:d3 <BROADCAST,MULTICAST> \ntailscale0       UNKNOWN        <POINTOPOINT,MULTICAST,NOARP,UP,LOWER_UP> \nvirbr0           UP             52:54:00:ef:09:e0 <BROADCAST,MULTICAST,UP,LOWER_UP> \nvirbr-vibing     UP             52:54:00:0e:a2:6e <BROADCAST,MULTICAST,UP,LOWER_UP> \ndocker0          UP             82:d8:de:ac:62:69 <BROADCAST,MULTICAST,UP,LOWER_UP> \nenx00e04c596160  UP             00:e0:4c:59:61:60 <BROADCAST,MULTICAST,UP,LOWER_UP> \nveth81dd18b@if2  UP             26:92:00:a1:49:ff <BROADCAST,MULTICAST,UP,LOWER_UP> \nvnet10           UNKNOWN        fe:54:00:66:00:10 <BROADCAST,MULTICAST,UP,LOWER_UP> \nveth913c63b@if2  UP             ce:47:e8:b9:7e:56 <BROADCAST,MULTICAST,UP,LOWER_UP> \nvnet11           UNKNOWN        fe:54:00:22:c6:89 <BROADCAST,MULTICAST,UP,LOWER_UP> \nvnet12           UNKNOWN        fe:54:00:7d:ed:98 <BROADCAST,MULTICAST,UP,LOWER_UP> \nens8npf0vf0      DOWN           2a:a7:4c:52:cf:af <NO-CARRIER,BROADCAST,MULTICAST,UP,LOWER_UP> \nens8npf0vf1      DOWN           1a:a2:a6:d0:0b:da <NO-CARRIER,BROADCAST,MULTICAST,UP,LOWER_UP> \nens8v0           UP             1a:ca:0a:26:a8:8c <BROADCAST,MULTICAST,UP,LOWER_UP> \nens8v1           UP             1a:ca:0a:26:a8:8e <BROADCAST,MULTICAST,UP,LOWER_UP>",
+    "health_switchdev": "1 packets transmitted, 1 received, 0% packet loss, time 0ms\nrtt min/avg/max/mdev = 0.171/0.171/0.171/0.000 ms\nTARGET SOURCE\n/cold  10.2.0.12:/cold",
+    "flow": "port=0 name=0000:b8:00.0 flags=75\nport=1 name=0000:b8:00.0_representor_vf0 flags=91\nport=2 name=0000:b8:00.0_representor_vf1 flags=91\nmirror validate=0 errno=95 type=0 message=none\nmirror create=ok errno=95 type=0 message=none\nmirror ready original=1 capture=2\nmirror hits=0\nmirror hits=0",
+    "measurements": [
+      {
+        "rxq": 4,
+        "before": [
+          {
+            "time": 4206765.47232814,
+            "rx": 8934401,
+            "accepted": 0,
+            "ringfull": 0,
+            "nombuf": 0,
+            "filtered": 0,
+            "imissed": 0,
+            "rx_nombuf": 0
+          },
+          {
+            "time": 4206765.472035908,
+            "rx": 8922010,
+            "accepted": 0,
+            "ringfull": 0,
+            "nombuf": 0,
+            "filtered": 0,
+            "imissed": 0,
+            "rx_nombuf": 0
+          }
+        ],
+        "after": [
+          {
+            "time": 4206771.4720649,
+            "rx": 357249180,
+            "accepted": 0,
+            "ringfull": 0,
+            "nombuf": 0,
+            "filtered": 0,
+            "imissed": 0,
+            "rx_nombuf": 0
+          },
+          {
+            "time": 4206771.472676224,
+            "rx": 357288480,
+            "accepted": 0,
+            "ringfull": 0,
+            "nombuf": 0,
+            "filtered": 0,
+            "imissed": 0,
+            "rx_nombuf": 0
+          }
+        ],
+        "offered_mpps": 124.21157734229855,
+        "original_mpps": 58.05501023530493,
+        "mirrored_mpps": 58.054882755577694
+      },
+      {
+        "rxq": 8,
+        "before": [
+          {
+            "time": 4206779.46835071,
+            "rx": 434103,
+            "accepted": 0,
+            "ringfull": 0,
+            "nombuf": 0,
+            "filtered": 0,
+            "imissed": 0,
+            "rx_nombuf": 0
+          },
+          {
+            "time": 4206779.468059582,
+            "rx": 434063,
+            "accepted": 0,
+            "ringfull": 0,
+            "nombuf": 0,
+            "filtered": 0,
+            "imissed": 0,
+            "rx_nombuf": 0
+          }
+        ],
+        "after": [
+          {
+            "time": 4206785.468063585,
+            "rx": 18751531,
+            "accepted": 0,
+            "ringfull": 0,
+            "nombuf": 0,
+            "filtered": 0,
+            "imissed": 0,
+            "rx_nombuf": 0
+          },
+          {
+            "time": 4206785.468675762,
+            "rx": 18752909,
+            "accepted": 0,
+            "ringfull": 0,
+            "nombuf": 0,
+            "filtered": 0,
+            "imissed": 0,
+            "rx_nombuf": 0
+          }
+        ],
+        "offered_mpps": 123.6472905445246,
+        "original_mpps": 3.0530507678095073,
+        "mirrored_mpps": 3.052827484431938
+      }
+    ],
+    "health_after": "1 packets transmitted, 1 received, 0% packet loss, time 0ms\nrtt min/avg/max/mdev = 0.369/0.369/0.369/0.000 ms\nTARGET SOURCE\n/cold  10.2.0.12:/cold"
+  },
+  "standard_padded": {
+    "health_before": "1 packets transmitted, 1 received, 0% packet loss, time 0ms\nrtt min/avg/max/mdev = 0.344/0.344/0.344/0.000 ms\nTARGET SOURCE\n/cold  10.2.0.12:/cold",
+    "legacy": "port=0 name=0000:b8:00.1 flags=75\nport=1 name=0000:b8:00.2 flags=75\nmirror validate=-95 errno=95 type=1 message=none",
+    "switchdev": "",
+    "ports": "pci/0000:b8:00.0/65535: type eth netdev ens8np0 flavour physical port 0 splittable false\npci/0000:b8:00.0/1: type eth netdev ens8npf0vf0 flavour pcivf controller 0 pfnum 0 vfnum 0 external false splittable false\n  function:\n    hw_addr 00:00:00:00:00:00\npci/0000:b8:00.0/2: type eth netdev ens8npf0vf1 flavour pcivf controller 0 pfnum 0 vfnum 1 external false splittable false\n  function:\n    hw_addr 00:00:00:00:00:00\npci/0000:3a:00.0/0: type eth netdev ens5f0 flavour physical port 0 splittable false\npci/0000:3a:00.1/512: type eth netdev ens5f1 flavour physical port 1 splittable false\npci/0000:b8:00.1/65536: type eth netdev ens8v0 flavour virtual splittable false\npci/0000:b8:00.2/131072: type eth netdev ens8v1 flavour virtual splittable false\nlo               UNKNOWN        00:00:00:00:00:00 <LOOPBACK,UP,LOWER_UP> \nens8np0          UP             b8:ce:f6:91:37:66 <BROADCAST,MULTICAST,UP,LOWER_UP> \nenxdae3cfe3cb5d  DOWN           da:e3:cf:e3:cb:5d <BROADCAST,MULTICAST> \nens5f0           UP             68:be:49:28:20:d2 <BROADCAST,MULTICAST,UP,LOWER_UP> \nens5f1           DOWN           68:be:49:28:20:d3 <BROADCAST,MULTICAST> \ntailscale0       UNKNOWN        <POINTOPOINT,MULTICAST,NOARP,UP,LOWER_UP> \nvirbr0           UP             52:54:00:ef:09:e0 <BROADCAST,MULTICAST,UP,LOWER_UP> \nvirbr-vibing     UP             52:54:00:0e:a2:6e <BROADCAST,MULTICAST,UP,LOWER_UP> \ndocker0          UP             82:d8:de:ac:62:69 <BROADCAST,MULTICAST,UP,LOWER_UP> \nenx00e04c596160  UP             00:e0:4c:59:61:60 <BROADCAST,MULTICAST,UP,LOWER_UP> \nveth81dd18b@if2  UP             26:92:00:a1:49:ff <BROADCAST,MULTICAST,UP,LOWER_UP> \nvnet10           UNKNOWN        fe:54:00:66:00:10 <BROADCAST,MULTICAST,UP,LOWER_UP> \nveth913c63b@if2  UP             ce:47:e8:b9:7e:56 <BROADCAST,MULTICAST,UP,LOWER_UP> \nvnet11           UNKNOWN        fe:54:00:22:c6:89 <BROADCAST,MULTICAST,UP,LOWER_UP> \nvnet12           UNKNOWN        fe:54:00:7d:ed:98 <BROADCAST,MULTICAST,UP,LOWER_UP> \nens8npf0vf0      DOWN           aa:a2:f0:53:7e:92 <NO-CARRIER,BROADCAST,MULTICAST,UP,LOWER_UP> \nens8npf0vf1      DOWN           4a:ae:96:90:d3:ce <NO-CARRIER,BROADCAST,MULTICAST,UP,LOWER_UP> \nens8v0           UP             1a:ca:0a:26:a8:8c <BROADCAST,MULTICAST,UP,LOWER_UP> \nens8v1           UP             1a:ca:0a:26:a8:8e <BROADCAST,MULTICAST,UP,LOWER_UP>",
+    "health_switchdev": "1 packets transmitted, 1 received, 0% packet loss, time 0ms\nrtt min/avg/max/mdev = 0.227/0.227/0.227/0.000 ms\nTARGET SOURCE\n/cold  10.2.0.12:/cold",
+    "flow": "port=0 name=0000:b8:00.0 flags=75\nport=1 name=0000:b8:00.0_representor_vf0 flags=91\nport=2 name=0000:b8:00.0_representor_vf1 flags=91\nmirror validate=0 errno=95 type=0 message=none\nmirror create=ok errno=95 type=0 message=none\nmirror ready original=1 capture=2\nmirror hits=0\nmirror hits=0",
+    "health_flow": "1 packets transmitted, 1 received, 0% packet loss, time 0ms\nrtt min/avg/max/mdev = 0.226/0.226/0.226/0.000 ms\nTARGET SOURCE\n/cold  10.2.0.12:/cold",
+    "measurements": [
+      {
+        "rxq": 4,
+        "before": [
+          {
+            "time": 4206937.472278354,
+            "rx": 37918513,
+            "accepted": 0,
+            "ringfull": 0,
+            "nombuf": 0,
+            "filtered": 0,
+            "imissed": 0,
+            "rx_nombuf": 0,
+            "queues": [
+              9480422,
+              9476270,
+              9482719,
+              9479792
+            ]
+          },
+          {
+            "time": 4206937.472051031,
+            "rx": 37911505,
+            "accepted": 0,
+            "ringfull": 0,
+            "nombuf": 0,
+            "filtered": 0,
+            "imissed": 0,
+            "rx_nombuf": 0,
+            "queues": [
+              9478626,
+              9474522,
+              9480960,
+              9478024
+            ]
+          }
+        ],
+        "after": [
+          {
+            "time": 4206942.472666551,
+            "rx": 323638079,
+            "accepted": 0,
+            "ringfull": 0,
+            "nombuf": 0,
+            "filtered": 0,
+            "imissed": 604,
+            "rx_nombuf": 0,
+            "queues": [
+              80913124,
+              80902701,
+              80912864,
+              80910039
+            ]
+          },
+          {
+            "time": 4206942.473096704,
+            "rx": 323667673,
+            "accepted": 0,
+            "ringfull": 0,
+            "nombuf": 0,
+            "filtered": 0,
+            "imissed": 0,
+            "rx_nombuf": 0,
+            "queues": [
+              80920915,
+              80909961,
+              80920066,
+              80917238
+            ]
+          }
+        ],
+        "offered_mpps": 126.34581490293746,
+        "original_mpps": 57.13947691842938,
+        "mirrored_mpps": 57.139283796975576
+      },
+      {
+        "rxq": 8,
+        "before": [
+          {
+            "time": 4206951.472491661,
+            "rx": 2012491,
+            "accepted": 0,
+            "ringfull": 0,
+            "nombuf": 0,
+            "filtered": 0,
+            "imissed": 0,
+            "rx_nombuf": 0,
+            "queues": [
+              251609,
+              251587,
+              251584,
+              251379,
+              251136,
+              251670,
+              251967,
+              251577
+            ]
+          },
+          {
+            "time": 4206951.47267186,
+            "rx": 2012948,
+            "accepted": 0,
+            "ringfull": 0,
+            "nombuf": 0,
+            "filtered": 0,
+            "imissed": 0,
+            "rx_nombuf": 0,
+            "queues": [
+              251663,
+              251642,
+              251644,
+              251445,
+              251192,
+              251723,
+              252024,
+              251633
+            ]
+          }
+        ],
+        "after": [
+          {
+            "time": 4206957.468268663,
+            "rx": 18372917,
+            "accepted": 0,
+            "ringfull": 0,
+            "nombuf": 0,
+            "filtered": 0,
+            "imissed": 0,
+            "rx_nombuf": 0,
+            "queues": [
+              2293829,
+              2302112,
+              2301829,
+              2288886,
+              2298908,
+              2292265,
+              2291078,
+              2304028
+            ]
+          },
+          {
+            "time": 4206957.469098395,
+            "rx": 18382197,
+            "accepted": 0,
+            "ringfull": 0,
+            "nombuf": 0,
+            "filtered": 0,
+            "imissed": 0,
+            "rx_nombuf": 0,
+            "queues": [
+              2295014,
+              2303371,
+              2303066,
+              2290073,
+              2300189,
+              2293461,
+              2292279,
+              2305295
+            ]
+          }
+        ],
+        "offered_mpps": 122.92194791590492,
+        "original_mpps": 2.7286581865239548,
+        "mirrored_mpps": 2.7298339944457557
+      }
+    ],
+    "health_after": "1 packets transmitted, 1 received, 0% packet loss, time 0ms\nrtt min/avg/max/mdev = 0.357/0.357/0.357/0.000 ms\nTARGET SOURCE\n/cold  10.2.0.12:/cold"
+  },
+  "standard_desc1024": {
+    "health_before": "1 packets transmitted, 1 received, 0% packet loss, time 0ms\nrtt min/avg/max/mdev = 0.363/0.363/0.363/0.000 ms\nTARGET SOURCE\n/cold  10.2.0.12:/cold",
+    "legacy": "port=0 name=0000:b8:00.1 flags=75\nport=1 name=0000:b8:00.2 flags=75\nmirror validate=-95 errno=95 type=1 message=none",
+    "switchdev": "",
+    "ports": "pci/0000:b8:00.0/65535: type eth netdev ens8np0 flavour physical port 0 splittable false\npci/0000:b8:00.0/1: type eth netdev ens8npf0vf0 flavour pcivf controller 0 pfnum 0 vfnum 0 external false splittable false\n  function:\n    hw_addr 00:00:00:00:00:00\npci/0000:b8:00.0/2: type eth netdev ens8npf0vf1 flavour pcivf controller 0 pfnum 0 vfnum 1 external false splittable false\n  function:\n    hw_addr 00:00:00:00:00:00\npci/0000:3a:00.0/0: type eth netdev ens5f0 flavour physical port 0 splittable false\npci/0000:3a:00.1/512: type eth netdev ens5f1 flavour physical port 1 splittable false\npci/0000:b8:00.1/65536: type eth netdev ens8v0 flavour virtual splittable false\npci/0000:b8:00.2/131072: type eth netdev ens8v1 flavour virtual splittable false\nlo               UNKNOWN        00:00:00:00:00:00 <LOOPBACK,UP,LOWER_UP> \nens8np0          UP             b8:ce:f6:91:37:66 <BROADCAST,MULTICAST,UP,LOWER_UP> \nenxdae3cfe3cb5d  DOWN           da:e3:cf:e3:cb:5d <BROADCAST,MULTICAST> \nens5f0           UP             68:be:49:28:20:d2 <BROADCAST,MULTICAST,UP,LOWER_UP> \nens5f1           DOWN           68:be:49:28:20:d3 <BROADCAST,MULTICAST> \ntailscale0       UNKNOWN        <POINTOPOINT,MULTICAST,NOARP,UP,LOWER_UP> \nvirbr0           UP             52:54:00:ef:09:e0 <BROADCAST,MULTICAST,UP,LOWER_UP> \nvirbr-vibing     UP             52:54:00:0e:a2:6e <BROADCAST,MULTICAST,UP,LOWER_UP> \ndocker0          UP             82:d8:de:ac:62:69 <BROADCAST,MULTICAST,UP,LOWER_UP> \nenx00e04c596160  UP             00:e0:4c:59:61:60 <BROADCAST,MULTICAST,UP,LOWER_UP> \nveth81dd18b@if2  UP             26:92:00:a1:49:ff <BROADCAST,MULTICAST,UP,LOWER_UP> \nvnet10           UNKNOWN        fe:54:00:66:00:10 <BROADCAST,MULTICAST,UP,LOWER_UP> \nveth913c63b@if2  UP             ce:47:e8:b9:7e:56 <BROADCAST,MULTICAST,UP,LOWER_UP> \nvnet11           UNKNOWN        fe:54:00:22:c6:89 <BROADCAST,MULTICAST,UP,LOWER_UP> \nvnet12           UNKNOWN        fe:54:00:7d:ed:98 <BROADCAST,MULTICAST,UP,LOWER_UP> \nens8npf0vf0      DOWN           f2:34:23:26:70:9d <NO-CARRIER,BROADCAST,MULTICAST,UP,LOWER_UP> \nens8npf0vf1      DOWN           e2:fe:22:99:a6:f8 <NO-CARRIER,BROADCAST,MULTICAST,UP,LOWER_UP> \nens8v0           UP             1a:ca:0a:26:a8:8c <BROADCAST,MULTICAST,UP,LOWER_UP> \nens8v1           UP             1a:ca:0a:26:a8:8e <BROADCAST,MULTICAST,UP,LOWER_UP>",
+    "health_switchdev": "1 packets transmitted, 1 received, 0% packet loss, time 0ms\nrtt min/avg/max/mdev = 0.198/0.198/0.198/0.000 ms\nTARGET SOURCE\n/cold  10.2.0.12:/cold",
+    "flow": "port=0 name=0000:b8:00.0 flags=75\nport=1 name=0000:b8:00.0_representor_vf0 flags=91\nport=2 name=0000:b8:00.0_representor_vf1 flags=91\nmirror validate=0 errno=95 type=0 message=none\nmirror create=ok errno=95 type=0 message=none\nmirror ready original=1 capture=2\nmirror hits=0\nmirror hits=0",
+    "health_flow": "1 packets transmitted, 1 received, 0% packet loss, time 0ms\nrtt min/avg/max/mdev = 0.199/0.199/0.199/0.000 ms\nTARGET SOURCE\n/cold  10.2.0.12:/cold",
+    "measurements": [
+      {
+        "rxq": 4,
+        "before": [
+          {
+            "time": 4207353.472072884,
+            "rx": 17848200,
+            "accepted": 0,
+            "ringfull": 0,
+            "nombuf": 0,
+            "filtered": 0,
+            "imissed": 0,
+            "rx_nombuf": 0,
+            "queues": [
+              4461157,
+              4462409,
+              4463210,
+              4462058
+            ]
+          },
+          {
+            "time": 4207353.472674613,
+            "rx": 17883186,
+            "accepted": 0,
+            "ringfull": 0,
+            "nombuf": 0,
+            "filtered": 0,
+            "imissed": 0,
+            "rx_nombuf": 0,
+            "queues": [
+              4469872,
+              4471059,
+              4471836,
+              4470736
+            ]
+          }
+        ],
+        "after": [
+          {
+            "time": 4207359.472728926,
+            "rx": 374374261,
+            "accepted": 0,
+            "ringfull": 0,
+            "nombuf": 0,
+            "filtered": 0,
+            "imissed": 13973,
+            "rx_nombuf": 0,
+            "queues": [
+              93585853,
+              93590500,
+              93600026,
+              93598664
+            ]
+          },
+          {
+            "time": 4207359.472255193,
+            "rx": 374357837,
+            "accepted": 0,
+            "ringfull": 0,
+            "nombuf": 0,
+            "filtered": 0,
+            "imissed": 1404,
+            "rx_nombuf": 0,
+            "queues": [
+              93589472,
+              93583154,
+              93593768,
+              93591864
+            ]
+          }
+        ],
+        "descriptors": 1024,
+        "wire_before": {
+          "time": 1790885210.742692,
+          "rx_out_of_buffer": 0,
+          "rx_steer_missed_packets": 1394,
+          "rx_packets_phy": 155877142826,
+          "rx_discards_phy": 1971222490
+        },
+        "wire_after": {
+          "time": 1790885216.478224,
+          "rx_out_of_buffer": 0,
+          "rx_steer_missed_packets": 1394,
+          "rx_packets_phy": 156643354233,
+          "rx_discards_phy": 2146568869
+        },
+        "offered_mpps": 133.48893078639205,
+        "original_mpps": 59.41451377069258,
+        "mirrored_mpps": 59.416595253279915
+      },
+      {
+        "rxq": 8,
+        "before": [
+          {
+            "time": 4207368.472091104,
+            "rx": 1849894,
+            "accepted": 0,
+            "ringfull": 0,
+            "nombuf": 0,
+            "filtered": 0,
+            "imissed": 0,
+            "rx_nombuf": 0,
+            "queues": [
+              231439,
+              231736,
+              231237,
+              230615,
+              231654,
+              231107,
+              231080,
+              231052
+            ]
+          },
+          {
+            "time": 4207368.472247969,
+            "rx": 1850369,
+            "accepted": 0,
+            "ringfull": 0,
+            "nombuf": 0,
+            "filtered": 0,
+            "imissed": 0,
+            "rx_nombuf": 0,
+            "queues": [
+              231499,
+              231803,
+              231276,
+              230679,
+              231718,
+              231164,
+              231146,
+              231102
+            ]
+          }
+        ],
+        "after": [
+          {
+            "time": 4207374.472270073,
+            "rx": 42903855,
+            "accepted": 0,
+            "ringfull": 0,
+            "nombuf": 0,
+            "filtered": 0,
+            "imissed": 0,
+            "rx_nombuf": 0,
+            "queues": [
+              5354205,
+              5372173,
+              5372384,
+              5353095,
+              5369546,
+              5352354,
+              5355402,
+              5374709
+            ]
+          },
+          {
+            "time": 4207374.472044903,
+            "rx": 42903743,
+            "accepted": 0,
+            "ringfull": 0,
+            "nombuf": 0,
+            "filtered": 0,
+            "imissed": 0,
+            "rx_nombuf": 0,
+            "queues": [
+              5354192,
+              5372156,
+              5372370,
+              5353085,
+              5369531,
+              5352338,
+              5355391,
+              5374688
+            ]
+          }
+        ],
+        "descriptors": 1024,
+        "wire_before": {
+          "time": 1790885225.4255898,
+          "rx_out_of_buffer": 0,
+          "rx_steer_missed_packets": 1394,
+          "rx_packets_phy": 156899497077,
+          "rx_discards_phy": 2175368624
+        },
+        "wire_after": {
+          "time": 1790885231.5583901,
+          "rx_out_of_buffer": 0,
+          "rx_steer_missed_packets": 1394,
+          "rx_packets_phy": 157715450946,
+          "rx_discards_phy": 2194761977
+        },
+        "offered_mpps": 131.67524244998808,
+        "original_mpps": 6.842122744825259,
+        "mirrored_mpps": 6.842460579093126
+      }
+    ],
+    "health_after": "1 packets transmitted, 1 received, 0% packet loss, time 0ms\nrtt min/avg/max/mdev = 0.299/0.299/0.299/0.000 ms\nTARGET SOURCE\n/cold  10.2.0.12:/cold"
+  },
+  "mprq_with_count": {
+    "health_before": "1 packets transmitted, 1 received, 0% packet loss, time 0ms\nrtt min/avg/max/mdev = 0.322/0.322/0.322/0.000 ms\nTARGET SOURCE\n/cold  10.2.0.12:/cold",
+    "legacy": "port=0 name=0000:b8:00.1 flags=75\nport=1 name=0000:b8:00.2 flags=75\nmirror validate=-95 errno=95 type=1 message=none",
+    "switchdev": "",
+    "ports": "pci/0000:b8:00.0/65535: type eth netdev ens8np0 flavour physical port 0 splittable false\npci/0000:b8:00.0/1: type eth netdev ens8npf0vf0 flavour pcivf controller 0 pfnum 0 vfnum 0 external false splittable false\n  function:\n    hw_addr 00:00:00:00:00:00\npci/0000:b8:00.0/2: type eth netdev ens8npf0vf1 flavour pcivf controller 0 pfnum 0 vfnum 1 external false splittable false\n  function:\n    hw_addr 00:00:00:00:00:00\npci/0000:3a:00.0/0: type eth netdev ens5f0 flavour physical port 0 splittable false\npci/0000:3a:00.1/512: type eth netdev ens5f1 flavour physical port 1 splittable false\npci/0000:b8:00.1/65536: type eth netdev ens8v0 flavour virtual splittable false\npci/0000:b8:00.2/131072: type eth netdev ens8v1 flavour virtual splittable false\nlo               UNKNOWN        00:00:00:00:00:00 <LOOPBACK,UP,LOWER_UP> \nens8np0          UP             b8:ce:f6:91:37:66 <BROADCAST,MULTICAST,UP,LOWER_UP> \nenxdae3cfe3cb5d  DOWN           da:e3:cf:e3:cb:5d <BROADCAST,MULTICAST> \nens5f0           UP             68:be:49:28:20:d2 <BROADCAST,MULTICAST,UP,LOWER_UP> \nens5f1           DOWN           68:be:49:28:20:d3 <BROADCAST,MULTICAST> \ntailscale0       UNKNOWN        <POINTOPOINT,MULTICAST,NOARP,UP,LOWER_UP> \nvirbr0           UP             52:54:00:ef:09:e0 <BROADCAST,MULTICAST,UP,LOWER_UP> \nvirbr-vibing     UP             52:54:00:0e:a2:6e <BROADCAST,MULTICAST,UP,LOWER_UP> \ndocker0          UP             82:d8:de:ac:62:69 <BROADCAST,MULTICAST,UP,LOWER_UP> \nenx00e04c596160  UP             00:e0:4c:59:61:60 <BROADCAST,MULTICAST,UP,LOWER_UP> \nveth81dd18b@if2  UP             26:92:00:a1:49:ff <BROADCAST,MULTICAST,UP,LOWER_UP> \nvnet10           UNKNOWN        fe:54:00:66:00:10 <BROADCAST,MULTICAST,UP,LOWER_UP> \nveth913c63b@if2  UP             ce:47:e8:b9:7e:56 <BROADCAST,MULTICAST,UP,LOWER_UP> \nvnet11           UNKNOWN        fe:54:00:22:c6:89 <BROADCAST,MULTICAST,UP,LOWER_UP> \nvnet12           UNKNOWN        fe:54:00:7d:ed:98 <BROADCAST,MULTICAST,UP,LOWER_UP> \nens8npf0vf0      DOWN           3a:c0:a3:4d:a7:0e <NO-CARRIER,BROADCAST,MULTICAST,UP,LOWER_UP> \nens8npf0vf1      DOWN           92:d4:c7:ff:a6:33 <NO-CARRIER,BROADCAST,MULTICAST,UP,LOWER_UP> \nens8v0           UP             1a:ca:0a:26:a8:8c <BROADCAST,MULTICAST,UP,LOWER_UP> \nens8v1           UP             1a:ca:0a:26:a8:8e <BROADCAST,MULTICAST,UP,LOWER_UP>",
+    "health_switchdev": "1 packets transmitted, 1 received, 0% packet loss, time 0ms\nrtt min/avg/max/mdev = 0.239/0.239/0.239/0.000 ms\nTARGET SOURCE\n/cold  10.2.0.12:/cold",
+    "flow": "port=0 name=0000:b8:00.0 flags=75\nport=1 name=0000:b8:00.0_representor_vf0 flags=91\nport=2 name=0000:b8:00.0_representor_vf1 flags=91\nmirror validate=0 errno=95 type=0 message=none\nmirror create=ok errno=95 type=0 message=none\nmirror ready original=1 capture=2\nmirror hits=0\nmirror hits=0",
+    "health_flow": "1 packets transmitted, 1 received, 0% packet loss, time 0ms\nrtt min/avg/max/mdev = 0.217/0.217/0.217/0.000 ms\nTARGET SOURCE\n/cold  10.2.0.12:/cold",
+    "measurements": [
+      {
+        "rxq": 4,
+        "original_rxq": 4,
+        "before": [
+          {
+            "time": 4208051.46826273,
+            "rx": 32800048,
+            "accepted": 0,
+            "ringfull": 0,
+            "nombuf": 0,
+            "filtered": 0,
+            "imissed": 0,
+            "rx_nombuf": 0,
+            "external": 32800048,
+            "scattered": 0,
+            "queues": [
+              8199491,
+              8199171,
+              8201155,
+              8200800
+            ]
+          },
+          {
+            "time": 4208051.468282228,
+            "rx": 32802004,
+            "accepted": 0,
+            "ringfull": 0,
+            "nombuf": 0,
+            "filtered": 0,
+            "imissed": 0,
+            "rx_nombuf": 0,
+            "external": 32802004,
+            "scattered": 0,
+            "queues": [
+              8199971,
+              8199649,
+              8201622,
+              8201283
+            ]
+          }
+        ],
+        "after": [
+          {
+            "time": 4208057.468269138,
+            "rx": 431242594,
+            "accepted": 0,
+            "ringfull": 0,
+            "nombuf": 0,
+            "filtered": 0,
+            "imissed": 14825,
+            "rx_nombuf": 0,
+            "external": 431242594,
+            "scattered": 0,
+            "queues": [
+              107799491,
+              107817987,
+              107818071,
+              107807585
+            ]
+          },
+          {
+            "time": 4208057.468698181,
+            "rx": 431276885,
+            "accepted": 0,
+            "ringfull": 0,
+            "nombuf": 0,
+            "filtered": 0,
+            "imissed": 3140,
+            "rx_nombuf": 0,
+            "external": 431276885,
+            "scattered": 0,
+            "queues": [
+              107816835,
+              107823641,
+              107823774,
+              107813337
+            ]
+          }
+        ],
+        "device_args": ",mprq_en=1,rxqs_min_mprq=4,mprq_max_memcpy_len=0,mprq_log_stride_num=6,mprq_log_stride_size=8",
+        "original_args": ",mprq_en=1,rxqs_min_mprq=4,mprq_max_memcpy_len=0,mprq_log_stride_num=6,mprq_log_stride_size=8",
+        "capture_args": ",mprq_en=1,rxqs_min_mprq=4,mprq_max_memcpy_len=0,mprq_log_stride_num=6,mprq_log_stride_size=8",
+        "descriptors": 1024,
+        "wire_before": {
+          "time": 1790885908.4864666,
+          "rx_out_of_buffer": 0,
+          "rx_steer_missed_packets": 1421,
+          "rx_packets_phy": 165232014836,
+          "rx_discards_phy": 2275200537
+        },
+        "wire_after": {
+          "time": 1790885914.1860592,
+          "rx_out_of_buffer": 0,
+          "rx_steer_missed_packets": 1421,
+          "rx_packets_phy": 165841847026,
+          "rx_discards_phy": 2380951776
+        },
+        "offered_mpps": 106.51784061234008,
+        "original_mpps": 66.40702008284407,
+        "mirrored_mpps": 66.40787640880079
+      },
+      {
+        "rxq": 8,
+        "original_rxq": 8,
+        "before": [
+          {
+            "time": 4208065.472075678,
+            "rx": 0,
+            "accepted": 0,
+            "ringfull": 0,
+            "nombuf": 0,
+            "filtered": 0,
+            "imissed": 0,
+            "rx_nombuf": 0,
+            "external": 0,
+            "scattered": 0,
+            "queues": [
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "time": 4208065.472714053,
+            "rx": 0,
+            "accepted": 0,
+            "ringfull": 0,
+            "nombuf": 0,
+            "filtered": 0,
+            "imissed": 0,
+            "rx_nombuf": 0,
+            "external": 0,
+            "scattered": 0,
+            "queues": [
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ]
+          }
+        ],
+        "after": [
+          {
+            "time": 4208071.472481927,
+            "rx": 396760105,
+            "accepted": 0,
+            "ringfull": 0,
+            "nombuf": 0,
+            "filtered": 0,
+            "imissed": 2241,
+            "rx_nombuf": 0,
+            "external": 396760105,
+            "scattered": 0,
+            "queues": [
+              49181008,
+              50017763,
+              50018541,
+              49154933,
+              50016361,
+              49173472,
+              49163084,
+              50035459
+            ]
+          },
+          {
+            "time": 4208071.472070918,
+            "rx": 396735053,
+            "accepted": 0,
+            "ringfull": 0,
+            "nombuf": 0,
+            "filtered": 0,
+            "imissed": 1309,
+            "rx_nombuf": 0,
+            "external": 396735053,
+            "scattered": 0,
+            "queues": [
+              49180035,
+              50014528,
+              50014041,
+              49151747,
+              50013086,
+              49170243,
+              49159861,
+              50032222
+            ]
+          }
+        ],
+        "device_args": ",mprq_en=1,rxqs_min_mprq=4,mprq_max_memcpy_len=0,mprq_log_stride_num=6,mprq_log_stride_size=8",
+        "original_args": ",mprq_en=1,rxqs_min_mprq=4,mprq_max_memcpy_len=0,mprq_log_stride_num=6,mprq_log_stride_size=8",
+        "capture_args": ",mprq_en=1,rxqs_min_mprq=4,mprq_max_memcpy_len=0,mprq_log_stride_num=6,mprq_log_stride_size=8",
+        "descriptors": 1024,
+        "wire_before": {
+          "time": 1790885922.9258687,
+          "rx_out_of_buffer": 0,
+          "rx_steer_missed_packets": 1421,
+          "rx_packets_phy": 166010653843,
+          "rx_discards_phy": 2415239085
+        },
+        "wire_after": {
+          "time": 1790885928.933413,
+          "rx_out_of_buffer": 0,
+          "rx_steer_missed_packets": 1421,
+          "rx_packets_phy": 166666909903,
+          "rx_discards_phy": 2539267115
+        },
+        "offered_mpps": 109.51320353071979,
+        "original_mpps": 66.12220715880947,
+        "mirrored_mpps": 66.12959720001852
+      }
+    ],
+    "health_after": "1 packets transmitted, 1 received, 0% packet loss, time 0ms\nrtt min/avg/max/mdev = 0.365/0.365/0.365/0.000 ms\nTARGET SOURCE\n/cold  10.2.0.12:/cold"
+  },
+  "mprq_without_count_and_mixed": {
+    "health_before": "1 packets transmitted, 1 received, 0% packet loss, time 0ms\nrtt min/avg/max/mdev = 0.320/0.320/0.320/0.000 ms\nTARGET SOURCE\n/cold  10.2.0.12:/cold",
+    "legacy": "port=0 name=0000:b8:00.1 flags=75\nport=1 name=0000:b8:00.2 flags=75\nmirror validate=-95 errno=95 type=1 message=none",
+    "switchdev": "",
+    "ports": "pci/0000:b8:00.0/65535: type eth netdev ens8np0 flavour physical port 0 splittable false\npci/0000:b8:00.0/1: type eth netdev ens8npf0vf0 flavour pcivf controller 0 pfnum 0 vfnum 0 external false splittable false\n  function:\n    hw_addr 00:00:00:00:00:00\npci/0000:b8:00.0/2: type eth netdev ens8npf0vf1 flavour pcivf controller 0 pfnum 0 vfnum 1 external false splittable false\n  function:\n    hw_addr 00:00:00:00:00:00\npci/0000:3a:00.0/0: type eth netdev ens5f0 flavour physical port 0 splittable false\npci/0000:3a:00.1/512: type eth netdev ens5f1 flavour physical port 1 splittable false\npci/0000:b8:00.1/65536: type eth netdev ens8v0 flavour virtual splittable false\npci/0000:b8:00.2/131072: type eth netdev ens8v1 flavour virtual splittable false\nlo               UNKNOWN        00:00:00:00:00:00 <LOOPBACK,UP,LOWER_UP> \nens8np0          UP             b8:ce:f6:91:37:66 <BROADCAST,MULTICAST,UP,LOWER_UP> \nenxdae3cfe3cb5d  DOWN           da:e3:cf:e3:cb:5d <BROADCAST,MULTICAST> \nens5f0           UP             68:be:49:28:20:d2 <BROADCAST,MULTICAST,UP,LOWER_UP> \nens5f1           DOWN           68:be:49:28:20:d3 <BROADCAST,MULTICAST> \ntailscale0       UNKNOWN        <POINTOPOINT,MULTICAST,NOARP,UP,LOWER_UP> \nvirbr0           UP             52:54:00:ef:09:e0 <BROADCAST,MULTICAST,UP,LOWER_UP> \nvirbr-vibing     UP             52:54:00:0e:a2:6e <BROADCAST,MULTICAST,UP,LOWER_UP> \ndocker0          UP             82:d8:de:ac:62:69 <BROADCAST,MULTICAST,UP,LOWER_UP> \nenx00e04c596160  UP             00:e0:4c:59:61:60 <BROADCAST,MULTICAST,UP,LOWER_UP> \nveth81dd18b@if2  UP             26:92:00:a1:49:ff <BROADCAST,MULTICAST,UP,LOWER_UP> \nvnet10           UNKNOWN        fe:54:00:66:00:10 <BROADCAST,MULTICAST,UP,LOWER_UP> \nveth913c63b@if2  UP             ce:47:e8:b9:7e:56 <BROADCAST,MULTICAST,UP,LOWER_UP> \nvnet11           UNKNOWN        fe:54:00:22:c6:89 <BROADCAST,MULTICAST,UP,LOWER_UP> \nvnet12           UNKNOWN        fe:54:00:7d:ed:98 <BROADCAST,MULTICAST,UP,LOWER_UP> \nens8npf0vf0      DOWN           7a:ce:5a:73:ae:21 <NO-CARRIER,BROADCAST,MULTICAST,UP,LOWER_UP> \nens8npf0vf1      DOWN           92:8b:f3:9e:b6:fd <NO-CARRIER,BROADCAST,MULTICAST,UP,LOWER_UP> \nens8v0           UP             1a:ca:0a:26:a8:8c <BROADCAST,MULTICAST,UP,LOWER_UP> \nens8v1           UP             1a:ca:0a:26:a8:8e <BROADCAST,MULTICAST,UP,LOWER_UP>",
+    "health_switchdev": "1 packets transmitted, 1 received, 0% packet loss, time 0ms\nrtt min/avg/max/mdev = 0.248/0.248/0.248/0.000 ms\nTARGET SOURCE\n/cold  10.2.0.12:/cold",
+    "flow": "port=0 name=0000:b8:00.0 flags=75\nport=1 name=0000:b8:00.0_representor_vf0 flags=91\nport=2 name=0000:b8:00.0_representor_vf1 flags=91\nmirror validate=0 errno=95 type=0 message=none\nmirror create=ok errno=95 type=0 message=none\nmirror ready original=1 capture=2",
+    "health_flow": "1 packets transmitted, 1 received, 0% packet loss, time 0ms\nrtt min/avg/max/mdev = 0.244/0.244/0.244/0.000 ms\nTARGET SOURCE\n/cold  10.2.0.12:/cold",
+    "measurements": [
+      {
+        "rxq": 8,
+        "original_rxq": 8,
+        "before": [
+          {
+            "time": 4208318.472921212,
+            "rx": 40927760,
+            "accepted": 0,
+            "ringfull": 0,
+            "nombuf": 0,
+            "filtered": 0,
+            "imissed": 0,
+            "rx_nombuf": 0,
+            "external": 40927760,
+            "scattered": 0,
+            "queues": [
+              5115631,
+              5115118,
+              5115090,
+              5117187,
+              5115361,
+              5115422,
+              5117794,
+              5116582
+            ]
+          },
+          {
+            "time": 4208318.472901111,
+            "rx": 40926137,
+            "accepted": 0,
+            "ringfull": 0,
+            "nombuf": 0,
+            "filtered": 0,
+            "imissed": 0,
+            "rx_nombuf": 0,
+            "external": 40926137,
+            "scattered": 0,
+            "queues": [
+              5115421,
+              5114906,
+              5114883,
+              5116977,
+              5115139,
+              5115233,
+              5117578,
+              5116384
+            ]
+          }
+        ],
+        "after": [
+          {
+            "time": 4208323.472902439,
+            "rx": 373348183,
+            "accepted": 0,
+            "ringfull": 0,
+            "nombuf": 0,
+            "filtered": 0,
+            "imissed": 2860,
+            "rx_nombuf": 0,
+            "external": 373348183,
+            "scattered": 0,
+            "queues": [
+              46660406,
+              46675068,
+              46663268,
+              46666360,
+              46667267,
+              46668096,
+              46683034,
+              46665155
+            ]
+          },
+          {
+            "time": 4208323.472675651,
+            "rx": 373335474,
+            "accepted": 0,
+            "ringfull": 0,
+            "nombuf": 0,
+            "filtered": 0,
+            "imissed": 748,
+            "rx_nombuf": 0,
+            "external": 373335474,
+            "scattered": 0,
+            "queues": [
+              46660582,
+              46673171,
+              46660630,
+              46664492,
+              46665411,
+              46667011,
+              46681219,
+              46663307
+            ]
+          }
+        ],
+        "device_args": ",mprq_en=1,rxqs_min_mprq=4,mprq_max_memcpy_len=0,mprq_log_stride_num=6,mprq_log_stride_size=8",
+        "original_args": ",mprq_en=1,rxqs_min_mprq=4,mprq_max_memcpy_len=0,mprq_log_stride_num=6,mprq_log_stride_size=8",
+        "capture_args": ",mprq_en=1,rxqs_min_mprq=4,mprq_max_memcpy_len=0,mprq_log_stride_num=6,mprq_log_stride_size=8",
+        "descriptors": 1024,
+        "flow_count": false,
+        "wire_before": {
+          "time": 1790886175.3293216,
+          "rx_out_of_buffer": 0,
+          "rx_steer_missed_packets": 1431,
+          "rx_packets_phy": 166955641780,
+          "rx_discards_phy": 2609883396
+        },
+        "wire_after": {
+          "time": 1790886180.9891067,
+          "rx_out_of_buffer": 0,
+          "rx_steer_missed_packets": 1431,
+          "rx_packets_phy": 167677632762,
+          "rx_discards_phy": 2830212352
+        },
+        "offered_mpps": 127.41437917961309,
+        "original_mpps": 66.48433423006553,
+        "mirrored_mpps": 66.48486532524842
+      },
+      {
+        "rxq": 8,
+        "original_rxq": 4,
+        "before": [
+          {
+            "time": 4208332.472461494,
+            "rx": 13162570,
+            "accepted": 0,
+            "ringfull": 0,
+            "nombuf": 0,
+            "filtered": 0,
+            "imissed": 0,
+            "rx_nombuf": 0,
+            "external": 0,
+            "scattered": 0,
+            "queues": [
+              3290374,
+              3289091,
+              3291697,
+              3291762
+            ]
+          },
+          {
+            "time": 4208332.472252364,
+            "rx": 13160546,
+            "accepted": 0,
+            "ringfull": 0,
+            "nombuf": 0,
+            "filtered": 0,
+            "imissed": 0,
+            "rx_nombuf": 0,
+            "external": 13160546,
+            "scattered": 0,
+            "queues": [
+              1644433,
+              1644833,
+              1645315,
+              1645927,
+              1645439,
+              1643739,
+              1645891,
+              1645315
+            ]
+          }
+        ],
+        "after": [
+          {
+            "time": 4208338.468911813,
+            "rx": 404999652,
+            "accepted": 0,
+            "ringfull": 0,
+            "nombuf": 0,
+            "filtered": 0,
+            "imissed": 14281,
+            "rx_nombuf": 0,
+            "external": 0,
+            "scattered": 0,
+            "queues": [
+              101226587,
+              101268318,
+              101260765,
+              101244481
+            ]
+          },
+          {
+            "time": 4208338.468495552,
+            "rx": 404993689,
+            "accepted": 0,
+            "ringfull": 0,
+            "nombuf": 0,
+            "filtered": 0,
+            "imissed": 1225,
+            "rx_nombuf": 0,
+            "external": 404993689,
+            "scattered": 0,
+            "queues": [
+              50620974,
+              50640806,
+              50621535,
+              50627503,
+              50613519,
+              50622763,
+              50634849,
+              50612227
+            ]
+          }
+        ],
+        "device_args": ",mprq_en=1,rxqs_min_mprq=4,mprq_max_memcpy_len=0,mprq_log_stride_num=6,mprq_log_stride_size=8",
+        "original_args": "",
+        "capture_args": ",mprq_en=1,rxqs_min_mprq=4,mprq_max_memcpy_len=0,mprq_log_stride_num=6,mprq_log_stride_size=8",
+        "descriptors": 1024,
+        "flow_count": false,
+        "wire_before": {
+          "time": 1790886189.712621,
+          "rx_out_of_buffer": 0,
+          "rx_steer_missed_packets": 1431,
+          "rx_packets_phy": 167875737083,
+          "rx_discards_phy": 2886334945
+        },
+        "wire_after": {
+          "time": 1790886195.7006373,
+          "rx_out_of_buffer": 0,
+          "rx_steer_missed_packets": 1431,
+          "rx_packets_phy": 168638490538,
+          "rx_discards_phy": 3094619521
+        },
+        "offered_mpps": 127.3150764529868,
+        "original_mpps": 65.34483922286425,
+        "mirrored_mpps": 65.34643954632354
+      }
+    ],
+    "health_after": "1 packets transmitted, 1 received, 0% packet loss, time 0ms\nrtt min/avg/max/mdev = 0.325/0.325/0.325/0.000 ms\nTARGET SOURCE\n/cold  10.2.0.12:/cold"
+  },
+  "shutdown": {
+    "before": {
+      "time": 1790886408.1687126,
+      "cpu": {
+        "cpworker": 0.86,
+        "dpdk_primary": 25.74
+      },
+      "tx_packets_phy": 45501798,
+      "rx_packets_phy": 170699901641,
+      "tx_bytes_phy": 53719932782,
+      "rx_bytes_phy": 11817695668304,
+      "rx_64_bytes_phy": 2551344761,
+      "rx_65_to_127_bytes_phy": 168088647476,
+      "rx_128_to_255_bytes_phy": 10739064,
+      "rx_256_to_511_bytes_phy": 19240156,
+      "rx_512_to_1023_bytes_phy": 2270150,
+      "rx_1024_to_1518_bytes_phy": 2628299,
+      "rx_1519_to_2047_bytes_phy": 803779,
+      "rx_2048_to_4095_bytes_phy": 1291796,
+      "rx_4096_to_8191_bytes_phy": 633641,
+      "rx_8192_to_10239_bytes_phy": 22275310,
+      "primary": {
+        "time": 4208551.472515986,
+        "rx": 40006021,
+        "accepted": 39996600,
+        "ringfull": 28734137,
+        "nombuf": 0,
+        "filtered": 0,
+        "imissed": 486364,
+        "rx_nombuf": 0
+      },
+      "captured": 17580032
+    },
+    "secondary_remaining": "",
+    "primary_pid": "920926",
+    "after1": {
+      "time": 4208553.472679987,
+      "rx": 223468085,
+      "accepted": 106573384,
+      "ringfull": 84209225,
+      "nombuf": 0,
+      "filtered": 0,
+      "imissed": 863237,
+      "rx_nombuf": 0
+    },
+    "after2": {
+      "time": 4208555.472906865,
+      "rx": 416131800,
+      "accepted": 106573384,
+      "ringfull": 84209225,
+      "nombuf": 0,
+      "filtered": 0,
+      "imissed": 867473,
+      "rx_nombuf": 0
+    },
+    "worker_log": "perf_pool: n=131072 cache=32 room=2196 socket=1 ops=ring_mp_mc\n2026-10-01T20:26:42 INFO  enter rte_pdump_enable_bpf, port 0\n2026-10-01T20:26:42 INFO  exit rte_pdump_enable_bpf, port 0\n2026-10-01T20:26:42 INFO  create task-0 success\n2026-10-01T20:26:42 INFO  init 1 tasks, total 1 tasks\n2026-10-01T20:26:42 INFO  listen on unix socket /tmp/cpperf.sock\n2026-10-01T20:26:42 INFO  start poll packets\n2026-10-01T20:26:48 INFO  quit",
+    "cores": "",
+    "passed": true
+  }
+}
