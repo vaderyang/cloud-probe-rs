@@ -10,6 +10,33 @@
 //! It opens `lo` with a `udp and port 41234` filter, fires UDP datagrams at that
 //! port and checks that at least one matching frame is captured with the
 //! expected timestamp/accounting.
+//!
+//! ## veth ordering (bead `cloud-probe-rs-h53`)
+//!
+//! `live_capture_veth_delivers_exactly_n_frames` asserts a **strict** order:
+//! the injected sequence numbers `0..N` must come back in that order. That is
+//! a property of the *surrounding kernel path*, not of the capturer:
+//!
+//! * the capturer reads one `AF_PACKET` socket queue and cannot reorder;
+//! * a single-queue veth delivers a *single-threaded* sender's frames in order
+//!   only while they all traverse one CPU. veth delivers a transmitted frame on
+//!   the sending CPU (directly, or through that CPU's `netif_rx` backlog) and
+//!   `packet_rcv` enqueues it into the capture socket under a lock, so frames
+//!   processed concurrently on two CPUs are queued in lock-acquisition order,
+//!   not send order (measured on this kernel with an 8-CPU raw-sender stress:
+//!   adjacent inversions > 0, total exact);
+//! * when the injecting thread migrates between CPUs (scheduler placement, or
+//!   a softirq deferred to `ksoftirqd` under load) the high band can surface
+//!   early - exactly the bead h53 symptom (a contiguous run of high sequence
+//!   numbers delivered before a lower run, with the total still exact).
+//!
+//! The veth tests therefore pin the injecting thread to one CPU (the private
+//! `CpuPin` guard) so the strict-order assertion stays deterministic. It is
+//! **not** weakened to a set/sorted comparison. Two environment preconditions
+//! matter as well: the process needs enough file descriptors for `ip`'s netlink
+//! socket (a harness with `ulimit -n 4` fails at `ip link set ... up`, long
+//! before the capture path runs), and the capturer needs a socket buffer large
+//! enough for the burst (8 MiB here, well above `N * frame`).
 
 use std::sync::Arc;
 
@@ -62,6 +89,82 @@ fn run_ok(cmd: &str, args: &[&str]) {
         .status()
         .unwrap_or_else(|e| panic!("spawn {cmd}: {e}"));
     assert!(status.success(), "{cmd} {args:?} failed: {status}");
+}
+
+/// Like [`run_ok`] but returns `false` instead of panicking, so a caller can
+/// retry with a different name or clean up.
+fn try_run(cmd: &str, args: &[&str]) -> bool {
+    std::process::Command::new(cmd)
+        .args(args)
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
+/// A fresh 16-bit name suffix for a veth pair. Mixes the pid, the nanosecond
+/// clock and the retry counter so a harness that starts many processes in a
+/// tight loop cannot have two of them pick the same pair name.
+fn name_tag(attempt: u32) -> u32 {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.subsec_nanos())
+        .unwrap_or(0);
+    (std::process::id() ^ nanos ^ attempt.wrapping_mul(0x9e37_79b9)) & 0xFFFF
+}
+
+/// Pins the calling thread to a single allowed CPU and restores the previous
+/// affinity on drop.
+///
+/// See the module doc ("veth ordering") for why the strict-order veth tests
+/// need this: when veth delivers on more than one CPU, the single `AF_PACKET`
+/// capture queue is filled in lock-acquisition order rather than send order.
+struct CpuPin {
+    prev: libc::cpu_set_t,
+}
+
+impl CpuPin {
+    fn single() -> Self {
+        // SAFETY: `sched_getaffinity`/`sched_setaffinity` with a `cpu_set_t`
+        // of the size libc reports is the documented Linux ABI; pid 0 means the
+        // calling thread.
+        unsafe {
+            let size = std::mem::size_of::<libc::cpu_set_t>();
+            let mut prev: libc::cpu_set_t = std::mem::zeroed();
+            assert_eq!(
+                libc::sched_getaffinity(0, size, &mut prev),
+                0,
+                "sched_getaffinity failed: {}",
+                std::io::Error::last_os_error()
+            );
+            let mut one: libc::cpu_set_t = std::mem::zeroed();
+            let mut cpu = None;
+            for c in 0..libc::CPU_SETSIZE as usize {
+                if libc::CPU_ISSET(c, &prev) {
+                    libc::CPU_SET(c, &mut one);
+                    cpu = Some(c);
+                    break;
+                }
+            }
+            let cpu = cpu.expect("the current affinity mask contains no CPU");
+            assert_eq!(
+                libc::sched_setaffinity(0, size, &one),
+                0,
+                "sched_setaffinity to CPU {cpu} failed: {}; the strict-order veth \
+                 contract requires the injecting thread on one CPU",
+                std::io::Error::last_os_error()
+            );
+            CpuPin { prev }
+        }
+    }
+}
+
+impl Drop for CpuPin {
+    fn drop(&mut self) {
+        // SAFETY: `prev` was filled by a successful `sched_getaffinity` above.
+        unsafe {
+            libc::sched_setaffinity(0, std::mem::size_of::<libc::cpu_set_t>(), &self.prev);
+        }
+    }
 }
 
 /// Send an 802.1Q-tagged Ethernet frame out of `ifname` via a raw socket.
@@ -453,6 +556,18 @@ fn udp_frame(
     frame
 }
 
+/// Decode the injected sequence numbers from a [`Collect`] in delivery order.
+fn delivered_seqs(sink: &Collect, port: u16) -> Vec<u32> {
+    sink.pkts
+        .iter()
+        .map(|p| {
+            let off = 14 + 20 + 8;
+            assert_eq!(u16::from_be_bytes([p[off - 6], p[off - 5]]), port);
+            u32::from_be_bytes([p[off], p[off + 1], p[off + 2], p[off + 3]])
+        })
+        .collect()
+}
+
 /// A raw `AF_PACKET` transmitter bound to one interface.
 struct RawTx {
     fd: std::os::fd::RawFd,
@@ -518,19 +633,33 @@ struct VethPair {
 
 impl VethPair {
     fn new() -> Self {
-        let tag = std::process::id() % 0xFFFF;
-        let a = format!("cplv{tag:04x}a");
-        let b = format!("cplv{tag:04x}b");
-        run_ok(
-            "ip",
-            &["link", "add", &a, "type", "veth", "peer", "name", &b],
-        );
-        run_ok("ip", &["link", "set", &a, "up"]);
-        run_ok("ip", &["link", "set", &b, "up"]);
+        // A fresh veth must not collide with a concurrent run (a harness may
+        // start several processes from the same shell). Deriving the name from
+        // the pid *and* the nanosecond clock, and retrying `ip link add`, keeps
+        // the setup robust without ever reusing a live pair.
+        let mut created = None;
+        for attempt in 0..8u32 {
+            let tag = name_tag(attempt);
+            let a = format!("cplv{tag:04x}a");
+            let b = format!("cplv{tag:04x}b");
+            if try_run(
+                "ip",
+                &["link", "add", &a, "type", "veth", "peer", "name", &b],
+            ) {
+                created = Some((a, b));
+                break;
+            }
+        }
+        let (a, b) = created.expect("could not create a unique veth pair after 8 attempts");
+        // Build the guard *before* bringing the pair up so a failed `ip` still
+        // deletes both ends through `Drop`.
+        let pair = VethPair { a, b };
+        run_ok("ip", &["link", "set", &pair.a, "up"]);
+        run_ok("ip", &["link", "set", &pair.b, "up"]);
         // A freshly created veth has no carrier until the peer is up; the first
         // frames sent without one are simply dropped by the driver.
         std::thread::sleep(std::time::Duration::from_millis(300));
-        VethPair { a, b }
+        pair
     }
 }
 
@@ -567,6 +696,8 @@ fn live_capture_veth_delivers_exactly_n_frames() {
     const N: u32 = 400;
 
     let veth = VethPair::new();
+    // All N frames must traverse one CPU: see the module doc ("veth ordering").
+    let _pin = CpuPin::single();
     let dst_mac = iface_mac(&veth.a);
     let src_mac = iface_mac(&veth.b);
     // Destination address: not configured on either end, so the frame is tapped by
@@ -627,20 +758,87 @@ fn live_capture_veth_delivers_exactly_n_frames() {
         "the capturer reported drops while delivering {N} frames"
     );
     // Exactly the injected set, in order: no duplicate, no gap, no reordering.
-    let seqs: Vec<u32> = sink
-        .pkts
-        .iter()
-        .map(|p| {
-            let off = 14 + 20 + 8;
-            assert_eq!(u16::from_be_bytes([p[off - 6], p[off - 5]]), PORT);
-            u32::from_be_bytes([p[off], p[off + 1], p[off + 2], p[off + 3]])
-        })
-        .collect();
+    let seqs = delivered_seqs(&sink, PORT);
     assert_eq!(
         seqs,
         (0..N).collect::<Vec<u32>>(),
         "delivered frames are not the injected frames in order"
     );
+}
+
+/// Bounded repetition of the veth fidelity contract.
+///
+/// The single-shot test proves ordering for one burst; the reorder from bead
+/// `cloud-probe-rs-h53` is a scheduling race, so one pass is weak evidence.
+/// This repeats the inject/capture cycle `REPS` times on the same veth pair and
+/// capturer and requires the strict `0..N` order every time. With the `CpuPin`
+/// guard it is deterministic; the multi-CPU veth delivery path is what makes an
+/// unpinned run flaky.
+#[test]
+#[ignore = "requires CAP_NET_RAW + CAP_NET_ADMIN (run with sudo); creates a veth pair"]
+fn live_capture_veth_order_is_stable_under_repetition() {
+    assert_privileged("live_capture_veth_order_is_stable_under_repetition");
+    const PORT: u16 = 41249;
+    const N: u32 = 128;
+    const REPS: usize = 12;
+
+    let veth = VethPair::new();
+    // All N frames must traverse one CPU: see the module doc ("veth ordering").
+    let _pin = CpuPin::single();
+    let dst_mac = iface_mac(&veth.a);
+    let src_mac = iface_mac(&veth.b);
+    let dst_ip = [198, 51, 100, 8];
+
+    let json = format!(
+        r#"{{
+            "log_level": "INFO",
+            "execution_model": "rtc",
+            "tasks": [{{
+                "capturer": {{ "type": "libpcap", "libpcap": {{
+                    "interface": "{ifname}",
+                    "bpf": "udp and dst port {PORT}",
+                    "buffer_size_mb": 8,
+                    "timeout_ms": 50
+                }} }},
+                "outputs": []
+            }}]
+        }}"#,
+        ifname = veth.a
+    );
+    let cfg = Config::parse_str(&json).expect("parse config");
+    let tasks = cfg.tasks.clone();
+    let stats = Arc::new(CaptureStats::default());
+    let mut cap = new_capturer(&tasks, &tasks[0], stats).expect("capturer");
+
+    let tx = RawTx::new(&veth.b);
+    let frames: Vec<Vec<u8>> = (0..N)
+        .map(|seq| udp_frame(seq, &dst_mac, &src_mac, dst_ip, PORT))
+        .collect();
+
+    for rep in 0..REPS {
+        for f in &frames {
+            tx.send(f);
+        }
+        // Drain until every frame arrived; only then assert. The previous
+        // repetition is guaranteed to have emptied the queue (the BPF filter
+        // matches nothing else), so there are never stale frames to account for.
+        let mut sink = Collect::default();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while (sink.pkts.len() as u32) < N && std::time::Instant::now() < deadline {
+            cap.capture_once(&mut sink);
+        }
+        assert_eq!(
+            sink.pkts.len() as u32,
+            N,
+            "repetition {rep}: delivered {} of {N} frames",
+            sink.pkts.len()
+        );
+        assert_eq!(
+            delivered_seqs(&sink, PORT),
+            (0..N).collect::<Vec<u32>>(),
+            "repetition {rep}: delivered frames are not the injected frames in order"
+        );
+    }
 }
 
 /// On loopback the kernel taps every datagram twice (transmitted +
