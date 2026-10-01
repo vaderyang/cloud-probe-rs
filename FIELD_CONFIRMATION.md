@@ -19,10 +19,20 @@
 ## 2. ⬜ 混杂模式（promisc）意图
 
 - **需要**：确认原 C 实现是否有意设置混杂模式；镜像口/SPAN 场景下的预期采集面。
+- **已核实（2026-10，上游源码 + yinjiao 内核实验）**：
+  - 上游 C 的 libpcap 路径调用 `pcap_set_promisc(p, opts.promisc)`（`libpcap.c:154`），但
+    `opts.promisc = 0` 是**硬编码**（`libpcap.c:340`）、**不从 JSON 读取** → C 的 libpcap 路径
+    **永不启用混杂、也不可配置**。DPDK pdump 则 `promiscuous_mode = true` 默认为开（`dpdk/pdump.c:386`）。
+  - 本移植（AF_PACKET，libpcap 类比）不设 `PACKET_MR_PROMISC` → **与 C libpcap 完全一致**。
+  - yinjiao veth 内核实验：AF_PACKET `SOCK_RAW` 在**非 promisc** 下仍能收到 dst MAC 非本机、
+    非广播的单播帧（虚拟设备不建模硬件 RX 过滤）→ promisc 的取舍由**物理网卡/SPAN 镜像**决定，
+    veth 无法复现。
 - **为什么重要**：直接决定采集面等价性（三篇审计均未定论）。本移植的 AF_PACKET 路径当前
   **不设** `PACKET_MR_PROMISC`。
-- **如何采集**：现场以镜像口/SPAN 部署时，对比同一镜像流量下 C 版与本移植版抓到的帧数/流量。
-- **解锁决策**：是否需要在 libpcap 采集路径上默认开启混杂模式（或做成配置项）。
+- **如何采集**：现场以镜像口/SPAN 部署时，对比同一镜像流量下 C 版与本移植版抓到的帧数/流量
+  （即验证物理网卡在非 promisc 下是否丢弃镜像帧）。
+- **解锁决策**：若现场确为 SPAN 且物理网卡在非 promisc 下丢帧，则**新增** `promisc` 配置项
+  （相对 oracle 的增强；DPDK 默认开说明镜像场景倾向开）；否则保持 parity（不设）。
 
 ## 3. ⬜ libpcap TPACKET ring 相对 `SO_RCVBUF` 的高负载容量
 
