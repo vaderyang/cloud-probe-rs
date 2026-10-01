@@ -27,6 +27,7 @@ from typing import Any
 
 HERE = pathlib.Path(__file__).resolve().parent
 LAB_VERIFY = HERE / "lab_verify.py"
+VM_VERIFY = HERE / "vm_verify.py"
 
 
 def _resolve_secret(spec: dict[str, Any], value_key: str, env_key: str,
@@ -100,6 +101,33 @@ def build_argv(entry: dict[str, Any], args: argparse.Namespace,
     return argv
 
 
+def build_vm_argv(entry: dict[str, Any], args: argparse.Namespace,
+                  artifact: pathlib.Path, junit_dir: pathlib.Path) -> list[str]:
+    """QEMU/KVM driver: install the source in a local VM and verify there."""
+    workdir = pathlib.Path(args.vm_workdir) / entry["name"]
+    argv = [
+        sys.executable, str(VM_VERIFY),
+        "--artifact", str(artifact),
+        "--source", entry["source"],
+        "--target-name", entry["name"],
+        "--boot-style", entry.get("boot_style", "redhat"),
+        "--junit-out", str(junit_dir / f"{entry['name']}.junit.xml"),
+        "--result-out", str(junit_dir / f"{entry['name']}.result.json"),
+        "--workdir", str(workdir),
+        "--vm-cpus", str(args.vm_cpus),
+        "--vm-mem", str(args.vm_mem),
+    ]
+    if args.oneboot:
+        argv += ["--oneboot", args.oneboot]
+    if entry.get("iso"):
+        argv += ["--iso", str(entry["iso"])]
+    if entry.get("dist_host"):
+        argv += ["--dist-host", str(entry["dist_host"])]
+    if entry.get("frames"):
+        argv += ["--frames", str(entry["frames"])]
+    return argv
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -109,6 +137,13 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--oneboot", help="override the inventory's OneBoot URL")
     p.add_argument("--target", action="append", default=[],
                    help="verify only this target name (repeatable)")
+    p.add_argument("--driver", choices=["oneboot", "vm"], default="oneboot",
+                   help="oneboot = PXE/BMC lab machines; vm = local QEMU/KVM")
+    p.add_argument("--vm-workdir",
+                   default=str(pathlib.Path(tempfile.gettempdir()) / "cprs-vm"),
+                   help="per-target VM workdir (also caches the ISO)")
+    p.add_argument("--vm-cpus", type=int, default=4)
+    p.add_argument("--vm-mem", type=int, default=6144)
     p.add_argument("--apply", action="store_true",
                    help="actually provision; without it every run is a dry run")
     p.add_argument("--trigger", choices=["manual", "ipmi", "none"])
@@ -136,24 +171,25 @@ def main(argv: list[str] | None = None) -> int:
         args.oneboot = inv["oneboot"]
 
     # Materialise an SSH key from the environment once for every target that
-    # names one, then remove it when the run finishes.
+    # names one, then remove it when the run finishes.  (VM runs need no SSH.)
     key_path: str | None = None
     ssh_key_file: str | None = None
-    for t in targets:
-        ssh = t.get("ssh") or {}
-        if ssh.get("key"):
-            ssh_key_file = str(ssh["key"])
-            break
-        if ssh.get("key_env"):
-            content = _resolve_secret({"key_env": ssh["key_env"]}, "key", "key_env",
-                                      allow_missing=args.dry_run)
-            if content and not content.startswith("<unset:"):
-                fd, key_path = tempfile.mkstemp(prefix="cprs-sshkey-")
-                os.close(fd)
-                pathlib.Path(key_path).write_text(content)
-                os.chmod(key_path, 0o600)
-                ssh_key_file = key_path
-            break
+    if args.driver == "oneboot":
+        for t in targets:
+            ssh = t.get("ssh") or {}
+            if ssh.get("key"):
+                ssh_key_file = str(ssh["key"])
+                break
+            if ssh.get("key_env"):
+                content = _resolve_secret({"key_env": ssh["key_env"]}, "key", "key_env",
+                                          allow_missing=args.dry_run)
+                if content and not content.startswith("<unset:"):
+                    fd, key_path = tempfile.mkstemp(prefix="cprs-sshkey-")
+                    os.close(fd)
+                    pathlib.Path(key_path).write_text(content)
+                    os.chmod(key_path, 0o600)
+                    ssh_key_file = key_path
+                break
 
     failures = 0
     try:
@@ -163,7 +199,10 @@ def main(argv: list[str] | None = None) -> int:
                 failures += 1
                 continue
             artifact = _find_artifact(artifact_dir, entry["artifact"])
-            entry_argv = build_argv(entry, args, artifact, junit_dir, ssh_key_file)
+            if args.driver == "vm":
+                entry_argv = build_vm_argv(entry, args, artifact, junit_dir)
+            else:
+                entry_argv = build_argv(entry, args, artifact, junit_dir, ssh_key_file)
             print(f"\n===== {entry['name']} =====")
             print("  " + " ".join(_redact(entry_argv)))
             if args.dry_run:

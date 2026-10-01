@@ -10,6 +10,7 @@
 | `tools/oneboot/oneboot_client.py` | OneBoot 管理 API 的无依赖客户端（只读自检 / 列表 / 上传 kickstart / 触发） |
 | `tools/oneboot/on_target_smoke.sh` | **在目标机上执行**的发布件冒烟/兼容性验证，输出 `result.json` |
 | `tools/oneboot/lab_verify.py` | 编排：生成 kickstart → 上传 → 触发启动 → 回收结果 → 产出 JUnit |
+| `tools/oneboot/vm_verify.py` | 无 BMC/物理机时，用本机 QEMU/KVM 装同一 OS 并验证 |
 | `tools/oneboot/run_inventory.py` | 读取机器清单，逐台执行并按清单聚合结果 |
 | `tools/oneboot/inventory.example.json` | 机器清单模板（复制为 `inventory.json`） |
 | `.github/workflows/lab-verify.yml` | 内网 self-hosted runner 上的验证工作流 |
@@ -200,6 +201,40 @@ tools/oneboot/run_inventory.py --verify-ssh --apply \
 
 这条路径非常适合把 OneBoot 装好的机器**长期挂成 self-hosted runner 池**：
 重装用 §4.4，日常回归用 §4.5。
+
+### 4.6 用虚拟机验证（没有物理机 / BMC 时）
+
+`vm_verify.py` 把同一套流程放进本机 QEMU/KVM：用 OneBoot 的**同一个 ISO +
+kernel/initrd + 同一 kickstart**，只是把 stage2/repo 换成从本机挂载的 ISO 提供，
+因此不需要 BMC、也不需要加入 PXE 二层网段。
+
+```bash
+tools/oneboot/vm_verify.py \
+  --artifact dist/cloud-probe-rs-x86_64-unknown-linux-gnu-glibc217.tar.gz \
+  --source centos_7_9_x86_64_dvd_2009 \
+  --junit-out build/vm-junit/centos7.xml
+# 或整份清单：tools/oneboot/run_inventory.py --driver vm --artifact-dir dist
+```
+
+要求：`qemu-system-x86_64`、`qemu-img`、`/dev/kvm`、`sudo`（loop 挂载）、nginx 或
+python3。首次运行会把 ISO 缓存到 `--workdir`（默认 `/tmp/cprs-vm`），之后复用。
+
+**几个非显然的坑（已处理）**：
+
+1. OneBoot 的 stage2 **session 会在安装中被清理**：虚拟机走 QEMU user-mode NAT，
+   OneBoot 看不到它的 DHCP 租约，`active_sessions` 归零、`/mnt/sessions/...` 404，
+   anaconda 随即报 `Error populating transaction`。→ 改用本机挂载 ISO + nginx 提供 repo。
+2. QEMU user-mode 把宿主映射为 `10.0.2.2`：kickstart 里的载荷/回调 URL 必须指向它。
+3. `/images/<source>/` 是按需从一次 `/go` 请求生成、并随 session 清理的，所以 driver
+   会先发一次 `/go` 再下载 kernel/initrd。
+4. repo 用 `python3 -m http.server` 时，anaconda 经 slirp 下载会 `No more mirrors`；
+   nginx 正常（driver 优先 nginx）。
+
+**实测（CentOS 7.9, glibc 2.17）**：安装成功，5 个二进制全部加载运行，
+`capture:fidelity captured 4000 >= injected 2000 icmp frames`，`ok=true`。
+
+> 注：目标机无 python3 时（CentOS 7），`on_target_smoke.sh` 用 netns + ping 注入
+> ICMP 帧并用 awk 写 `result.json`，不再依赖解释器。
 
 ---
 
