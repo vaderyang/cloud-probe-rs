@@ -519,6 +519,12 @@ release profile 用 `panic = "abort"`：**panic 是致命事件，不是可恢�
 
 ### 5.1 计划移植（有明确目标）
 
+> **已完成（bead 4mv.4）**：`ring_buffer.c` 的无锁 SPSC ring 已移植。实现用原子 `head`/`tail`
+> 与显式 `Acquire`/`Release` 排序（`SpscRing::split` 给出一对单生产/单消费者句柄，使得安全代码
+> 不可能拿到两个生产者）；满时 `push` 返回 `Err`、容量为 `size-1`、`used` 取值方式与 C 的
+> `spsc_ring_push`/`spsc_ring_pop`/`spsc_ring_used` 逐项对齐。并发正确性由 200 万条 FIFO 压测 +
+> 小环穷举交错模型测试覆盖，并在 Miri（`-Zmiri-many-seeds`，数据竞争检测）下通过。
+>
 > **已完成（bead 4mv.5）**：cgroup v1 CPU 限额（`cpu.cfs_period_us` / `cpu.cfs_quota_us` / `tasks`）已随 v2
 > 一同 port 到 `reslimit.rs`；`version=auto` 按 `cgroup.controllers` 探测 v2，否则回退 v1。Go
 > `verifyProcessCgroup` 的写后校验仍未移植（不影响限额生效，只是缺一条观测日志）。

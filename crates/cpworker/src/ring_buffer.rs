@@ -1,13 +1,20 @@
 //! Pipeline ring buffer and byte allocator. Port of `ring_buffer.c`.
 //!
-//! The original used a lock-free SPSC ring / circular mempool. This port keeps
-//! the same public behaviour (bounded SPSC queue + byte accounting) but uses
-//! safe synchronisation primitives; the hot-path performance can be revisited
-//! with a lock-free implementation if needed.
+//! The original C used a lock-free SPSC ring / circular mempool. This module
+//! keeps the same public behaviour (bounded SPSC queue + byte accounting) and
+//! implements the ring lock-free with atomics and explicit `Acquire`/`Release`
+//! ordering, mirroring `spsc_ring_push` / `spsc_ring_pop`.
+//!
+//! The ring is configured for exactly one producer thread to call [`SpscRing::push`]
+//! and one consumer thread to call [`SpscRing::pop`]. Because safe code must not be
+//! able to obtain two producers, the concurrent API is expressed through
+//! [`SpscRing::split`], which hands out one [`RingProducer`] and one [`RingConsumer`]
+//! while borrowing the ring; the plain [`SpscRing::push`] / [`SpscRing::pop`] are for
+//! use behind an external lock (as in the pipeline).
 
-use parking_lot::Mutex;
-use std::collections::VecDeque;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::cell::UnsafeCell;
+use std::mem::MaybeUninit;
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -59,10 +66,138 @@ impl RingMsg {
     }
 }
 
-/// Bounded single-producer/single-consumer queue of `RingMsg`.
-pub struct SpscRing {
-    buf: Mutex<VecDeque<Box<RingMsg>>>,
+/// Shared storage for the lock-free SPSC ring.
+///
+/// `head` is written only by the producer, `tail` only by the consumer. A slot is
+/// published by the producer's `Release` store to `head` and observed by the
+/// consumer's `Acquire` load; the consumer's `Release` store to `tail` is observed
+/// by the producer's `Acquire` load, which is what makes overwriting a
+/// already-consumed slot race-free.
+struct RingCore {
+    slots: Box<[UnsafeCell<MaybeUninit<Box<RingMsg>>>]>,
     size: usize,
+    head: AtomicUsize,
+    tail: AtomicUsize,
+}
+
+// SAFETY: `RingCore` is private and is only ever reachable through two safe
+// wrappers:
+//
+//   * `SpscRing`, which owns it by value and is `!Sync` (it contains
+//     `UnsafeCell`). Its `push`/`pop` therefore cannot be called concurrently;
+//     the pipeline serialises them with its own mutex.
+//   * The `RingProducer`/`RingConsumer` pair returned by `SpscRing::split`. The
+//     `&mut self` borrow of `split` prevents any other access to the ring while
+//     the pair is alive, `split` is the only constructor and returns exactly one
+//     of each, and neither handle is `Clone`.
+//
+// So the only way `&RingCore` can be shared across threads is one producer and
+// one consumer, exactly the contract the atomics implement.
+unsafe impl Sync for RingCore {}
+
+impl RingCore {
+    fn new(size: usize) -> Self {
+        let mut slots = Vec::with_capacity(size);
+        for _ in 0..size {
+            slots.push(UnsafeCell::new(MaybeUninit::uninit()));
+        }
+        RingCore {
+            slots: slots.into_boxed_slice(),
+            size,
+            head: AtomicUsize::new(0),
+            tail: AtomicUsize::new(0),
+        }
+    }
+
+    /// Next index, wrapping to 0 at `size`. Only called when `size > 0`.
+    #[inline]
+    fn advance(&self, idx: usize) -> usize {
+        let next = idx + 1;
+        if next == self.size {
+            0
+        } else {
+            next
+        }
+    }
+
+    fn push(&self, msg: Box<RingMsg>) -> Result<(), Box<RingMsg>> {
+        if self.size == 0 {
+            return Err(msg);
+        }
+        // `head` is only written by the producer, so a relaxed load of our own
+        // cursor is enough. `tail` is published by the consumer with `Release`;
+        // the `Acquire` load makes the consumer's slot read happen-before any
+        // overwrite of that slot below.
+        let head = self.head.load(Ordering::Relaxed);
+        let next = self.advance(head);
+        if next == self.tail.load(Ordering::Acquire) {
+            return Err(msg); // full, one slot is reserved to tell full from empty
+        }
+        // SAFETY: as the sole producer, no other thread reads or writes
+        // `slots[head]` until the `Release` store to `head` below publishes it.
+        // The consumer reaches `head` only through that store.
+        unsafe {
+            (*self.slots[head].get()).write(msg);
+        }
+        self.head.store(next, Ordering::Release);
+        Ok(())
+    }
+
+    fn pop(&self) -> Option<Box<RingMsg>> {
+        if self.size == 0 {
+            return None;
+        }
+        // `tail` is only written by the consumer (relaxed load of our own
+        // cursor); `head` is published by the producer with `Release`, and the
+        // `Acquire` load makes the slot write happen-before the read below.
+        let tail = self.tail.load(Ordering::Relaxed);
+        if tail == self.head.load(Ordering::Acquire) {
+            return None; // empty
+        }
+        // SAFETY: as the sole consumer we own `slots[tail]`; the producer
+        // published it before advancing `head`, and no other slot maps to
+        // `tail` while it is in `[tail, head)`.
+        let msg = unsafe { (*self.slots[tail].get()).assume_init_read() };
+        self.tail.store(self.advance(tail), Ordering::Release);
+        Some(msg)
+    }
+
+    /// Number of messages currently queued. Mirrors `spsc_ring_used`: head and
+    /// tail are read at different instants, so the value is a snapshot.
+    fn used(&self) -> usize {
+        let head = self.head.load(Ordering::Acquire);
+        let tail = self.tail.load(Ordering::Acquire);
+        if tail <= head {
+            head - tail
+        } else {
+            self.size - tail + head
+        }
+    }
+}
+
+impl Drop for RingCore {
+    fn drop(&mut self) {
+        // `&mut self` means no producer or consumer can be running, so the live
+        // slots in `[tail, head)` can be dropped directly.
+        let head = *self.head.get_mut();
+        let mut tail = *self.tail.get_mut();
+        while tail != head {
+            // SAFETY: no concurrency (`&mut self`) and `[tail, head)` holds
+            // initialised values.
+            unsafe {
+                (*self.slots[tail].get()).assume_init_drop();
+            }
+            tail = if tail + 1 == self.size { 0 } else { tail + 1 };
+        }
+    }
+}
+
+/// Bounded single-producer/single-consumer queue of `RingMsg`.
+///
+/// Holds `size - 1` messages at most (one slot is reserved so full and empty are
+/// distinguishable), matching `spsc_ring_create`/`spsc_ring_push`.
+pub struct SpscRing {
+    core: RingCore,
 }
 
 impl SpscRing {
@@ -70,19 +205,18 @@ impl SpscRing {
     #[must_use]
     pub fn new(size: usize) -> Self {
         SpscRing {
-            buf: Mutex::new(VecDeque::with_capacity(size)),
-            size,
+            core: RingCore::new(size),
         }
     }
 
     /// Configured ring capacity in messages.
     pub fn size(&self) -> usize {
-        self.size
+        self.core.size
     }
 
     /// Number of messages currently queued.
     pub fn used(&self) -> usize {
-        self.buf.lock().len()
+        self.core.used()
     }
 
     /// Returns `Err(msg)` (handing the message back) when full, mirroring
@@ -91,19 +225,78 @@ impl SpscRing {
     /// # Errors
     /// Returns `Err(msg)` with the original message if the ring is full.
     pub fn push(&self, msg: Box<RingMsg>) -> std::result::Result<(), Box<RingMsg>> {
-        let mut buf = self.buf.lock();
-        // Reserve one slot so full is distinguishable from empty, as in C.
-        if buf.len() + 1 >= self.size {
-            return Err(msg);
-        }
-        buf.push_back(msg);
-        Ok(())
+        self.core.push(msg)
     }
 
     /// Returns `false` when empty.
     /// Pop the oldest message, or `None` when empty.
     pub fn pop(&self) -> Option<Box<RingMsg>> {
-        self.buf.lock().pop_front()
+        self.core.pop()
+    }
+
+    /// Split the ring into one producer and one consumer handle for lock-free
+    /// concurrent use.
+    ///
+    /// The `&mut self` borrow keeps any other access to the ring (including
+    /// [`SpscRing::push`] / [`SpscRing::pop`]) out for as long as the handles
+    /// live, so at most one producer and one consumer exist at a time.
+    #[must_use]
+    pub fn split(&mut self) -> (RingProducer<'_>, RingConsumer<'_>) {
+        (
+            RingProducer { core: &self.core },
+            RingConsumer { core: &self.core },
+        )
+    }
+}
+
+/// Producer half of a split [`SpscRing`].
+pub struct RingProducer<'a> {
+    core: &'a RingCore,
+}
+
+impl RingProducer<'_> {
+    /// Push a message, handing it back when the ring is full.
+    ///
+    /// # Errors
+    /// Returns `Err(msg)` with the original message if the ring is full.
+    pub fn push(&mut self, msg: Box<RingMsg>) -> std::result::Result<(), Box<RingMsg>> {
+        self.core.push(msg)
+    }
+
+    /// Configured ring capacity in messages.
+    #[must_use]
+    pub fn capacity(&self) -> usize {
+        self.core.size
+    }
+
+    /// Number of messages currently queued.
+    #[must_use]
+    pub fn used(&self) -> usize {
+        self.core.used()
+    }
+}
+
+/// Consumer half of a split [`SpscRing`].
+pub struct RingConsumer<'a> {
+    core: &'a RingCore,
+}
+
+impl RingConsumer<'_> {
+    /// Pop the oldest message, or `None` when empty.
+    pub fn pop(&mut self) -> Option<Box<RingMsg>> {
+        self.core.pop()
+    }
+
+    /// Configured ring capacity in messages.
+    #[must_use]
+    pub fn capacity(&self) -> usize {
+        self.core.size
+    }
+
+    /// Number of messages currently queued.
+    #[must_use]
+    pub fn used(&self) -> usize {
+        self.core.used()
     }
 }
 
@@ -222,6 +415,7 @@ impl SimpleAllocator {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::VecDeque;
 
     #[test]
     fn ring_capacity() {
@@ -276,5 +470,132 @@ mod tests {
         }
         // The budget is still usable afterwards.
         assert!(a.alloc_heartbeat(1).is_some());
+    }
+
+    /// Bounded model test: for a small ring, exhaustively interleave a fixed
+    /// number of pushes and pops and compare every step against a `VecDeque`
+    /// reference, including the one-slot reserve and the `full`/`empty` answers.
+    ///
+    /// This is deterministic (no threads), so it checks the *semantics* the
+    /// lock-free implementation must preserve, independent of timing.
+    #[test]
+    fn bounded_interleavings_match_reference_model() {
+        const OPS: usize = 4; // 4 pushes and 4 pops
+        for cap in 1..=4usize {
+            for mask in 0u32..(1u32 << (2 * OPS)) {
+                if mask.count_ones() as usize != OPS {
+                    continue;
+                }
+                let ring = SpscRing::new(cap);
+                let mut reference: VecDeque<u64> = VecDeque::new();
+                let mut next_push = 0u64;
+                for step in 0..(2 * OPS) {
+                    if (mask >> step) & 1 == 1 {
+                        // Producer step.
+                        let msg = Box::new(RingMsg::Heartbeat {
+                            task_index: next_push as usize,
+                            ts: next_push as i64,
+                        });
+                        let expect_full = reference.len() + 1 >= cap;
+                        match ring.push(msg) {
+                            Ok(()) => {
+                                assert!(
+                                    !expect_full,
+                                    "cap={cap} mask={mask:08b} step={step}: accepted while full"
+                                );
+                                reference.push_back(next_push);
+                            }
+                            Err(_) => assert!(
+                                expect_full,
+                                "cap={cap} mask={mask:08b} step={step}: rejected while not full"
+                            ),
+                        }
+                        next_push += 1;
+                    } else {
+                        // Consumer step.
+                        let expected = reference.pop_front();
+                        let got = ring.pop().map(|m| match *m {
+                            RingMsg::Heartbeat { ts, .. } => ts as u64,
+                            RingMsg::Packet { .. } => {
+                                unreachable!("interleaving test only pushes heartbeats")
+                            }
+                        });
+                        assert_eq!(got, expected, "cap={cap} mask={mask:08b} step={step}");
+                    }
+                    assert_eq!(
+                        ring.used(),
+                        reference.len(),
+                        "cap={cap} mask={mask:08b} step={step}"
+                    );
+                }
+            }
+        }
+    }
+
+    /// True-concurrency stress: one producer and one consumer thread push/pop
+    /// millions of sequence-tagged messages through a small ring. The consumer
+    /// asserts strictly increasing, gap-free sequence numbers, which fails on
+    /// any drop, duplicate or reordering.
+    ///
+    /// The handles come from `split`, so this exercises the lock-free paths
+    /// without any external lock.
+    #[test]
+    fn spsc_stress_producer_consumer_fifo() {
+        // Miri interprets the code (and explores many schedules via
+        // `-Zmiri-many-seeds`), so it gets a smaller but still concurrent load.
+        const ITEMS: u64 = if cfg!(miri) { 300 } else { 2_000_000 };
+        const CAP: usize = 1024;
+
+        let mut ring = SpscRing::new(CAP);
+        let (mut producer, mut consumer) = ring.split();
+
+        std::thread::scope(|scope| {
+            scope.spawn(move || {
+                let mut next: u64 = 0;
+                while next < ITEMS {
+                    let mut pending = Box::new(RingMsg::Heartbeat {
+                        task_index: next as usize,
+                        ts: next as i64,
+                    });
+                    loop {
+                        match producer.push(pending) {
+                            Ok(()) => {
+                                next += 1;
+                                break;
+                            }
+                            Err(returned) => {
+                                pending = returned;
+                                std::thread::yield_now();
+                            }
+                        }
+                    }
+                }
+            });
+            scope.spawn(move || {
+                let mut expected: u64 = 0;
+                while expected < ITEMS {
+                    match consumer.pop() {
+                        Some(msg) => {
+                            match *msg {
+                                RingMsg::Heartbeat { task_index, ts } => {
+                                    assert_eq!(task_index as u64, expected, "reordered or dropped");
+                                    assert_eq!(ts as u64, expected, "reordered or dropped");
+                                }
+                                RingMsg::Packet { .. } => panic!("consumer saw a packet"),
+                            }
+                            expected += 1;
+                        }
+                        None => std::thread::yield_now(),
+                    }
+                }
+            });
+        });
+
+        assert_eq!(
+            ring.used(),
+            0,
+            "ring must be empty after the consumer drains it"
+        );
+        assert_eq!(ring.size(), CAP);
     }
 }

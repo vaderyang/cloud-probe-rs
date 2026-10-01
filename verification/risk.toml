@@ -72,7 +72,7 @@ category = "concurrency"
 priority = "P0"
 source = "PARITY.md §5.1"
 description = "ring buffer producer/consumer correctness under concurrent access"
-evidence = ["test:ring_capacity", "test:allocator_bounds", "test:releasing_more_than_was_reserved_saturates_at_zero"]
+evidence = ["test:ring_capacity", "test:allocator_bounds", "test:releasing_more_than_was_reserved_saturates_at_zero", "test:bounded_interleavings_match_reference_model", "test:spsc_stress_producer_consumer_fifo"]
 
 [[risk]]
 id = "RISK-OUTPUT-LIFECYCLE-RACE"

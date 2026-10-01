@@ -11,8 +11,10 @@
 //!   protocol is collapsed into the single manager mutex: the shared output
 //!   thread is stopped for the swap, so no in-flight ring message can be
 //!   delivered to a reordered task slot.
-//! * The pipeline output thread and ring are safe abstractions, not the
-//!   original lock-free SPSC structures.
+//! * The pipeline output thread and the ring are safe abstractions. The ring
+//!   itself is the lock-free SPSC structure from `ring_buffer`; the pipeline
+//!   shares it through a mutex because a single `SpscRing` is not `Sync` and
+//!   callers hold it by reference.
 
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
