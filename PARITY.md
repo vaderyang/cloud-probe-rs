@@ -548,6 +548,22 @@ release profile 用 `panic = "abort"`：**panic 是致命事件，不是可恢�
 > pdump 数据面成功：`enter/exit rte_pdump_enable_bpf, port 0` → `create task-0 success`，从 ring 出队并
 > 写出 1.5 GB pcap。上游从未调用的 `dpdk_init` 在本 port 中懒加载调用一次（否则
 > secondary 进程无法工作），primary 监控 alarm 为尽力而为移植。
+>
+> **真实网卡现场验证 + 两道 DPDK 限制（2026-10-01，bead `1eu` 后续）**：在 yinjiao 上从源码构建
+> DPDK 25.11（含 `net/nbl` + `net/mlx5`），对两张真实网卡做了验证：
+> - **网迅 nbl NIC（`3a:00.0/.1`）无法用 pdump**：nbl PMD 的 `nbl_pci_probe` 明确拒绝 secondary
+>   （`Secondary process is not supported.`），而 pdump 天生是 secondary 进程 → 我们的 capturer 报
+>   `interface ... not found`。这是 **PMD 能力限制**（与是否有链路无关），意味着 **DPDK pdump 采集路径
+>   与产品自研 nbl 网卡不兼容**；upstream 的 DPDK 路径需搭配支持多进程的 PMD（mlx5/ixgbe/i40e 等）。
+> - **Mellanox ConnectX-6 Dx（100G，`b8:00.0`）可用**：为不影响该 PF 上的 NFS，用 **SR-IOV VF**
+>   （`b8:00.1`，`sriov_numvfs=1`）给 DPDK，PF 继续跑 NFS。在 VF 上以 mlx5 PMD 跑 primary
+>   （`dpdk-testpmd`）+ 本 port 的 pdump secondary，从 PF 发 2000 帧到 VF MAC，**pdump 完整抓到
+>   2000/2000 帧**（零丢失），证明真实 NIC + ring/mempool + pdump 数据面全链路正确。
+> - **`rte_pdump_init()` 前向兼容修复**：DPDK **25.11** 把 pdump enable 改为**双向握手**
+>   （`pdump_request_to_secondary`，21.11-24.11 都没有），因此 secondary 必须先调 `rte_pdump_init()`
+>   注册自己的 `mp_pdump` action，否则 `rte_pdump_enable_bpf` 会以 `Cannot find action: mp_pdump` 失败。
+>   upstream（与旧 port）都不调它。本 port 现在会调（旧版本无回调、返回可忽略，安全），见
+>   `dpdk_pdump.rs`。DPDK 官方 `app/pdump` 也是 25.11 才加的这个调用。
 
 > **已完成（bead 4mv.4）**：`ring_buffer.c` 的无锁 SPSC ring 已移植。实现用原子 `head`/`tail`
 > 与显式 `Acquire`/`Release` 排序（`SpscRing::split` 给出一对单生产/单消费者句柄，使得安全代码

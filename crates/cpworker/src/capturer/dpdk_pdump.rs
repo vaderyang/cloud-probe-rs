@@ -273,6 +273,7 @@ mod runtime {
         ) -> *mut c_void;
         fn rte_pcapng_mbuf_size(length: u32) -> u32;
 
+        fn rte_pdump_init() -> c_int;
         fn rte_pdump_enable_bpf(
             port_id: u16,
             queue: u16,
@@ -480,6 +481,16 @@ mod runtime {
             stats: Arc<CaptureStats>,
         ) -> Result<Self> {
             ensure_eal_init()?;
+            // DPDK 25.11 turned the pdump enable handshake into a two-way one:
+            // the primary asks the secondary back (`pdump_request_to_secondary`)
+            // before it replies, so the secondary must register its own
+            // `mp_pdump` action via `rte_pdump_init()`. On 21.11-24.11 the call
+            // is harmless (no secondary action is ever invoked); on >=25.11 it
+            // is required, otherwise `rte_pdump_enable_bpf` fails with
+            // "Cannot find action: mp_pdump".
+            unsafe {
+                rte_pdump_init();
+            }
             let opts = DpdkPdumpOptions::from_config(cfg)?;
             let req_pattern = ReqPattern::new_from_cfg(&task.req_pattern, &opts.interface)
                 .map_err(|e| Error::new(format!("create req_pattern_t error: {e}")))?;
