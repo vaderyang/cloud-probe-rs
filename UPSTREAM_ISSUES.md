@@ -24,6 +24,29 @@
 
 （已报过的：[#231](https://github.com/Netis/cloud-probe/issues/231) ZMQ VLAN 越界。）
 
+---
+
+## 上游处置状态（核对：2026-10-01）
+
+上游在 2026-09-30 集中处置：合并 PR **#275–#282、#284、#285**（tip `d302572`），并**关闭了 6 条**本仓库提交的 issue。
+
+| # | 状态 | 上游修复 | 本地（Rust）收敛 |
+|---|---|---|---|
+| [#231](https://github.com/Netis/cloud-probe/issues/231) | ✅ closed (09-30) | #256 `output_zmq.c` VLAN 越界 | 已移植 |
+| [#232](https://github.com/Netis/cloud-probe/issues/232) | ⬜ open（1 评论：判为 Internal-Datacenter by design，待文档豁免条款） | — | 本地已主动修复（默认校验证书 + mTLS，属**有意分歧**） |
+| [#233](https://github.com/Netis/cloud-probe/issues/233) | ✅ closed (09-30) | PR **#282**（`packet_split` 拒绝畸形头） | **已移植**（PARITY §2 记录“分歧已收敛”） |
+| [#234](https://github.com/Netis/cloud-probe/issues/234) | ✅ closed (09-30) | PR **#279**（数值校验，不再静默钳位） | **已移植**（`verify_config.sh` 直接对比规范化输出） |
+| [#235](https://github.com/Netis/cloud-probe/issues/235) | ✅ closed (09-30) | PR **#279**（`zmq.hwm=0`） | 已移植 |
+| [#236](https://github.com/Netis/cloud-probe/issues/236) | ⬜ open | — | 本地已按 q20.3 处理（netns 恢复失败终止 worker）；上游 #285 同向 |
+| [#237](https://github.com/Netis/cloud-probe/issues/237) | ⬜ open | — | 结论=keep/document（Go 宽容解码） |
+| [#238](https://github.com/Netis/cloud-probe/issues/238) | ⬜ open | — | 结论=by design（cJSON 宽容语义） |
+| [#239](https://github.com/Netis/cloud-probe/issues/239) | ✅ closed (09-30) | PR **#279**（`req_pattern` 拒绝 `-0`） | 已移植 |
+| [#240](https://github.com/Netis/cloud-probe/issues/240) | ✅ closed (09-30) | PR **#280**（文档化 libpcap `timeout_ms=0` 行为） | 已文档化 |
+
+**额外已覆盖的上游 PR**：#275（cpctl jsonl）、#276（libpcap 非阻塞）、#277（file slice/rate）、#278（pcap_file EOF）、#281（`nic.<if>` 堆溢出）、#284（CPM strategy 校验 + CFS quota ≥1ms，见 `crates/cpdaemon/src/{cpm/task_builder.rs,reslimit.rs}`）、#285（释放泄漏 + netns 恢复失败终止 worker，见 `capturer/af_packet.rs`）；#285 的其余部分是 C 手动内存管理，Rust 所有权模型天然规避。
+
+**结论（2026-10-01）**：上游当前 tip `d302572` 的修复**全部已收敛**到本 Rust 移植；无待追平项。剩余 4 条 open 中，#232 待上游补文档豁免、#236/#237/#238 本地已给出 keep/document/by-design 结论。
+
 > 这 9 条在上游已改为**英文标题 + 英文正文（主）+ 中文原文（折叠在 `<details>` 内）**；本文件下方的中文草稿仍作存档。
 
 ---
