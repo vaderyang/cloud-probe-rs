@@ -1931,7 +1931,10 @@ mod tests {
             handles.push(std::thread::spawn(move || {
                 for _ in 0..300 {
                     let s = m.lock().collect_stats_summary();
-                    assert!(s["pipeline_buffer"]["ring_total"].as_u64().unwrap_or(0) > 0);
+                    let ring_total: u64 =
+                        serde_json::from_value(s["pipeline_buffer"]["ring_total"].clone())
+                            .unwrap_or(0);
+                    assert!(ring_total > 0);
                 }
                 tx.send(()).expect("send");
             }));
