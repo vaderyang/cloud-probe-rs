@@ -236,6 +236,23 @@ Two conventions worth knowing before reading:
 
 ### Fixed
 
+- **The veth capture-fidelity test is deterministic under repetition (bead
+  `cloud-probe-rs-h53`).** Running
+  `live_capture_veth_delivers_exactly_n_frames` in a tight loop failed
+  occasionally with *"delivered frames are not the injected frames in order"*:
+  a contiguous high band of sequence numbers surfaced early while the total
+  stayed exact. The reorder is not in the capturer (it reads one `AF_PACKET`
+  socket queue, a FIFO) but in the kernel path the test set up: veth delivers a
+  transmitted frame on the sending CPU and `packet_rcv` fills the capture socket
+  under a lock, so frames processed on two CPUs are queued in lock-acquisition
+  order. The test now pins the injecting thread to a single
+  CPU (so all frames traverse one CPU path), retries veth creation under a
+  collision-resistant name, and keeps the **strict** `0..N` order assertion
+  unchanged. A new bounded stress test
+  (`live_capture_veth_order_is_stable_under_repetition`, 128 frames × 12
+  repetitions on one pair) guards it; both passed 25/25 in a tight loop. The
+  previously suspected `ulimit -n`-small harness failure is unrelated: it dies
+  at `ip link set ... up` from fd exhaustion, not in the capture path.
 - **P3 batch from the same two reviews.** Each item keeps its own regression test:
   * `zmq.hwm` was range-checked twice, and the second check was unreachable (the
     first `i32_in` had already enforced the same range), so its user-facing

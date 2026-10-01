@@ -157,6 +157,19 @@ not good enough - it `panic!`s. Silently skipping is what made that job report
 `capturer/af_packet.rs` (stats, auxdata/VLAN, buffer sizes, socket setup ordering,
 filter attach/fallback) are only considered tested if this suite ran.
 
+The two veth fidelity tests
+(`live_capture_veth_delivers_exactly_n_frames` and the bounded
+`live_capture_veth_order_is_stable_under_repetition`) assert a **strict** frame
+order and therefore pin the injecting thread to one CPU (`CpuPin`). A
+single-queue veth enqueues into a per-CPU `netif_rx` backlog and the single
+`AF_PACKET` socket is filled under a lock, so a thread that migrates between
+CPUs can surface a high band of frames early without any loss (bead
+`cloud-probe-rs-h53`). Do not replace the order assertion with a set comparison;
+keep the single-CPU precondition instead. The process also needs a normal file
+descriptor limit: a shell with `ulimit -n 4` cannot spawn `ip`'s netlink socket
+and fails at `ip link set ... up`, which is a harness fault rather than a
+capture result.
+
 ## 8. Commits, PRs, review
 
 * Conventional commits, scoped: `fix(bpf):`, `fix(capturer):`, `ci:`, `docs:`,
