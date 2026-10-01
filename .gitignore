@@ -29,3 +29,7 @@ mutants.out.old/
 # OneBoot lab verification (machine-specific inventory + run outputs)
 tools/oneboot/inventory.json
 build/lab-junit/
+
+# OneBoot/VM build inputs and release artifacts
+dist/
+.protoc/
