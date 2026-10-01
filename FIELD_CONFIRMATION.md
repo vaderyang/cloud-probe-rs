@@ -27,25 +27,62 @@
   - yinjiao veth 内核实验：AF_PACKET `SOCK_RAW` 在**非 promisc** 下仍能收到 dst MAC 非本机、
     非广播的单播帧（虚拟设备不建模硬件 RX 过滤）→ promisc 的取舍由**物理网卡/SPAN 镜像**决定，
     veth 无法复现。
+  - **现场实测（2026-10，yinjiao 直连口 `ens5f0`，`rx-vlan-filter: on [fixed]`）**：
+    在真机 NIC 上，**非混杂模式会丢弃未注册 VLAN 的 802.1Q/QinQ 帧**，而混杂模式不会——
+    `tcpdump`（默认混杂）抓到全部 900 帧（含 600 带 VLAN 标签），`tcpdump -p`（关混杂）
+    只抓到 300 帧（无 VLAN），与 cpworker（不设 promisc）**完全一致**。
+    → **promisc 不是纯 parity 问题，而是 trunk/SPAN 场景的功能正确性前提**：
+    C libpcap 硬编码 `promisc=0`，在带 VLAN 的镜像口会**丢带标签流量**，与本移植一致但均不完整。
 - **为什么重要**：直接决定采集面等价性（三篇审计均未定论）。本移植的 AF_PACKET 路径当前
   **不设** `PACKET_MR_PROMISC`。
 - **如何采集**：现场以镜像口/SPAN 部署时，对比同一镜像流量下 C 版与本移植版抓到的帧数/流量
   （即验证物理网卡在非 promisc 下是否丢弃镜像帧）。
-- **解锁决策**：若现场确为 SPAN 且物理网卡在非 promisc 下丢帧，则**新增** `promisc` 配置项
-  （相对 oracle 的增强；DPDK 默认开说明镜像场景倾向开）；否则保持 parity（不设）。
+- **解锁决策**：若现场确为 SPAN/trunk 且网卡在非 promisc 下丢 VLAN 帧（已实测成立），
+  则**必须新增** `promisc` 配置项并**默认开启**（相对 oracle 的功能修复；DPDK pdump 本就默认开）。
+  这是当前唯一同时影响 parity 与功能正确性的现场项。
 
 ## 3. ⬜ libpcap TPACKET ring 相对 `SO_RCVBUF` 的高负载容量
 
 - **需要**：高负载（如 10Gbps 镜像口）下的实测：ring 可用 MB 数、丢包率、`SO_RCVBUF` 上限。
-- **为什么重要**：核心结论（256 MiB → 8 MiB 的默认值）已实测；「ring 可用 MB 级」仍需高负载确认，
+- **已实测（2026-10，yinjiao ↔ jinjiao 25G 直连）**：
+  - 环境：yinjiao(10.0.0.11) 在 `ens5f0`（25G，直连 jinjiao 10.0.0.10）实抓；jinjiao 用 `iperf3 -u`
+    定向泛洪。cpworker 配置 `buffer_size_mb=256` → 实测 **`SO_RCVBUF=536,870,912`（512 MB，SO_RCVBUFFORCE）**，
+    BPF `udp and dst port 5201`，输出 null。
+  - 实测（单位 pps 为 `iperf3 -l 1448` 报文的到达率）：
+
+    | 到达速率 | 包数 | cpworker 捕获 | 内核 `Drop Packets` | iperf 自身 socket 丢包 |
+    | --- | --- | --- | --- | --- |
+    | 4.37 Gbps (380k pps) | 3,796,167 | 全部 | **0** | 0.64% |
+    | 7.16 Gbps (618k pps) | 3,706,822 | 全部 | **0** | 0% |
+    | 8.72 Gbps (753k pps) | 4,516,894 | 全部 | **0** | 0% |
+    | 14.2 Gbps (1.25M pps) | 10,018,455 | 6,771,712 | **2,728,783 (27%)** | 1.8% |
+
+  - **结论**：单线程采集路径在 **~750k–900k pps（≈8–9 Gbps @1448B）以内零丢包且精确捕获**；
+    超过后**用户态 drain 成为瓶颈**，内核 `PACKET_STATISTICS` 的 drop 计数线性上升（buffer 再大也不能
+    提升稳态 drain 上限，只能延缓首次丢弃）。注意 iperf3 普通 UDP socket 在 4.37G 已丢 0.64%，而
+    `AF_PACKET + 大 SO_RCVBUF` 路径 0 丢——采集路径在大缓冲下优于普通 socket。
+  - **含义**：`buffer_size_mb=256`（512MB）对低速率域充裕；若要支撑 >9 Gbps 的镜像口，需要
+    **多 worker/多队列**（RPS/RSS 或按接口多 task）而非单纯加大 buffer——可作为后续增强项。
+- **为什么重要**：核心结论（256 MiB 默认）已实测；「ring 可用 MB 级」仍需高负载确认，
   关系到 P3「去 C 依赖」后采集路径的可达上限。
 - **如何采集**：在目标硬件上用现成工具对比：C 版（libpcap TPACKET_V3）与本移植版
   （AF_PACKET mmap ring）在同一流量下的 `cap_drop`/`cap_bytes`。
   可用 `bench/live_bench.py`（root、veth 参数化）做受控注入。
-- **解锁决策**：`buffer_size_mb` 默认值与上限是否需要在现场硬件上重新标定。
+- **解锁决策**：`buffer_size_mb` 默认值与上限是否需要在现场硬件上重新标定；
+  是否需要为高带宽口增加多 task/多队列采集。
 
 ## 4. ⬜ VLAN / H3 的现场影响
 
+- **已实测（2026-10，yinjiao ↔ jinjiao 25G 直连 + `ens5f0`）**：
+  - 用 Python 原始 L2 构造正确的 802.1Q（vlan 100）与 QinQ（outer 0x88a8/100 + inner 0x8100/200）
+    的 HTTP 请求帧，从 jinjiao 发向 yinjiao。
+  - `tcpdump`（混杂）同口抓到并正确解出**全部 900 帧**（300 无标签 + 300 单标签 + 300 QinQ）。
+  - cpworker（不设 promisc）只抓到 **300 帧**（无标签组）。
+  - 隔离验证：同一批帧用 **`pcap_file` 捕获器**喂给 cpworker（本地），输出 pcap **900/900 全保留，
+    含 600 带标签** → 捕获器的 VLAN 重插（AUXDATA，P5-03）**正确**。
+  - 再用 **`tcpdump -p`（关混杂）** 复测，同样只得 300 帧 → **根因是 promisc，不是 VLAN 处理**。
+  - **结论**：VLAN 帧丢失源于**非混杂模式下 NIC 的 VLAN 过滤**（j36.2），而非 P5-03 重插缺陷；
+    修 j36.2（加 `promisc` 并默认开）即可同时解决 VLAN 场景。H3 未涉及（无对应头样本）。
 - **需要**：在 trunk 口 / 镜像口实测带 802.1Q（含 QinQ）与 H3 扩展头的流量。
 - **为什么重要**：评估 VLAN 重插与 H3 相关处理在现场的严重度（P5-03 已实现 AUXDATA VLAN 重插，
   但现场量级未知）。
