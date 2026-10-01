@@ -612,6 +612,12 @@ mod runtime {
         fn drop(&mut self) {
             unsafe {
                 rte_eal_alarm_cancel(monitor_primary, ptr::null_mut());
+            }
+            // The primary's RX/TX callbacks still use the shared ring and
+            // clone pool until pdump is disabled. Unregister them before
+            // returning either allocation to EAL, including on task reload.
+            cleanup_pdump_resources(self.port, self.promiscuous_mode);
+            unsafe {
                 if !self.bpf_prm.is_null() {
                     rte_free(self.bpf_prm);
                 }
@@ -622,7 +628,6 @@ mod runtime {
                     rte_mempool_free(self.mp);
                 }
             }
-            cleanup_pdump_resources(self.port, self.promiscuous_mode);
         }
     }
 
@@ -650,6 +655,8 @@ mod runtime {
             let ts_sec = now.as_secs() as i64;
             let ts_usec = i64::from(now.subsec_micros());
 
+            let mut captured_bytes = 0;
+            let mut captured_packets = 0;
             for &m in &pkts[..n as usize] {
                 if m.is_null() {
                     continue;
@@ -670,8 +677,8 @@ mod runtime {
                     caplen,
                     len,
                 };
-                self.stats.cap_bytes.add(u64::from(caplen));
-                self.stats.cap_packets.add(1);
+                captured_bytes += u64::from(caplen);
+                captured_packets += 1;
                 let direction = match &self.req_pattern {
                     ReqPattern::None => PKT_DIR_NONCHECK,
                     other => other.judge_pkt_direction(data),
@@ -679,6 +686,12 @@ mod runtime {
                 sink.on_packet(&hdr, data, direction);
             }
 
+            // Publish totals once per burst. These counters have one capture
+            // writer; TaskManager holds its polling lock until this returns,
+            // so control snapshots still see the complete batch. Keep invalid
+            // mbufs excluded, just as in the per-packet path.
+            self.stats.cap_bytes.add(captured_bytes);
+            self.stats.cap_packets.add(captured_packets);
             unsafe {
                 rte_pktmbuf_free_bulk(pkts.as_mut_ptr(), n);
             }
