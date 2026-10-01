@@ -140,6 +140,12 @@ export CALLBACK_URL="{callback}"
 export RESULT_FILE=/root/cprs-smoke/result.json
 export FRAMES="{frames}"
 mkdir -p /root/cprs-smoke
+# Best-effort: old distros (CentOS 7) ship no python3; the veth injector needs
+# it.  Failure is non-fatal - the capture check just SKIPs.
+if ! command -v python3 >/dev/null 2>&1; then
+  (yum install -y epel-release >/dev/null 2>&1 && \\
+     yum install -y python3 >/dev/null 2>&1) || true
+fi
 if command -v curl >/dev/null 2>&1; then
   curl -fsSL "$BASE/on_target_smoke.sh" -o /root/cprs-smoke.sh
 elif command -v wget >/dev/null 2>&1; then
@@ -176,7 +182,6 @@ curl
 tar
 gzip
 iproute
-python3
 %end
 
 {_SMOKE_POST.format(base=base, archive=archive, sha256=sha256, callback=callback, frames=frames)}"""
@@ -366,6 +371,9 @@ def cmd_plan(args: argparse.Namespace) -> int:
         args.boot_style, base=base, archive=name, sha256=sha256,
         callback=f"{base}/result", frames=args.frames,
     )
+    if args.dump_kickstart:
+        pathlib.Path(args.dump_kickstart).write_text(ks)
+        print(f"[plan] wrote kickstart to {args.dump_kickstart}", file=sys.stderr)
     print(ks)
     print(f"# --- would save to OneBoot as "
           f"/api/v1/kickstart/{args.source}/{args.kickstart_name}", file=sys.stderr)

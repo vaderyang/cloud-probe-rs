@@ -81,14 +81,26 @@ with open(out, "w") as fh:
                "failed": failed, "checks": checks}, fh, indent=2)
 PY
   else
-    # Fallback: a minimal, valid JSON (details omitted).
-    {
-      printf '{"schema":"cprs-on-target-smoke-v1","arch":"%s","glibc":"%s",' \
-        "$uname_m" "$(printf '%s' "$glibc" | sed 's/"/\\\\"/g')"
-      printf '"os":"%s","ok":%s,"failed":%s,"checks":[]}\n' \
-        "$(printf '%s' "$os_pretty" | sed 's/"/\\\\"/g')" \
-        "$([ "$failed" -eq 0 ] && echo true || echo false)" "$failed"
-    } > "$RESULT_FILE"
+    # No python3 (e.g. CentOS 7): emit the same JSON with awk so the checks are
+    # not lost.  Details are already tab/newline-free; escape backslash and quote.
+    ok="$([ "$failed" -eq 0 ] && echo true || echo false)"
+    awk -F'\t' -v ARCH="$uname_m" -v GLIBC="$glibc" \
+      -v OSP="$os_pretty" -v OK="$ok" -v FAIL="$failed" '
+      function esc(s) { gsub(/\\/, "\\\\", s); gsub(/"/, "\\\"", s); return s }
+      BEGIN {
+        printf "{\n  \"schema\": \"cprs-on-target-smoke-v1\",\n"
+        printf "  \"arch\": \"%s\",\n  \"glibc\": \"%s\",\n", ARCH, esc(GLIBC)
+        printf "  \"os\": \"%s\",\n", esc(OSP)
+        printf "  \"ok\": %s,\n  \"failed\": %s,\n  \"checks\": [\n", OK, FAIL
+        first = 1
+      }
+      {
+        if (!first) printf ",\n";
+        first = 0
+        printf "    {\"name\": \"%s\", \"status\": \"%s\", \"detail\": \"%s\"}", esc($1), esc($2), esc($3)
+      }
+      END { printf "\n  ]\n}\n" }
+    ' "$CHECKS_FILE" > "$RESULT_FILE"
   fi
 
   echo "----- result -----"
@@ -176,7 +188,10 @@ fi
 # the contract is "the dynamic loader resolves every symbol": an ABI mismatch
 # fails *before* main() with exit 127 and 'GLIBC_x.y not found'.
 loader_broken() {
-  printf '%s' "$1" | grep -Eq 'GLIBC_[0-9.]+ not found|error while loading shared libraries|cannot execute|No such file'
+  # Loader-specific markers only.  A generic 'No such file or directory' must
+  # NOT match: dockerpid/cripid legitimately print that when their socket is
+  # absent, and treating it as an ABI failure is a false negative.
+  printf '%s' "$1" | grep -Eq 'GLIBC_[0-9.]+ not found|error while loading shared libraries|cannot open shared object file'
 }
 if [ -n "$BIN" ]; then
   for b in $BINARIES; do
@@ -212,9 +227,24 @@ elif [ -z "$BIN" ]; then
   record capture SKIP "no binaries extracted"
 elif ! command -v ip >/dev/null 2>&1; then
   record capture SKIP "iproute2 not installed"
-elif ! command -v python3 >/dev/null 2>&1; then
-  record capture SKIP "python3 not installed (cannot inject frames)"
 else
+  # Pick an injector.  python3 sends raw UDP frames.  On distros without
+  # python3 (CentOS 7) fall back to ping, but the peer veth end must live in a
+  # network namespace: with both ends local the kernel short-circuits the
+  # traffic and nothing crosses the wire.
+  NS=cprs-probe-ns
+  if command -v python3 >/dev/null 2>&1; then
+    INJECTOR=python; BPF=udp
+  elif command -v ping >/dev/null 2>&1 \
+       && ip netns add "$NS" 2>/dev/null; then
+    ip netns del "$NS" 2>/dev/null
+    INJECTOR=ping; BPF=icmp
+  else
+    INJECTOR=""
+  fi
+  if [ -z "$INJECTOR" ]; then
+    record capture SKIP "neither python3 nor ping available (cannot inject frames)"
+  else
   V0=cprs-v0; V1=cprs-v1
   SOCK="$WORKDIR/cpworker.sock"
   SOCKET_PATH="$SOCK"
@@ -228,7 +258,7 @@ else
       "capturer": {
         "type": "libpcap",
         "libpcap": { "interface": "$V0", "snaplen": 2048,
-                     "buffer_size_mb": 32, "bpf": "udp", "timeout_ms": 1000 }
+                     "buffer_size_mb": 32, "bpf": "$BPF", "timeout_ms": 1000 }
       },
       "outputs": [ { "type": "null", "rate_limit_mbps": 1000 } ]
     }
@@ -237,10 +267,18 @@ else
 JSON
 
   # Tear down any leftover pair, then create one.
+  ip netns del "$NS" 2>/dev/null
   ip link del "$V0" 2>/dev/null
   ip link add "$V0" type veth peer name "$V1" 2>/dev/null
+  if [ "$INJECTOR" = "ping" ]; then
+    ip netns add "$NS" 2>/dev/null
+    ip link set "$V1" netns "$NS" 2>/dev/null
+    ip addr add 10.99.0.1/24 dev "$V0" 2>/dev/null
+    ip netns exec "$NS" ip link set lo up 2>/dev/null
+    ip netns exec "$NS" ip addr add 10.99.0.2/24 dev "$V1" 2>/dev/null
+    ip netns exec "$NS" ip link set "$V1" up 2>/dev/null
+  fi
   ip link set "$V0" up 2>/dev/null
-  ip link set "$V1" up 2>/dev/null
   sleep 1
 
   "$BIN/cpworker" -c "$WORKDIR/cpworker.json" > "$WORKDIR/cpworker.log" 2>&1 &
@@ -261,7 +299,8 @@ JSON
     # cpctl info answered -> RPC path works.
     record "capture:rpc" PASS "cpctl info/ping over unix socket"
 
-    python3 - "$V1" "$V0" "$FRAMES" <<'PY' || true
+    if [ "$INJECTOR" = "python" ]; then
+      python3 - "$V1" "$V0" "$FRAMES" <<'PY' || true
 import socket, struct, sys
 src_if, dst_if, n = sys.argv[1], sys.argv[2], int(sys.argv[3])
 def mac(ifname):
@@ -279,9 +318,13 @@ for _ in range(n):
     s.send(frame)
 s.close()
 PY
+    else
+      ip netns exec "$NS" ping -c "$FRAMES" -i 0.005 -W 1 10.99.0.1 >/dev/null 2>&1 || true
+    fi
     sleep 2
     "$BIN/cpctl" -u "$SOCK" -W 5s -f jsonl stats -n 1 > "$WORKDIR/stats.jsonl" 2>/dev/null
-    cap="$(python3 - "$WORKDIR/stats.jsonl" <<'PY' 2>/dev/null || echo -1
+    if command -v python3 >/dev/null 2>&1; then
+      cap="$(python3 - "$WORKDIR/stats.jsonl" <<'PY' 2>/dev/null || echo -1
 import json, sys
 try:
     rec = json.loads(open(sys.argv[1]).readline())
@@ -291,8 +334,13 @@ except Exception:
     print(-1)
 PY
 )"
-    if [ "$cap" -ge "$FRAMES" ] 2>/dev/null; then
-      record "capture:fidelity" PASS "captured $cap >= injected $FRAMES UDP frames"
+    else
+      # No interpreter: pull the raw counter out of the jsonl sample.
+      cap="$(grep -oE '"cap_packets":\{"packets":[0-9]+' "$WORKDIR/stats.jsonl" 2>/dev/null \
+        | grep -oE '[0-9]+' | head -n1)"
+    fi
+    if [ -n "$cap" ] && [ "$cap" -ge "$FRAMES" ] 2>/dev/null; then
+      record "capture:fidelity" PASS "captured $cap >= injected $FRAMES $BPF frames"
     else
       record "capture:fidelity" FAIL "captured ${cap:-?} < injected $FRAMES"
     fi
@@ -300,6 +348,8 @@ PY
 
   kill "$CPW_PID" 2>/dev/null; wait "$CPW_PID" 2>/dev/null
   ip link del "$V0" 2>/dev/null
+  ip netns del "$NS" 2>/dev/null
+  fi
 fi
 
 record summary "PASS" "arch=$(uname -m) os=$(. /etc/os-release 2>/dev/null && echo "${PRETTY_NAME:-}")"
