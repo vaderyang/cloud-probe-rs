@@ -434,6 +434,7 @@ fn live_capture_reinserts_vlan_on_veth() {
     // traffic on the newly created veth (86-byte frames) is also visible to
     // AF_PACKET and would otherwise pollute the snaplen/orig_len invariants.
     let mut tagged = 0usize;
+    let mut tagged_pkt: Option<&Vec<u8>> = None;
     for (i, ((cap_len, orig_len), pkt)) in sink16.hdrs.iter().zip(&sink16.pkts).enumerate() {
         let is_tagged = pkt.len() >= 14
             && pkt[..6] == [0xff; 6]
@@ -443,6 +444,7 @@ fn live_capture_reinserts_vlan_on_veth() {
             continue;
         }
         tagged += 1;
+        tagged_pkt = Some(pkt);
         assert!(
             *cap_len <= 16,
             "frame {i}: caplen {cap_len} exceeds the configured snaplen 16 (P2-7)"
@@ -466,7 +468,9 @@ fn live_capture_reinserts_vlan_on_veth() {
         "expected exactly the one tagged frame to be captured, got {tagged}"
     );
     // What is reported is the first `snaplen` bytes of the *reinserted* frame.
-    let p = &sink16.pkts[0];
+    // Find it by predicate: the kernel's own IPv6/ND frames on the fresh veth
+    // are visible to AF_PACKET too and may be captured before the injected one.
+    let p = tagged_pkt.expect("the tagged frame was counted above");
     assert_eq!(
         p[12..14],
         [0x81, 0x00],
