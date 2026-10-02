@@ -408,6 +408,9 @@ impl WorkerManager {
         Ok((tasks, warnings, buff))
     }
 
+    /// Keep the upstream Go budgets, including possible NIC + pipeline overcommit.
+    /// These are configured capacities, not cgroup charges or resident bytes;
+    /// see PARITY.md §2.8 for the measured AF_PACKET/DPDK accounting boundaries.
     fn new_worker_config(
         &self,
         tasks: &[crate::worker_config::TaskConfig],
@@ -451,6 +454,17 @@ impl WorkerManager {
             let mut buffer_size = self.worker_cfg.pipeline.min_buffer_size_mb;
             if mem_limit > task_mem && mem_limit - task_mem > buffer_size {
                 buffer_size = mem_limit - task_mem;
+            }
+            // Do not shrink either budget: the oracle retains the pipeline minimum
+            // even when NIC buffers already exhaust memLimit. Widen only the
+            // diagnostic sum so adding the two u64 capacities cannot wrap.
+            let total = u128::from(task_mem) + u128::from(buffer_size);
+            if total > u128::from(mem_limit) {
+                crate::log_warn!(
+                    "worker memory overcommit: memory_policy.policy={}, sum(tasks.libpcap.buffer_size_mb)={task_mem} MiB + pipeline.buffer_size_mb={buffer_size} MiB (memory_policy.pipeline.min_buffer_size_mb={}) = {total} MiB > memLimit={mem_limit} MiB (positive response mem_limit or memory_policy.default_limit_mb); configured budgets retained, cgroup memory.current is not total allocated memory",
+                    self.worker_cfg.memory.policy,
+                    self.worker_cfg.pipeline.min_buffer_size_mb,
+                );
             }
             w_cfg.pipeline = Some(crate::worker_config::PipelineConfig {
                 buffer_size_mb: buffer_size,
@@ -646,6 +660,150 @@ mod tests {
         let cfg = mgr.new_worker_config(&tasks, &res);
         // 512 (limit) - 256 (task capture buffer) = 256 > min 128.
         assert_eq!(cfg.pipeline.as_ref().unwrap().buffer_size_mb, 256);
+    }
+
+    #[test]
+    fn pipeline_overcommit_warns_once_without_changing_budgets() {
+        // Capture this thread only; parallel lifecycle tests also emit WARNs.
+        thread_local! {
+            static WARNINGS: std::cell::RefCell<Vec<String>> = const {
+                std::cell::RefCell::new(Vec::new())
+            };
+        }
+        struct WarningLogger;
+        impl log::Log for WarningLogger {
+            fn enabled(&self, metadata: &log::Metadata<'_>) -> bool {
+                metadata.level() == log::Level::Warn
+            }
+            fn log(&self, record: &log::Record<'_>) {
+                if self.enabled(record.metadata()) {
+                    WARNINGS.with(|w| w.borrow_mut().push(record.args().to_string()));
+                }
+            }
+            fn flush(&self) {}
+        }
+        log::set_logger(&WarningLogger).unwrap();
+        log::set_max_level(log::LevelFilter::Warn);
+
+        // policy, model, NIC/task, interfaces, response limit, effective limit,
+        // pipeline minimum, expected pipeline, expected overcommit.
+        for (policy, model, nic, interfaces, limit, effective, min, pipeline, total) in [
+            (
+                MEMORY_POLICY_AUTO_NIC_BUFFER,
+                EXECUTION_MODEL_PIPELINE,
+                512,
+                1,
+                Some(512),
+                512,
+                128,
+                Some(128),
+                Some(640),
+            ),
+            (
+                MEMORY_POLICY_AUTO_NIC_BUFFER,
+                EXECUTION_MODEL_PIPELINE,
+                256,
+                2,
+                None,
+                512,
+                128,
+                Some(128),
+                Some(640),
+            ),
+            (
+                MEMORY_POLICY_AUTO_NIC_BUFFER,
+                EXECUTION_MODEL_PIPELINE,
+                200,
+                2,
+                Some(400),
+                400,
+                128,
+                Some(128),
+                Some(528),
+            ),
+            (
+                MEMORY_POLICY_FIXED_NIC_BUFFER,
+                EXECUTION_MODEL_PIPELINE,
+                8,
+                1,
+                Some(0),
+                512,
+                128,
+                Some(504),
+                None,
+            ),
+            (
+                MEMORY_POLICY_FIXED_NIC_BUFFER,
+                EXECUTION_MODEL_PIPELINE,
+                384,
+                1,
+                Some(512),
+                512,
+                128,
+                Some(128),
+                None,
+            ),
+            (
+                MEMORY_POLICY_FIXED_NIC_BUFFER,
+                EXECUTION_MODEL_PIPELINE,
+                400,
+                1,
+                Some(512),
+                512,
+                128,
+                Some(128),
+                Some(528),
+            ),
+            (
+                MEMORY_POLICY_FIXED_NIC_BUFFER,
+                EXECUTION_MODEL_PIPELINE,
+                8,
+                1,
+                None,
+                512,
+                u64::MAX,
+                Some(u64::MAX),
+                Some(u128::from(u64::MAX) + 8),
+            ),
+            (
+                MEMORY_POLICY_AUTO_NIC_BUFFER,
+                EXECUTION_MODEL_RTC,
+                512,
+                1,
+                Some(512),
+                512,
+                128,
+                None,
+                None,
+            ),
+        ] {
+            let mut wc = base_worker_config();
+            wc.memory.policy = policy.into();
+            wc.memory.libpcap.fixed_buffer_size_mb = nic;
+            wc.execution_model = model.into();
+            wc.pipeline.min_buffer_size_mb = min;
+            let mgr = WorkerManager::new(wc, Tool::default());
+            let mut res = strategy(&["eth0", "eth1"][..interfaces], &[], &[]);
+            res.mem_limit = limit;
+            let (tasks, warnings, buff) = mgr.build_tasks(&res, "uuid", &[]).unwrap();
+            assert!(warnings.is_empty());
+            assert_eq!(buff, nic);
+            assert!(tasks
+                .iter()
+                .all(|t| { t.capturer.libpcap.as_ref().unwrap().buffer_size_mb == Some(nic) }));
+            WARNINGS.with(|w| w.borrow_mut().clear());
+            let cfg = mgr.new_worker_config(&tasks, &res);
+            assert_eq!(cfg.pipeline.map(|p| p.buffer_size_mb), pipeline);
+            let emitted = WARNINGS.with(|w| std::mem::take(&mut *w.borrow_mut()));
+            let expected: Vec<String> = total.into_iter().map(|total| {
+                let task_mem = nic * u64::try_from(interfaces).unwrap();
+                let pipeline = pipeline.unwrap();
+                format!(
+                    "worker memory overcommit: memory_policy.policy={policy}, sum(tasks.libpcap.buffer_size_mb)={task_mem} MiB + pipeline.buffer_size_mb={pipeline} MiB (memory_policy.pipeline.min_buffer_size_mb={min}) = {total} MiB > memLimit={effective} MiB (positive response mem_limit or memory_policy.default_limit_mb); configured budgets retained, cgroup memory.current is not total allocated memory"
+                )
+            }).collect();
+            assert_eq!(emitted, expected, "policy={policy}, limit={limit:?}");
+        }
     }
 
     fn valid_config() -> WorkerConfig {
