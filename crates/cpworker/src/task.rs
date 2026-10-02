@@ -229,6 +229,29 @@ fn find_reusable(entries: &[TaskEntry], reused: &[bool], task_cfg: &TaskConfig) 
 }
 
 /// Owns all tasks, their capturers and outputs, and the execution threads.
+/// Shared capture and reload must use the free functions, which acquire polling
+/// before the manager. The uncoordinated methods are not public entry points:
+///
+/// ```compile_fail
+/// use cpworker::task::TaskManager;
+/// fn poll(manager: &mut TaskManager) {
+///     manager.poll_packets_batch(1);
+/// }
+/// ```
+///
+/// ```compile_fail
+/// use cpworker::task::TaskManager;
+/// fn poll(manager: &mut TaskManager) {
+///     manager.poll_packets();
+/// }
+/// ```
+///
+/// ```compile_fail
+/// use cpworker::{config::Config, task::TaskManager};
+/// fn reload(manager: &mut TaskManager, config: Config) {
+///     let _ = manager.reload(config);
+/// }
+/// ```
 pub struct TaskManager {
     config: Config,
     config_path: String,
@@ -243,9 +266,15 @@ pub struct TaskManager {
 
     pipeline: Option<PipelineShared>,
 
-    /// Serializes an off-manager pipeline capture batch with reload. Always
+    /// Serializes an off-manager capture batch with reload. Always
     /// acquired before the manager mutex; stats need only the manager mutex.
     polling: Arc<Mutex<()>>,
+
+    /// Shutdown may already hold the manager, so it cannot wait for polling.
+    /// This gate covers only capture, and is released before entries are returned
+    /// under the manager lock. Shutdown sets stopping before waiting on the gate.
+    capturing: Arc<Mutex<()>>,
+    stopping: Arc<AtomicBool>,
 
     running: Arc<AtomicBool>,
     output_thread: Option<JoinHandle<()>>,
@@ -285,6 +314,8 @@ impl TaskManager {
             out_sets: Arc::new(Mutex::new(Vec::new())),
             pipeline,
             polling: Arc::new(Mutex::new(())),
+            capturing: Arc::new(Mutex::new(())),
+            stopping: Arc::new(AtomicBool::new(false)),
             running: Arc::new(AtomicBool::new(false)),
             output_thread: None,
             inited_count: 0,
@@ -407,6 +438,12 @@ impl TaskManager {
             return;
         };
         let consumer = pipeline.consumer.clone();
+        // Reentrant start must keep the live thread's join handle: replacing it
+        // would detach the only consumer, leaving stop/reload unable to drain it.
+        if self.output_thread.is_some() || consumer.lock().is_none() {
+            crate::log_error!("pipeline consumer already taken; output thread not started");
+            return;
+        }
         let alloc = pipeline.alloc.clone();
         let out_sets = self.out_sets.clone();
         let running = self.running.clone();
@@ -419,6 +456,7 @@ impl TaskManager {
                 // endpoint or manager mutex is held during queue operations,
                 // output syscalls or idle waits.
                 let Some(mut ring) = consumer.lock().take() else {
+                    crate::log_error!("pipeline consumer already taken; output thread not started");
                     return;
                 };
                 loop {
@@ -467,7 +505,15 @@ impl TaskManager {
     /// before being destroyed, which makes repeat calls a no-op (destroy is
     /// never run twice) and keeps the shared lock held only for the O(n) swap,
     /// not for the multi-second linger wait.
+    ///
+    /// Request cancellation before waiting for capture. Unlike polling, the
+    /// capture gate is released before a batch reacquires the manager, so this
+    /// also works when the caller already holds the manager mutex. The current
+    /// capture finishes before the output thread is joined and outputs drained.
     pub fn stop(&mut self) {
+        self.stopping.store(true, Ordering::Release);
+        let capturing = self.capturing.clone();
+        let _capturing = capturing.lock();
         self.stop_output_thread();
         let mut doomed: Vec<Box<dyn Output>> = {
             let mut sets = self.out_sets.lock();
@@ -481,16 +527,17 @@ impl TaskManager {
     }
 
     /// Poll each task once. Mirrors `task_manager_poll_packets`.
-    pub fn poll_packets(&mut self) -> u64 {
+    #[cfg(test)]
+    fn poll_packets(&mut self) -> u64 {
         self.poll_packets_batch(1)
     }
 
     /// Poll up to `max` packets, amortising the output-set lock (and the
     /// caller's TaskManager lock) across a batch instead of once per packet.
-    /// Shared callers should use the free [`crate::task::poll_packets_batch`],
-    /// which keeps every capture wait outside the manager mutex; this method
-    /// holds it for the whole batch.
-    pub fn poll_packets_batch(&mut self, max: usize) -> u64 {
+    /// Only standalone test managers use this helper; shared callers must use
+    /// the free function so polling is acquired before the manager mutex.
+    #[cfg(test)]
+    fn poll_packets_batch(&mut self, max: usize) -> u64 {
         let mut total = 0u64;
         match self.config.execution_model {
             ExecutionModel::Pipeline => {
@@ -501,10 +548,10 @@ impl TaskManager {
                         return total;
                     }
                 };
-                total = poll_pipeline(&mut self.entries, pipeline, max);
+                total = poll_pipeline(&mut self.entries, pipeline, &self.stopping, max);
             }
             ExecutionModel::Rtc => {
-                total = poll_rtc(&mut self.entries, &self.out_sets, max);
+                total = poll_rtc(&mut self.entries, &self.out_sets, &self.stopping, max);
             }
         }
         total
@@ -519,10 +566,10 @@ impl TaskManager {
     /// tasks absent from the new config (or belonging to a changed fingerprint)
     /// have their outputs destroyed. This mirrors `task.c`'s
     /// `find_task_by_fingerprint` reuse without its three-phase mailbox dance,
-    /// because the manager is already serialised by a single mutex.
+    /// because the caller already holds polling and the manager mutex.
     ///
     /// Shared-manager callers must use the free [`crate::task::reload`] or [`reload_from_file`]
-    /// to serialize with off-manager pipeline capture. The latter parses and
+    /// to serialize with off-manager capture. The latter parses and
     /// resolves host names *before* taking the lock: a BPF expression
     /// containing a name blocks there for as long as the resolver takes.
     ///
@@ -534,7 +581,7 @@ impl TaskManager {
     ///
     /// # Errors
     /// Returns an error if the rebuilt task set cannot be constructed.
-    pub fn reload(&mut self, new_config: Config) -> Result<()> {
+    fn reload(&mut self, new_config: Config) -> Result<()> {
         let was_running = self.output_thread.is_some();
         // Join the shared output thread but keep every task's resources so
         // unchanged tasks can be reused below. `stop()` would destroy them all.
@@ -562,6 +609,7 @@ impl TaskManager {
         self.reload_epoch += 1;
         let result = self.rebuild_reusing(old_entries, old_out_sets);
         drop(old_config);
+        self.stopping.store(false, Ordering::Release);
 
         if was_running {
             self.start();
@@ -724,15 +772,22 @@ impl Drop for TaskManager {
 /// a blocking wait inside a capturer — the RTC path's readability `poll()`
 /// (`timeout_ms` can be a second), or a full ring's backpressure — cannot stall
 /// control snapshots. The polling lock serializes a batch with reload and with
-/// another batch, so task order, outputs and buffers cannot change until the
-/// entries have been returned. It is always taken before the manager mutex,
+/// another batch, so reload cannot change task order, outputs or buffers until
+/// the entries have been returned. Shutdown uses a separate capture gate to
+/// cancel the remainder of the batch before draining outputs. Polling is always
+/// taken before the manager mutex,
 /// which is the order [`reload`] uses, so the two cannot deadlock.
 pub fn poll_packets_batch(mgr: &Mutex<TaskManager>, max: usize) -> u64 {
     // Peek the Arcs the batch needs under a short manager lock, then take the
     // polling lock before the manager lock.
-    let (polling, out_sets) = {
+    let (polling, out_sets, capturing, stopping) = {
         let guard = mgr.lock();
-        (guard.polling.clone(), guard.out_sets.clone())
+        (
+            guard.polling.clone(),
+            guard.out_sets.clone(),
+            guard.capturing.clone(),
+            guard.stopping.clone(),
+        )
     };
     let _polling = polling.lock();
     let mut guard = mgr.lock();
@@ -743,7 +798,8 @@ pub fn poll_packets_batch(mgr: &Mutex<TaskManager>, max: usize) -> u64 {
     let total = match (model, pipeline) {
         (ExecutionModel::Pipeline, Some(pipeline)) => {
             parking_lot::MutexGuard::unlocked(&mut guard, || {
-                poll_pipeline(&mut entries, &pipeline, max)
+                let _capturing = capturing.lock();
+                poll_pipeline(&mut entries, &pipeline, &stopping, max)
             })
         }
         (ExecutionModel::Pipeline, None) => {
@@ -751,9 +807,10 @@ pub fn poll_packets_batch(mgr: &Mutex<TaskManager>, max: usize) -> u64 {
             crate::log_error!("pipeline model missing ring/alloc; no packets polled");
             return 0;
         }
-        (ExecutionModel::Rtc, _) => {
-            parking_lot::MutexGuard::unlocked(&mut guard, || poll_rtc(&mut entries, &out_sets, max))
-        }
+        (ExecutionModel::Rtc, _) => parking_lot::MutexGuard::unlocked(&mut guard, || {
+            let _capturing = capturing.lock();
+            poll_rtc(&mut entries, &out_sets, &stopping, max)
+        }),
     };
     guard.entries = entries;
     total
@@ -761,14 +818,23 @@ pub fn poll_packets_batch(mgr: &Mutex<TaskManager>, max: usize) -> u64 {
 
 /// Capture one RTC batch. The caller has released the manager mutex, so a
 /// capturer's blocking wait cannot hold up control snapshots; `out_sets` is held
-/// for the batch and is only otherwise taken by reload, which the caller's
-/// polling lock already excludes.
-fn poll_rtc(entries: &mut [TaskEntry], out_sets: &Mutex<Vec<TaskOutputs>>, max: usize) -> u64 {
+/// for the batch. Reload is excluded by polling; shutdown requests cancellation
+/// and waits for the capture gate before draining outputs. An in-flight capture
+/// or sink call must return, but shutdown need not wait for the rest of the batch.
+fn poll_rtc(
+    entries: &mut [TaskEntry],
+    out_sets: &Mutex<Vec<TaskOutputs>>,
+    stopping: &AtomicBool,
+    max: usize,
+) -> u64 {
     let mut total = 0u64;
     let mut sets = out_sets.lock();
     for _ in 0..max {
         let mut n = 0u64;
         for entry in entries.iter_mut() {
+            if stopping.load(Ordering::Acquire) {
+                return total + n;
+            }
             if let Some(cap) = entry.capturer.as_mut() {
                 let outs = &mut sets[entry.index].outputs;
                 let mut sink = RtcSink { outputs: outs };
@@ -783,7 +849,12 @@ fn poll_rtc(entries: &mut [TaskEntry], out_sets: &Mutex<Vec<TaskOutputs>>, max: 
     total
 }
 
-fn poll_pipeline(entries: &mut [TaskEntry], pipeline: &PipelineShared, max: usize) -> u64 {
+fn poll_pipeline(
+    entries: &mut [TaskEntry],
+    pipeline: &PipelineShared,
+    stopping: &AtomicBool,
+    max: usize,
+) -> u64 {
     // Borrow the unique producer once per batch, never per packet. The output
     // thread and stats observer do not use this ownership mutex.
     let mut producer = pipeline.producer.lock();
@@ -791,6 +862,9 @@ fn poll_pipeline(entries: &mut [TaskEntry], pipeline: &PipelineShared, max: usiz
     for _ in 0..max {
         let mut n = 0;
         for entry in entries.iter_mut() {
+            if stopping.load(Ordering::Acquire) {
+                return total + n;
+            }
             if let Some(cap) = entry.capturer.as_mut() {
                 let mut sink = PipelineSink {
                     ring: &mut producer,
@@ -808,7 +882,7 @@ fn poll_pipeline(entries: &mut [TaskEntry], pipeline: &PipelineShared, max: usiz
     total
 }
 
-/// Apply a prepared reload to a shared manager. Wait for any pipeline capture
+/// Apply a prepared reload to a shared manager. Wait for any capture
 /// batch before taking the manager mutex, so stats remain available even when
 /// a slow output is backpressuring that batch. The output thread still drains
 /// all old messages before any task slot or pipeline buffer is replaced.
@@ -1453,6 +1527,106 @@ mod tests {
         );
     }
 
+    fn assert_stop_interrupts_capture_batch(model: ExecutionModel) {
+        struct BlockingCapturer {
+            entered: Option<std::sync::mpsc::Sender<()>>,
+            release: std::sync::mpsc::Receiver<()>,
+            calls: Arc<AtomicUsize>,
+        }
+
+        impl Capturer for BlockingCapturer {
+            fn capture_once(&mut self, sink: &mut dyn PacketSink) -> u64 {
+                self.calls.fetch_add(1, Ordering::SeqCst);
+                if let Some(entered) = self.entered.take() {
+                    entered.send(()).unwrap();
+                    let _ = self.release.recv_timeout(std::time::Duration::from_secs(5));
+                }
+                let hdr = PacketHeader {
+                    ts_sec: 1,
+                    ts_usec: 0,
+                    caplen: 1,
+                    len: 1,
+                };
+                sink.on_packet(&hdr, &[11], 7);
+                sink.on_heartbeat();
+                1
+            }
+        }
+
+        let dir = tempfile::tempdir().unwrap();
+        let mut manager = match model {
+            ExecutionModel::Rtc => manager_with_spies(dir.path(), 0).0,
+            ExecutionModel::Pipeline => pipeline_manager(dir.path()),
+        };
+        let calls = Arc::new(AtomicUsize::new(0));
+        let packets = Arc::new(AtomicUsize::new(0));
+        let heartbeats = Arc::new(AtomicUsize::new(0));
+        let destroyed = Arc::new(AtomicUsize::new(0));
+        let (entered_tx, entered_rx) = std::sync::mpsc::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        manager.entries[0].capturer = Some(Box::new(BlockingCapturer {
+            entered: Some(entered_tx),
+            release: release_rx,
+            calls: calls.clone(),
+        }));
+        manager.out_sets.lock()[0].outputs = vec![
+            Box::new(CountOutput {
+                packets: packets.clone(),
+                heartbeats: heartbeats.clone(),
+            }),
+            Box::new(SpyOutput {
+                destroyed: destroyed.clone(),
+            }),
+        ];
+        manager.start();
+        let mgr = Arc::new(Mutex::new(manager));
+        let m = mgr.clone();
+        let producer = std::thread::spawn(move || poll_packets_batch(&m, 4));
+        entered_rx
+            .recv_timeout(std::time::Duration::from_secs(2))
+            .unwrap();
+
+        let m = mgr.clone();
+        let (stopping_tx, stopping_rx) = std::sync::mpsc::channel();
+        let (done_tx, done_rx) = std::sync::mpsc::channel();
+        let stopper = std::thread::spawn(move || {
+            let mut manager = m.lock();
+            stopping_tx.send(()).unwrap();
+            manager.stop();
+            done_tx.send(()).unwrap();
+        });
+        stopping_rx
+            .recv_timeout(std::time::Duration::from_secs(2))
+            .unwrap();
+        // Give stop time to reach its capture gate. It must wait for the current
+        // call even in pipeline mode, where it could otherwise join too early.
+        let waiting = done_rx
+            .recv_timeout(std::time::Duration::from_millis(100))
+            .is_err();
+        release_tx.send(()).unwrap();
+        let captured = producer.join().unwrap();
+        stopper.join().unwrap();
+        assert!(waiting, "stop must let the in-flight capture finish");
+        assert_eq!(captured, 1, "shutdown must skip the rest of the batch");
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        assert_eq!(packets.load(Ordering::SeqCst), 1);
+        assert_eq!(heartbeats.load(Ordering::SeqCst), 1);
+        assert_eq!(destroyed.load(Ordering::SeqCst), 1);
+        assert_eq!(poll_packets_batch(&mgr, 4), 0, "stopped outputs stay idle");
+        mgr.lock().stop();
+        assert_eq!(destroyed.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn stop_interrupts_rtc_batch_after_in_flight_capture() {
+        assert_stop_interrupts_capture_batch(ExecutionModel::Rtc);
+    }
+
+    #[test]
+    fn stop_interrupts_pipeline_batch_and_drains_in_flight_capture() {
+        assert_stop_interrupts_capture_batch(ExecutionModel::Pipeline);
+    }
+
     #[test]
     fn reload_destroys_replaced_outputs() {
         let dir = tempfile::tempdir().unwrap();
@@ -2040,6 +2214,64 @@ mod tests {
         );
     }
 
+    #[test]
+    fn repeated_start_reports_an_unavailable_consumer() {
+        const CHILD_ENV: &str = "CPWORKER_TEST_REPEATED_START_CHILD";
+        if std::env::var_os(CHILD_ENV).is_some() {
+            let dir = tempfile::tempdir().unwrap();
+            let mut manager = pipeline_manager(dir.path());
+            manager.start();
+            let consumer = manager.pipeline.as_ref().unwrap().consumer.clone();
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+            while consumer.lock().is_some() && std::time::Instant::now() < deadline {
+                std::thread::yield_now();
+            }
+            assert!(
+                consumer.lock().is_none(),
+                "first start must take the endpoint"
+            );
+            let thread_id = manager.output_thread.as_ref().unwrap().thread().id();
+            manager.start();
+            assert_eq!(
+                manager.output_thread.as_ref().unwrap().thread().id(),
+                thread_id,
+                "second start must preserve the live consumer's join handle"
+            );
+            manager.stop();
+            let _taken = consumer.lock().take().unwrap();
+            manager.start();
+            assert!(
+                manager.output_thread.is_none(),
+                "missing endpoint must reject start"
+            );
+            return;
+        }
+
+        // Logging writes directly to stderr. A child test process checks the
+        // actual log without replacing global logging or racing other tests.
+        let child = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "task::tests::repeated_start_reports_an_unavailable_consumer",
+                "--nocapture",
+            ])
+            .env(CHILD_ENV, "1")
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8_lossy(&child.stderr);
+        assert_eq!(
+            stderr
+                .lines()
+                .filter(|line| line.contains("ERROR")
+                    && line.contains("pipeline consumer already taken; output thread not started"))
+                .count(),
+            2,
+            "both reentry and an already-taken endpoint must report an error: {stderr}"
+        );
+        assert!(child.status.success(), "child test failed: {stderr}");
+        assert_eq!(stderr.matches("output thread started").count(), 1);
+    }
+
     /// Reloading a running pipeline manager rebuilds the ring/allocator and
     /// restarts the output thread; a stopped manager must stay stopped.
     #[test]
@@ -2339,7 +2571,7 @@ mod tests {
             handles.push(std::thread::spawn(move || {
                 for _ in 0..20 {
                     let plan = prepare_reload(&path).expect("prepare");
-                    m.lock().reload(plan.config).expect("reload");
+                    reload(&m, plan.config).expect("reload");
                 }
                 tx.send(()).expect("send");
             }));

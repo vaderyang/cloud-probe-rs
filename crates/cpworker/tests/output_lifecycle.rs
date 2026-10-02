@@ -16,8 +16,9 @@ use std::time::{Duration, Instant};
 use cpworker::config::Config;
 use cpworker::output::pcap_writer::PcapWriter;
 use cpworker::output::PacketHeader;
-use cpworker::task::TaskManager;
+use cpworker::task::{poll_packets_batch, reload, TaskManager};
 use cpworker::zmtp::codec;
+use parking_lot::Mutex;
 
 const PKT_LEN: usize = 4096;
 /// ~24 MiB of batched payload: far more than the socket buffers involved, so
@@ -130,16 +131,16 @@ fn packets_stat(summary: &serde_json::Value, key: &str) -> u64 {
         .expect("packets counter")
 }
 
-fn pump_all(mgr: &mut TaskManager) {
+fn pump_all(mgr: &Mutex<TaskManager>) {
     let deadline = Instant::now() + Duration::from_secs(60);
-    while mgr.poll_packets_batch(512) > 0 {
+    while poll_packets_batch(mgr, 512) > 0 {
         if Instant::now() > deadline {
             panic!("replaying the pcap file did not finish");
         }
     }
     // One more pass so the capturer's end-of-file heartbeat flushes the last
     // (partial) batch into the send queue.
-    assert_eq!(mgr.poll_packets_batch(8), 0);
+    assert_eq!(poll_packets_batch(mgr, 8), 0);
 }
 
 #[test]
@@ -153,18 +154,20 @@ fn stop_drains_batches_queued_in_zmtp() {
     let (go_tx, go_rx) = mpsc::channel();
     let peer = std::thread::spawn(move || stalled_peer(listener, go_rx));
 
-    let mut mgr = TaskManager::new(
-        Config::parse_str(&worker_config(&pcap, port, 200)).expect("parse"),
-        "test.json".into(),
-        dir.path().display().to_string(),
-    )
-    .expect("task manager");
-    pump_all(&mut mgr);
+    let mgr = Mutex::new(
+        TaskManager::new(
+            Config::parse_str(&worker_config(&pcap, port, 200)).expect("parse"),
+            "test.json".into(),
+            dir.path().display().to_string(),
+        )
+        .expect("task manager"),
+    );
+    pump_all(&mgr);
 
     // Every batch that was accepted into the send queue must be counted as
     // forwarded, and the HWM must not have been reached (24 MiB / 1 MiB
     // batches, hwm 200), so `fwd_packets` is exactly what the peer should see.
-    let summary = mgr.collect_stats_summary();
+    let summary = mgr.lock().collect_stats_summary();
     let fwd = packets_stat(&summary, "fwd_packets");
     let dropped = packets_stat(&summary, "error_drop_packets");
     assert_eq!(dropped, 0, "no batch may hit the HWM in this test");
@@ -175,7 +178,7 @@ fn stop_drains_batches_queued_in_zmtp() {
 
     go_tx.send(()).expect("release the peer");
     // The single destroy() call point: this must linger until the queue is dry.
-    mgr.stop();
+    mgr.lock().stop();
 
     let delivered = peer.join().expect("peer thread") as u64;
     assert_eq!(
@@ -199,19 +202,20 @@ fn reload_drains_batches_queued_in_zmtp() {
     let peer = std::thread::spawn(move || stalled_peer(listener, go_rx));
 
     let cfg = worker_config(&pcap, port, 200);
-    let mut mgr = TaskManager::new(
-        Config::parse_str(&cfg).expect("parse"),
-        "test.json".into(),
-        dir.path().display().to_string(),
-    )
-    .expect("task manager");
-    pump_all(&mut mgr);
-    let fwd = packets_stat(&mgr.collect_stats_summary(), "fwd_packets");
+    let mgr = Mutex::new(
+        TaskManager::new(
+            Config::parse_str(&cfg).expect("parse"),
+            "test.json".into(),
+            dir.path().display().to_string(),
+        )
+        .expect("task manager"),
+    );
+    pump_all(&mgr);
+    let fwd = packets_stat(&mgr.lock().collect_stats_summary(), "fwd_packets");
     assert!(fwd > 4_000, "packets queued for sending: {fwd}");
 
     go_tx.send(()).expect("release the peer");
-    mgr.reload(Config::parse_str(&cfg).expect("parse"))
-        .expect("reload");
+    reload(&mgr, Config::parse_str(&cfg).expect("parse")).expect("reload");
 
     let delivered = peer.join().expect("peer thread") as u64;
     assert_eq!(
@@ -237,17 +241,19 @@ fn stop_flushes_pcap_file_output() {
         pcap_in.display(),
         out_file.display()
     );
-    let mut mgr = TaskManager::new(
-        Config::parse_str(&cfg).expect("parse"),
-        "t.json".into(),
-        dir.path().display().to_string(),
-    )
-    .expect("task manager");
-    pump_all(&mut mgr);
-    let fwd = packets_stat(&mgr.collect_stats_summary(), "fwd_packets");
+    let mgr = Mutex::new(
+        TaskManager::new(
+            Config::parse_str(&cfg).expect("parse"),
+            "t.json".into(),
+            dir.path().display().to_string(),
+        )
+        .expect("task manager"),
+    );
+    pump_all(&mgr);
+    let fwd = packets_stat(&mgr.lock().collect_stats_summary(), "fwd_packets");
     assert!(fwd > 4_000, "packets forwarded: {fwd}");
 
-    mgr.stop();
+    mgr.lock().stop();
     // The output is gone; what it wrote must be readable and complete.
     let on_disk = std::fs::metadata(&out_file).expect("output file").len();
     assert_eq!(
