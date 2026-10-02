@@ -487,8 +487,9 @@ impl TaskManager {
 
     /// Poll up to `max` packets, amortising the output-set lock (and the
     /// caller's TaskManager lock) across a batch instead of once per packet.
-    /// Shared pipeline callers should use the free [`crate::task::poll_packets_batch`] to
-    /// keep backpressure and capture waits outside the manager mutex.
+    /// Shared callers should use the free [`crate::task::poll_packets_batch`],
+    /// which keeps every capture wait outside the manager mutex; this method
+    /// holds it for the whole batch.
     pub fn poll_packets_batch(&mut self, max: usize) -> u64 {
         let mut total = 0u64;
         match self.config.execution_model {
@@ -503,21 +504,7 @@ impl TaskManager {
                 total = poll_pipeline(&mut self.entries, pipeline, max);
             }
             ExecutionModel::Rtc => {
-                let mut sets = self.out_sets.lock();
-                for _ in 0..max {
-                    let mut n = 0u64;
-                    for entry in self.entries.iter_mut() {
-                        if let Some(cap) = entry.capturer.as_mut() {
-                            let outs = &mut sets[entry.index].outputs;
-                            let mut sink = RtcSink { outputs: outs };
-                            n += cap.capture_once(&mut sink);
-                        }
-                    }
-                    total += n;
-                    if n == 0 {
-                        break;
-                    }
-                }
+                total = poll_rtc(&mut self.entries, &self.out_sets, max);
             }
         }
         total
@@ -732,32 +719,67 @@ impl Drop for TaskManager {
     }
 }
 
-/// Poll a shared manager, amortising locks over a batch. Pipeline capture owns
-/// the entries for the duration of the batch, with the manager mutex released:
-/// a full ring still backpressures capture without blocking control snapshots.
-/// The polling lock prevents another batch or reload from changing task order,
-/// outputs or buffers until the entries have been returned.
+/// Poll a shared manager, amortising locks over a batch. Capture owns the
+/// entries for the duration of the batch **with the manager mutex released**, so
+/// a blocking wait inside a capturer — the RTC path's readability `poll()`
+/// (`timeout_ms` can be a second), or a full ring's backpressure — cannot stall
+/// control snapshots. The polling lock serializes a batch with reload and with
+/// another batch, so task order, outputs and buffers cannot change until the
+/// entries have been returned. It is always taken before the manager mutex,
+/// which is the order [`reload`] uses, so the two cannot deadlock.
 pub fn poll_packets_batch(mgr: &Mutex<TaskManager>, max: usize) -> u64 {
-    let mut guard = mgr.lock();
-    if guard.execution_model() == ExecutionModel::Rtc {
-        return guard.poll_packets_batch(max);
-    }
-    let polling = guard.polling.clone();
-    drop(guard);
+    // Peek the Arcs the batch needs under a short manager lock, then take the
+    // polling lock before the manager lock.
+    let (polling, out_sets) = {
+        let guard = mgr.lock();
+        (guard.polling.clone(), guard.out_sets.clone())
+    };
     let _polling = polling.lock();
     let mut guard = mgr.lock();
-    // A reload may have changed execution model while we waited for polling.
-    if guard.execution_model() == ExecutionModel::Rtc {
-        return guard.poll_packets_batch(max);
-    }
-    let Some(pipeline) = guard.pipeline.clone() else {
-        return 0;
-    };
+    // A reload may have changed the execution model while we waited for polling.
+    let model = guard.execution_model();
+    let pipeline = guard.pipeline.clone();
     let mut entries = std::mem::take(&mut guard.entries);
-    let total = parking_lot::MutexGuard::unlocked(&mut guard, || {
-        poll_pipeline(&mut entries, &pipeline, max)
-    });
+    let total = match (model, pipeline) {
+        (ExecutionModel::Pipeline, Some(pipeline)) => {
+            parking_lot::MutexGuard::unlocked(&mut guard, || {
+                poll_pipeline(&mut entries, &pipeline, max)
+            })
+        }
+        (ExecutionModel::Pipeline, None) => {
+            guard.entries = entries;
+            crate::log_error!("pipeline model missing ring/alloc; no packets polled");
+            return 0;
+        }
+        (ExecutionModel::Rtc, _) => {
+            parking_lot::MutexGuard::unlocked(&mut guard, || poll_rtc(&mut entries, &out_sets, max))
+        }
+    };
     guard.entries = entries;
+    total
+}
+
+/// Capture one RTC batch. The caller has released the manager mutex, so a
+/// capturer's blocking wait cannot hold up control snapshots; `out_sets` is held
+/// for the batch and is only otherwise taken by reload, which the caller's
+/// polling lock already excludes.
+fn poll_rtc(entries: &mut [TaskEntry], out_sets: &Mutex<Vec<TaskOutputs>>, max: usize) -> u64 {
+    let mut total = 0u64;
+    let mut sets = out_sets.lock();
+    for _ in 0..max {
+        let mut n = 0u64;
+        for entry in entries.iter_mut() {
+            if let Some(cap) = entry.capturer.as_mut() {
+                let outs = &mut sets[entry.index].outputs;
+                let mut sink = RtcSink { outputs: outs };
+                n += cap.capture_once(&mut sink);
+            }
+        }
+        total += n;
+        if n == 0 {
+            break;
+        }
+    }
     total
 }
 
@@ -1830,6 +1852,66 @@ mod tests {
             1,
             "the pipeline path must drain the same single packet"
         );
+    }
+
+    /// The RTC capture batch must not hold the manager mutex: an RTC capturer
+    /// that blocks inside `capture_once` (the mmap ring's readability `poll()`,
+    /// which can wait `timeout_ms`) must not stop a control snapshot. Before
+    /// cloud-probe-rs-brh was fixed the free `poll_packets_batch` short-circuited
+    /// straight to `guard.poll_packets_batch`, keeping the guard across the wait.
+    #[test]
+    fn rtc_capture_wait_does_not_hold_the_manager_lock() {
+        struct BlockingCapturer {
+            entered: std::sync::mpsc::Sender<()>,
+            release: std::sync::mpsc::Receiver<()>,
+            blocked: bool,
+        }
+
+        impl Capturer for BlockingCapturer {
+            fn capture_once(&mut self, _sink: &mut dyn PacketSink) -> u64 {
+                if self.blocked {
+                    return 0;
+                }
+                self.blocked = true;
+                let _ = self.entered.send(());
+                let _ = self.release.recv_timeout(std::time::Duration::from_secs(5));
+                1
+            }
+        }
+
+        let dir = tempfile::tempdir().unwrap();
+        let (mgr, _) = manager_with_spies(dir.path(), 0);
+        let mgr = Arc::new(Mutex::new(mgr));
+        let (entered_tx, entered_rx) = std::sync::mpsc::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        {
+            let mut m = mgr.lock();
+            assert_eq!(m.execution_model(), ExecutionModel::Rtc);
+            m.entries[0].capturer = Some(Box::new(BlockingCapturer {
+                entered: entered_tx,
+                release: release_rx,
+                blocked: false,
+            }));
+        }
+
+        let polling = mgr.clone();
+        let producer = std::thread::spawn(move || poll_packets_batch(&polling, 4));
+        entered_rx
+            .recv_timeout(std::time::Duration::from_secs(2))
+            .expect("capture must enter the blocking capturer");
+
+        let (stats_tx, stats_rx) = std::sync::mpsc::channel();
+        let stats_mgr = mgr.clone();
+        std::thread::spawn(move || {
+            let _ = stats_tx.send(stats_mgr.lock().collect_stats_summary());
+        });
+        let snapshot = stats_rx
+            .recv_timeout(std::time::Duration::from_secs(1))
+            .expect("stats must not wait for an RTC capture's blocking wait");
+        assert!(snapshot["capture"].is_object());
+
+        release_tx.send(()).unwrap();
+        assert_eq!(producer.join().unwrap(), 1);
     }
 
     /// A task that cannot be built is recorded (not fatal) and surfaced by
