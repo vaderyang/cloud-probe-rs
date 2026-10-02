@@ -1470,4 +1470,36 @@ mod tests {
         let err = b.finish().expect_err("a backward jump must be rejected");
         assert!(err.to_string().contains("backward jump"), "{err}");
     }
+
+    /// `ether proto N` decides at *exactly* N = `ETHERNET_8023_MAX` (1500): libpcap
+    /// reads a value <= 1500 as an 802.3 length (compare the LLC byte at offset 14),
+    /// a value > 1500 as a plain ethertype compare. Mutating `>` to `>=`
+    /// (sweep mutant `compiler.rs:521:24`) moves that boundary by one, so both
+    /// sides are pinned here: the encoding, because the two branches differ in
+    /// instruction count, and the decision, because a frame that literally carries
+    /// 1500 in its EtherType field must still not match `ether proto 1500`.
+    #[test]
+    fn ether_proto_length_boundary_is_exactly_the_8023_maximum() {
+        assert_disasm(
+            "ether proto 1500",
+            "ldh 0 0 12 | jgt 3 0 1500 | ldb 0 0 14 | jeq 0 1 1500 | ret 0 0 262144 | ret 0 0 0",
+        );
+        assert_disasm(
+            "ether proto 1501",
+            "ldh 0 0 12 | jeq 0 1 1501 | ret 0 0 262144 | ret 0 0 0",
+        );
+
+        // 1500 is read as a length, so the byte at offset 14 decides; a byte can
+        // never equal 1500, which is why the frame below does not match even
+        // though its EtherType field holds the value.
+        let mut length_frame = vec![0u8; 20];
+        length_frame[12..14].copy_from_slice(&1500u16.to_be_bytes());
+        assert!(!apply("ether proto 1500", &length_frame));
+        length_frame[14] = 0xff;
+        assert!(!apply("ether proto 1500", &length_frame));
+
+        // One up is the straight 16-bit compare again.
+        assert!(apply("ether proto 1501", &eth(1501)));
+        assert!(!apply("ether proto 1501", &length_frame));
+    }
 }
