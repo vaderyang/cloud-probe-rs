@@ -16,6 +16,7 @@ use crate::packet::{
 };
 use crate::ratelimit::TokenBucket;
 use crate::stats::OutputStats;
+use crate::zmtp::client::MessageAccount;
 use crate::zmtp::{self, SendOutcome, ZmtpPush};
 
 const ZMQ_MAX_BATCH_BUF_SIZE: usize = 1_048_576;
@@ -344,7 +345,17 @@ impl ZmqOutput {
         // message. Backlog and loss stay visible through `error_drop_*` (batches
         // refused by the queue) and the `zmtp_queued_*` gauges (bytes currently
         // parked for the collector), so no C-facing number is redefined here.
-        let sent = self.zmtp.send(&self.builder.buf[..len]);
+        //
+        // Acceptance is only half the truth, so the batch's own numbers travel
+        // with it: the transport can still lose it after accepting it, and
+        // `settle_transport_loss` charges that back (cloud-probe-rs-b7b).
+        let sent = self.zmtp.send_with_account(
+            &self.builder.buf[..len],
+            MessageAccount {
+                packets: u64::from(send_num),
+                bytes: u64::try_from(len).unwrap_or(u64::MAX),
+            },
+        );
         match sent {
             SendOutcome::Queued => {
                 self.stats.fwd_bytes.add(len as u64);
@@ -366,7 +377,37 @@ impl ZmqOutput {
         }
 
         self.builder.end_flush();
+        self.settle_transport_loss();
         self.publish_queue_gauges();
+    }
+
+    /// Charge what the transport lost *after* it accepted a batch
+    /// (cloud-probe-rs-b7b).
+    ///
+    /// A frame that is half-written when the collector disconnects is
+    /// unrecoverable, and an undelivered backlog is discarded when this output
+    /// stops; both happen after the `fwd_*` counters already recorded the batch,
+    /// and the `zmtp_queued_*` gauges go back to 0 either way. Without this the
+    /// run looks clean while the peer never saw the data. The numbers ride out
+    /// through the existing periodic error summary rather than one line per
+    /// event, so a flapping collector cannot flood the log.
+    fn settle_transport_loss(&mut self) {
+        let lost = self.zmtp.take_loss_report();
+        if lost.messages == 0 {
+            return;
+        }
+        self.stats.error_drop_bytes.add(lost.bytes);
+        self.stats.error_drop_packets.add(lost.packets);
+        if self.error_info.nb_drop_batches == 0 {
+            self.error_info.send_error =
+                "connection lost after the batch was accepted (peer disconnected)".to_string();
+        }
+        self.error_info.nb_drop_batches = self
+            .error_info
+            .nb_drop_batches
+            .saturating_add(lost.messages);
+        self.error_info.nb_drop_packets =
+            self.error_info.nb_drop_packets.saturating_add(lost.packets);
     }
 
     /// Publish the send-queue backlog as gauges (AUDIT4 P5-11).
@@ -481,6 +522,7 @@ impl Output for ZmqOutput {
     fn heartbeat(&mut self, now: i64) {
         // Progress reconnect / flush even when no packets are flowing.
         self.zmtp.poll();
+        self.settle_transport_loss();
         self.publish_queue_gauges();
         self.flush_if_stale(now);
         if self.heartbeat_ms <= 0 {
@@ -505,7 +547,14 @@ impl Output for ZmqOutput {
             self.flush_packet();
         }
         self.zmtp.drain_for(Duration::from_secs(5));
+        // A linger that ran out is a drop: the backlog dies with this output, so
+        // it must be charged before the queue gauges are allowed to read 0
+        // (cloud-probe-rs-b7b).
+        self.zmtp.discard_queued();
+        self.settle_transport_loss();
         self.publish_queue_gauges();
+        // Say it out loud while there is still somewhere to report to.
+        self.flush_error_info();
     }
 }
 
@@ -514,6 +563,8 @@ mod tests {
     use super::*;
     use crate::config::{OutputKind, ZmqConfig};
     use crate::packet::PKT_DIR_NONCHECK;
+    use crate::zmtp::{Connector, Transport};
+    use std::sync::Mutex;
 
     fn zmq_output(hwm: i32, stats: Arc<OutputStats>) -> ZmqOutput {
         let cfg = ZmqConfig {
@@ -589,5 +640,146 @@ mod tests {
 
         let huge = zmq_output(crate::config::ZMQ_HWM_MAX, stats);
         assert_eq!(huge.queue_budget_bytes(), zmtp::DEFAULT_MAX_QUEUED_BYTES);
+    }
+
+    /// A collector that finishes the ZMTP handshake and then dies in the middle
+    /// of a business frame. That is the only way a batch accepted with
+    /// `SendOutcome::Queued` can still never reach the peer.
+    #[derive(Default)]
+    struct MockPeer {
+        state: Mutex<PeerState>,
+    }
+
+    #[derive(Default)]
+    struct PeerState {
+        /// What the peer still owes the client (its greeting and READY).
+        to_client: Vec<u8>,
+        /// Once armed, the socket accepts at most `budget` more bytes and then
+        /// fails hard - a peer that dies mid-frame.
+        armed: bool,
+        budget: usize,
+    }
+
+    struct PeerTransport {
+        peer: Arc<MockPeer>,
+    }
+
+    impl Transport for PeerTransport {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            let mut st = self.peer.state.lock().expect("peer lock");
+            if !st.armed {
+                return Ok(buf.len());
+            }
+            if st.budget == 0 {
+                return Err(std::io::Error::from(std::io::ErrorKind::BrokenPipe));
+            }
+            let n = st.budget.min(buf.len());
+            st.budget -= n;
+            Ok(n)
+        }
+
+        fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+            let mut st = self.peer.state.lock().expect("peer lock");
+            if !st.to_client.is_empty() {
+                let n = st.to_client.len().min(buf.len());
+                buf[..n].copy_from_slice(&st.to_client[..n]);
+                st.to_client.drain(..n);
+                return Ok(n);
+            }
+            // Go silent rather than hang up: the *write* side has to be what dies,
+            // otherwise the loss happens in the read path, not mid-frame.
+            Err(std::io::Error::from(std::io::ErrorKind::WouldBlock))
+        }
+    }
+
+    struct MockConnector {
+        peer: Arc<MockPeer>,
+    }
+
+    impl Connector for MockConnector {
+        fn start(&mut self) -> std::io::Result<Box<dyn Transport>> {
+            Ok(Box::new(PeerTransport {
+                peer: Arc::clone(&self.peer),
+            }))
+        }
+    }
+
+    fn mock_peer() -> Arc<MockPeer> {
+        let mut to_client = zmtp::codec::greeting().to_vec();
+        to_client.extend_from_slice(&zmtp::codec::ready_command("PULL"));
+        Arc::new(MockPeer {
+            state: Mutex::new(PeerState {
+                to_client,
+                ..Default::default()
+            }),
+        })
+    }
+
+    /// cloud-probe-rs-b7b: acceptance is not delivery. A batch still counts as
+    /// forwarded when the transport takes it (AUDIT4 P5-11, unchanged), but a
+    /// collector that dies mid-frame must have those same packets reappear in
+    /// `error_drop_*`. Before the fix this run reported 5 forwarded / 0 dropped
+    /// while the peer received nothing, and the queue gauge went back to 0.
+    #[test]
+    fn a_batch_lost_after_acceptance_shows_up_as_dropped() {
+        let stats = Arc::new(OutputStats::default());
+        let mut z = zmq_output(10, stats.clone());
+        let peer = mock_peer();
+        z.zmtp = ZmtpPush::new(
+            Box::new(MockConnector {
+                peer: Arc::clone(&peer),
+            }),
+            10,
+        );
+        for _ in 0..20 {
+            z.zmtp.poll();
+            if z.zmtp.is_connected() {
+                break;
+            }
+        }
+        assert!(
+            z.zmtp.is_connected(),
+            "the mock peer must complete the handshake"
+        );
+        // Only a few bytes of the next frame make it out before the peer dies.
+        {
+            let mut st = peer.state.lock().expect("peer lock");
+            st.armed = true;
+            st.budget = 8;
+        }
+
+        let body = frame();
+        let hdr = PacketHeader {
+            ts_sec: 1, // ancient, so the heartbeat flushes the batch
+            ts_usec: 0,
+            caplen: body.len() as u32,
+            len: body.len() as u32,
+        };
+        for _ in 0..5 {
+            assert_eq!(z.send_packet(&hdr, &body, PKT_DIR_NONCHECK), 0);
+        }
+        z.heartbeat(now_ts().0);
+
+        assert_eq!(
+            stats.fwd_packets.load().0,
+            5,
+            "acceptance still counts as forwarded (the P5-11 number is not redefined)"
+        );
+        assert_eq!(
+            stats.error_drop_packets.load().0,
+            5,
+            "a batch the peer never received must not disappear from the counters"
+        );
+        assert_eq!(
+            stats.error_drop_bytes.load().0,
+            stats.fwd_bytes.load().0,
+            "the whole batch is charged back"
+        );
+        assert_eq!(z.zmtp.queued(), 0, "a half-written frame is not retried");
+        assert_eq!(
+            z.zmtp.take_loss_report().messages,
+            0,
+            "the report is drained once, so nothing is double-counted"
+        );
     }
 }
