@@ -1,0 +1,320 @@
+{
+  "completed_utc": "2026-10-02T01:12:28Z",
+  "hosts": {
+    "yinjiao": {
+      "pf": "ens8np0",
+      "vf_count": 0,
+      "pause": "Pause parameters for ens8np0:\nAutonegotiate:\toff\nRX:\t\ton\nTX:\t\ton\n\n",
+      "link": "Settings for ens8np0:\n\tSupported ports: [ FIBRE ]\n\tSupported link modes:   1000baseT/Full\n\t                        10000baseT/Full\n\t                        1000baseKX/Full\n\t                        10000baseKR/Full\n\t                        10000baseR_FEC\n\t                        40000baseKR4/Full\n\t                        40000baseCR4/Full\n\t                        40000baseSR4/Full\n\t                        40000baseLR4/Full\n\t                        25000baseCR/Full\n\t                        25000baseKR/Full\n\t                        25000baseSR/Full\n\t                        50000baseCR2/Full\n\t                        50000baseKR2/Full\n\t                        100000baseKR4/Full\n\t                        100000baseSR4/Full\n\t                        100000baseCR4/Full\n\t                        100000baseLR4_ER4/Full\n\t                        50000baseSR2/Full\n\t                        1000baseX/Full\n\t                        10000baseCR/Full\n\t                        10000baseSR/Full\n\t                        10000baseLR/Full\n\t                        10000baseER/Full\n\t                        50000baseKR/Full\n\t                        50000baseSR/Full\n\t                        50000baseCR/Full\n\t                        50000baseLR_ER_FR/Full\n\t                        50000baseDR/Full\n\t                        100000baseKR2/Full\n\t                        100000baseSR2/Full\n\t                        100000baseCR2/Full\n\t                        100000baseLR2_ER2_FR2/Full\n\t                        100000baseDR2/Full\n\tSupported pause frame use: Symmetric\n\tSupports auto-negotiation: Yes\n\tSupported FEC modes: None\t RS\t BASER\n\tAdvertised link modes:  1000baseT/Full\n\t                        10000baseT/Full\n\t                        1000baseKX/Full\n\t                        10000baseKR/Full\n\t                        10000baseR_FEC\n\t                        40000baseKR4/Full\n\t                        40000baseCR4/Full\n\t                        40000baseSR4/Full\n\t                        40000baseLR4/Full\n\t                        25000baseCR/Full\n\t                        25000baseKR/Full\n\t                        25000baseSR/Full\n\t                        50000baseCR2/Full\n\t                        50000baseKR2/Full\n\t                        100000baseKR4/Full\n\t                        100000baseSR4/Full\n\t                        100000baseCR4/Full\n\t                        100000baseLR4_ER4/Full\n\t                        50000baseSR2/Full\n\t                        1000baseX/Full\n\t                        10000baseCR/Full\n\t                        10000baseSR/Full\n\t                        10000baseLR/Full\n\t                        10000baseER/Full\n\t                        50000baseKR/Full\n\t                        50000baseSR/Full\n\t                        50000baseCR/Full\n\t                        50000baseLR_ER_FR/Full\n\t                        50000baseDR/Full\n\t                        100000baseKR2/Full\n\t                        100000baseSR2/Full\n\t                        100000baseCR2/Full\n\t                        100000baseLR2_ER2_FR2/Full\n\t                        100000baseDR2/Full\n\tAdvertised pause frame use: Symmetric\n\tAdvertised auto-negotiation: Yes\n\tAdvertised FEC modes: RS\n\tLink partner advertised link modes:  Not reported\n\tLink partner advertised pause frame use: No\n\tLink partner advertised auto-negotiation: Yes\n\tLink partner advertised FEC modes: Not reported\n\tSpeed: 100000Mb/s\n\tDuplex: Full\n\tAuto-negotiation: on\n\tPort: FIBRE\n\tPHYAD: 0\n\tTransceiver: internal\n\tSupports Wake-on: d\n\tWake-on: d\n        Current message level: 0x00000004 (4)\n                               link\n\tLink detected: yes\n",
+      "processes": {
+        "capacity_tx": "",
+        "cpworker": "",
+        "dpdk_primary": "",
+        "pdump_perf": "",
+        "dpdk-testpmd": ""
+      },
+      "runtime_entries": [],
+      "core_entries": [],
+      "temporary_capacity_files": [],
+      "cgroup_exists": false,
+      "hugepages": {
+        "/sys/devices/system/node/node0/hugepages/hugepages-2048kB/nr_hugepages": 628,
+        "/sys/devices/system/node/node1/hugepages/hugepages-2048kB/nr_hugepages": 396,
+        "/sys/devices/system/node/node0/hugepages/hugepages-2048kB/free_hugepages": 628,
+        "/sys/devices/system/node/node1/hugepages/hugepages-2048kB/free_hugepages": 396
+      },
+      "hugepage_files": [
+        "/dev/hugepages/libvirt"
+      ],
+      "steps": [
+        {
+          "command": [
+            "pkill",
+            "-TERM",
+            "-x",
+            "capacity_tx"
+          ],
+          "rc": 1,
+          "stdout": "",
+          "stderr": ""
+        },
+        {
+          "command": [
+            "pkill",
+            "-TERM",
+            "-x",
+            "cpworker"
+          ],
+          "rc": 1,
+          "stdout": "",
+          "stderr": ""
+        },
+        {
+          "command": [
+            "pkill",
+            "-TERM",
+            "-x",
+            "dpdk_primary"
+          ],
+          "rc": 1,
+          "stdout": "",
+          "stderr": ""
+        },
+        {
+          "command": [
+            "pkill",
+            "-TERM",
+            "-x",
+            "pdump_perf"
+          ],
+          "rc": 1,
+          "stdout": "",
+          "stderr": ""
+        },
+        {
+          "command": [
+            "pkill",
+            "-TERM",
+            "-x",
+            "dpdk-testpmd"
+          ],
+          "rc": 1,
+          "stdout": "",
+          "stderr": ""
+        },
+        {
+          "command": [
+            "pkill",
+            "-f",
+            "^python3 /tmp/cpcap-probe.py"
+          ],
+          "rc": 1,
+          "stdout": "",
+          "stderr": ""
+        },
+        {
+          "command": [
+            "ethtool",
+            "-A",
+            "ens8np0",
+            "autoneg",
+            "off",
+            "rx",
+            "on",
+            "tx",
+            "on"
+          ],
+          "rc": 0,
+          "stdout": "",
+          "stderr": ""
+        },
+        {
+          "command": [
+            "sh",
+            "-c",
+            "rm -rf /var/run/dpdk/* /tmp/core.* /tmp/cpcap*"
+          ],
+          "rc": 0,
+          "stdout": "",
+          "stderr": ""
+        },
+        {
+          "command": [
+            "ethtool",
+            "-a",
+            "ens8np0"
+          ],
+          "rc": 0,
+          "stdout": "Pause parameters for ens8np0:\nAutonegotiate:\toff\nRX:\t\ton\nTX:\t\ton",
+          "stderr": ""
+        },
+        {
+          "command": [
+            "ethtool",
+            "ens8np0"
+          ],
+          "rc": 0,
+          "stdout": "Settings for ens8np0:\n\tSupported ports: [ FIBRE ]\n\tSupported link modes:   1000baseT/Full\n\t                        10000baseT/Full\n\t                        1000baseKX/Full\n\t                        10000baseKR/Full\n\t                        10000baseR_FEC\n\t                        40000baseKR4/Full\n\t                        40000baseCR4/Full\n\t                        40000baseSR4/Full\n\t                        40000baseLR4/Full\n\t                        25000baseCR/Full\n\t                        25000baseKR/Full\n\t                        25000baseSR/Full\n\t                        50000baseCR2/Full\n\t                        50000baseKR2/Full\n\t                        100000baseKR4/Full\n\t                        100000baseSR4/Full\n\t                        100000baseCR4/Full\n\t                        100000baseLR4_ER4/Full\n\t                        50000baseSR2/Full\n\t                        1000baseX/Full\n\t                        10000baseCR/Full\n\t                        10000baseSR/Full\n\t                        10000baseLR/Full\n\t                        10000baseER/Full\n\t                        50000baseKR/Full\n\t                        50000baseSR/Full\n\t                        50000baseCR/Full\n\t                        50000baseLR_ER_FR/Full\n\t                        50000baseDR/Full\n\t                        100000baseKR2/Full\n\t                        100000baseSR2/Full\n\t                        100000baseCR2/Full\n\t                        100000baseLR2_ER2_FR2/Full\n\t                        100000baseDR2/Full\n\tSupported pause frame use: Symmetric\n\tSupports auto-negotiation: Yes\n\tSupported FEC modes: None\t RS\t BASER\n\tAdvertised link modes:  1000baseT/Full\n\t                        10000baseT/Full\n\t                        1000baseKX/Full\n\t                        10000baseKR/Full\n\t                        10000baseR_FEC\n\t                        40000baseKR4/Full\n\t                        40000baseCR4/Full\n\t                        40000baseSR4/Full\n\t                        40000baseLR4/Full\n\t                        25000baseCR/Full\n\t                        25000baseKR/Full\n\t                        25000baseSR/Full\n\t                        50000baseCR2/Full\n\t                        50000baseKR2/Full\n\t                        100000baseKR4/Full\n\t                        100000baseSR4/Full\n\t                        100000baseCR4/Full\n\t                        100000baseLR4_ER4/Full\n\t                        50000baseSR2/Full\n\t                        1000baseX/Full\n\t                        10000baseCR/Full\n\t                        10000baseSR/Full\n\t                        10000baseLR/Full\n\t                        10000baseER/Full\n\t                        50000baseKR/Full\n\t                        50000baseSR/Full\n\t                        50000baseCR/Full\n\t                        50000baseLR_ER_FR/Full\n\t                        50000baseDR/Full\n\t                        100000baseKR2/Full\n\t                        100000baseSR2/Full\n\t                        100000baseCR2/Full\n\t                        100000baseLR2_ER2_FR2/Full\n\t                        100000baseDR2/Full\n\tAdvertised pause frame use: Symmetric\n\tAdvertised auto-negotiation: Yes\n\tAdvertised FEC modes: RS\n\tLink partner advertised link modes:  Not reported\n\tLink partner advertised pause frame use: No\n\tLink partner advertised auto-negotiation: Yes\n\tLink partner advertised FEC modes: Not reported\n\tSpeed: 100000Mb/s\n\tDuplex: Full\n\tAuto-negotiation: on\n\tPort: FIBRE\n\tPHYAD: 0\n\tTransceiver: internal\n\tSupports Wake-on: d\n\tWake-on: d\n        Current message level: 0x00000004 (4)\n                               link\n\tLink detected: yes",
+          "stderr": ""
+        },
+        {
+          "command": [
+            "rpcinfo",
+            "-T",
+            "tcp",
+            "-n",
+            "2049",
+            "10.2.0.12",
+            "100003",
+            "4"
+          ],
+          "rc": 0,
+          "stdout": "program 100003 version 4 ready and waiting",
+          "stderr": ""
+        },
+        {
+          "command": [
+            "stat",
+            "-f",
+            "/cold"
+          ],
+          "rc": 0,
+          "stdout": "File: \"/cold\"\n    ID: 0        Namelen: 255     Type: nfs\nBlock size: 1048576    Fundamental block size: 1048576\nBlocks: Total: 75990947   Free: 57283059   Available: 53468260\nInodes: Total: 1220730880 Free: 1210803555",
+          "stderr": ""
+        }
+      ],
+      "nfs_rpc": "program 100003 version 4 ready and waiting\n",
+      "nfs_stat": "  File: \"/cold\"\n    ID: 0        Namelen: 255     Type: nfs\nBlock size: 1048576    Fundamental block size: 1048576\nBlocks: Total: 75990947   Free: 57283059   Available: 53468260\nInodes: Total: 1220730880 Free: 1210803555\n",
+      "removed_unmapped_rtemap_files": 203
+    },
+    "laojun": {
+      "pf": "ens72np0",
+      "vf_count": 0,
+      "pause": "Pause parameters for ens72np0:\nAutonegotiate:\toff\nRX:\t\ton\nTX:\t\ton\n\n",
+      "link": "Settings for ens72np0:\n\tSupported ports: [ FIBRE ]\n\tSupported link modes:   1000baseT/Full\n\t                        10000baseT/Full\n\t                        1000baseKX/Full\n\t                        10000baseKR/Full\n\t                        10000baseR_FEC\n\t                        40000baseKR4/Full\n\t                        40000baseCR4/Full\n\t                        40000baseSR4/Full\n\t                        40000baseLR4/Full\n\t                        25000baseCR/Full\n\t                        25000baseKR/Full\n\t                        25000baseSR/Full\n\t                        50000baseCR2/Full\n\t                        50000baseKR2/Full\n\t                        100000baseKR4/Full\n\t                        100000baseSR4/Full\n\t                        100000baseCR4/Full\n\t                        100000baseLR4_ER4/Full\n\t                        50000baseSR2/Full\n\t                        1000baseX/Full\n\t                        10000baseCR/Full\n\t                        10000baseSR/Full\n\t                        10000baseLR/Full\n\t                        10000baseER/Full\n\t                        50000baseKR/Full\n\t                        50000baseSR/Full\n\t                        50000baseCR/Full\n\t                        50000baseLR_ER_FR/Full\n\t                        50000baseDR/Full\n\t                        100000baseKR2/Full\n\t                        100000baseSR2/Full\n\t                        100000baseCR2/Full\n\t                        100000baseLR2_ER2_FR2/Full\n\t                        100000baseDR2/Full\n\tSupported pause frame use: Symmetric\n\tSupports auto-negotiation: Yes\n\tSupported FEC modes: None\t RS\t BASER\n\tAdvertised link modes:  1000baseT/Full\n\t                        10000baseT/Full\n\t                        1000baseKX/Full\n\t                        10000baseKR/Full\n\t                        10000baseR_FEC\n\t                        40000baseKR4/Full\n\t                        40000baseCR4/Full\n\t                        40000baseSR4/Full\n\t                        40000baseLR4/Full\n\t                        25000baseCR/Full\n\t                        25000baseKR/Full\n\t                        25000baseSR/Full\n\t                        50000baseCR2/Full\n\t                        50000baseKR2/Full\n\t                        100000baseKR4/Full\n\t                        100000baseSR4/Full\n\t                        100000baseCR4/Full\n\t                        100000baseLR4_ER4/Full\n\t                        50000baseSR2/Full\n\t                        1000baseX/Full\n\t                        10000baseCR/Full\n\t                        10000baseSR/Full\n\t                        10000baseLR/Full\n\t                        10000baseER/Full\n\t                        50000baseKR/Full\n\t                        50000baseSR/Full\n\t                        50000baseCR/Full\n\t                        50000baseLR_ER_FR/Full\n\t                        50000baseDR/Full\n\t                        100000baseKR2/Full\n\t                        100000baseSR2/Full\n\t                        100000baseCR2/Full\n\t                        100000baseLR2_ER2_FR2/Full\n\t                        100000baseDR2/Full\n\tAdvertised pause frame use: Symmetric\n\tAdvertised auto-negotiation: Yes\n\tAdvertised FEC modes: RS\n\tLink partner advertised link modes:  Not reported\n\tLink partner advertised pause frame use: No\n\tLink partner advertised auto-negotiation: Yes\n\tLink partner advertised FEC modes: Not reported\n\tSpeed: 100000Mb/s\n\tDuplex: Full\n\tAuto-negotiation: on\n\tPort: FIBRE\n\tPHYAD: 0\n\tTransceiver: internal\n\tSupports Wake-on: d\n\tWake-on: d\n        Current message level: 0x00000004 (4)\n                               link\n\tLink detected: yes\n",
+      "processes": {
+        "capacity_tx": "",
+        "cpworker": "",
+        "dpdk_primary": "",
+        "pdump_perf": "",
+        "dpdk-testpmd": ""
+      },
+      "runtime_entries": [],
+      "core_entries": [],
+      "temporary_capacity_files": [],
+      "cgroup_exists": false,
+      "hugepages": {
+        "/sys/devices/system/node/node0/hugepages/hugepages-2048kB/nr_hugepages": 4,
+        "/sys/devices/system/node/node1/hugepages/hugepages-2048kB/nr_hugepages": 27,
+        "/sys/devices/system/node/node0/hugepages/hugepages-2048kB/free_hugepages": 4,
+        "/sys/devices/system/node/node1/hugepages/hugepages-2048kB/free_hugepages": 27
+      },
+      "hugepage_files": [
+        "/dev/hugepages/libvirt"
+      ],
+      "steps": [
+        {
+          "command": [
+            "pkill",
+            "-TERM",
+            "-x",
+            "capacity_tx"
+          ],
+          "rc": 1,
+          "stdout": "",
+          "stderr": ""
+        },
+        {
+          "command": [
+            "pkill",
+            "-TERM",
+            "-x",
+            "cpworker"
+          ],
+          "rc": 1,
+          "stdout": "",
+          "stderr": ""
+        },
+        {
+          "command": [
+            "pkill",
+            "-TERM",
+            "-x",
+            "dpdk_primary"
+          ],
+          "rc": 1,
+          "stdout": "",
+          "stderr": ""
+        },
+        {
+          "command": [
+            "pkill",
+            "-TERM",
+            "-x",
+            "pdump_perf"
+          ],
+          "rc": 1,
+          "stdout": "",
+          "stderr": ""
+        },
+        {
+          "command": [
+            "pkill",
+            "-TERM",
+            "-x",
+            "dpdk-testpmd"
+          ],
+          "rc": 1,
+          "stdout": "",
+          "stderr": ""
+        },
+        {
+          "command": [
+            "pkill",
+            "-f",
+            "^python3 /tmp/cpcap-probe.py"
+          ],
+          "rc": 1,
+          "stdout": "",
+          "stderr": ""
+        },
+        {
+          "command": [
+            "ethtool",
+            "-A",
+            "ens72np0",
+            "autoneg",
+            "off",
+            "rx",
+            "on",
+            "tx",
+            "on"
+          ],
+          "rc": 0,
+          "stdout": "",
+          "stderr": ""
+        },
+        {
+          "command": [
+            "sh",
+            "-c",
+            "rm -rf /var/run/dpdk/* /tmp/core.* /tmp/cpcap*"
+          ],
+          "rc": 0,
+          "stdout": "",
+          "stderr": ""
+        },
+        {
+          "command": [
+            "rm",
+            "-f",
+            "/tmp/capacity_tx",
+            "/tmp/capacity_tx.c"
+          ],
+          "rc": 0,
+          "stdout": "",
+          "stderr": ""
+        },
+        {
+          "command": [
+            "ethtool",
+            "-a",
+            "ens72np0"
+          ],
+          "rc": 0,
+          "stdout": "Pause parameters for ens72np0:\nAutonegotiate:\toff\nRX:\t\ton\nTX:\t\ton",
+          "stderr": ""
+        },
+        {
+          "command": [
+            "ethtool",
+            "ens72np0"
+          ],
+          "rc": 0,
+          "stdout": "Settings for ens72np0:\n\tSupported ports: [ FIBRE ]\n\tSupported link modes:   1000baseT/Full\n\t                        10000baseT/Full\n\t                        1000baseKX/Full\n\t                        10000baseKR/Full\n\t                        10000baseR_FEC\n\t                        40000baseKR4/Full\n\t                        40000baseCR4/Full\n\t                        40000baseSR4/Full\n\t                        40000baseLR4/Full\n\t                        25000baseCR/Full\n\t                        25000baseKR/Full\n\t                        25000baseSR/Full\n\t                        50000baseCR2/Full\n\t                        50000baseKR2/Full\n\t                        100000baseKR4/Full\n\t                        100000baseSR4/Full\n\t                        100000baseCR4/Full\n\t                        100000baseLR4_ER4/Full\n\t                        50000baseSR2/Full\n\t                        1000baseX/Full\n\t                        10000baseCR/Full\n\t                        10000baseSR/Full\n\t                        10000baseLR/Full\n\t                        10000baseER/Full\n\t                        50000baseKR/Full\n\t                        50000baseSR/Full\n\t                        50000baseCR/Full\n\t                        50000baseLR_ER_FR/Full\n\t                        50000baseDR/Full\n\t                        100000baseKR2/Full\n\t                        100000baseSR2/Full\n\t                        100000baseCR2/Full\n\t                        100000baseLR2_ER2_FR2/Full\n\t                        100000baseDR2/Full\n\tSupported pause frame use: Symmetric\n\tSupports auto-negotiation: Yes\n\tSupported FEC modes: None\t RS\t BASER\n\tAdvertised link modes:  1000baseT/Full\n\t                        10000baseT/Full\n\t                        1000baseKX/Full\n\t                        10000baseKR/Full\n\t                        10000baseR_FEC\n\t                        40000baseKR4/Full\n\t                        40000baseCR4/Full\n\t                        40000baseSR4/Full\n\t                        40000baseLR4/Full\n\t                        25000baseCR/Full\n\t                        25000baseKR/Full\n\t                        25000baseSR/Full\n\t                        50000baseCR2/Full\n\t                        50000baseKR2/Full\n\t                        100000baseKR4/Full\n\t                        100000baseSR4/Full\n\t                        100000baseCR4/Full\n\t                        100000baseLR4_ER4/Full\n\t                        50000baseSR2/Full\n\t                        1000baseX/Full\n\t                        10000baseCR/Full\n\t                        10000baseSR/Full\n\t                        10000baseLR/Full\n\t                        10000baseER/Full\n\t                        50000baseKR/Full\n\t                        50000baseSR/Full\n\t                        50000baseCR/Full\n\t                        50000baseLR_ER_FR/Full\n\t                        50000baseDR/Full\n\t                        100000baseKR2/Full\n\t                        100000baseSR2/Full\n\t                        100000baseCR2/Full\n\t                        100000baseLR2_ER2_FR2/Full\n\t                        100000baseDR2/Full\n\tAdvertised pause frame use: Symmetric\n\tAdvertised auto-negotiation: Yes\n\tAdvertised FEC modes: RS\n\tLink partner advertised link modes:  Not reported\n\tLink partner advertised pause frame use: No\n\tLink partner advertised auto-negotiation: Yes\n\tLink partner advertised FEC modes: Not reported\n\tSpeed: 100000Mb/s\n\tDuplex: Full\n\tAuto-negotiation: on\n\tPort: FIBRE\n\tPHYAD: 0\n\tTransceiver: internal\n\tSupports Wake-on: d\n\tWake-on: d\n        Current message level: 0x00000004 (4)\n                               link\n\tLink detected: yes",
+          "stderr": ""
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,126 @@
+{
+  "checked_utc": "2026-10-02T01:16:26Z",
+  "raw_lines": 140,
+  "completed_cases": 124,
+  "valid_measurement_cases": 123,
+  "failed_attempts": [
+    {
+      "line": 2,
+      "error": "cat: /tmp/cpcap-series.json: No such file or directory\n"
+    },
+    {
+      "line": 51,
+      "error": "string indices must be integers"
+    },
+    {
+      "line": 52,
+      "error": "string indices must be integers"
+    },
+    {
+      "line": 53,
+      "error": "string indices must be integers"
+    },
+    {
+      "line": 54,
+      "error": "string indices must be integers"
+    },
+    {
+      "line": 55,
+      "error": "string indices must be integers"
+    },
+    {
+      "line": 56,
+      "error": "string indices must be integers"
+    },
+    {
+      "line": 57,
+      "error": "string indices must be integers"
+    },
+    {
+      "line": 58,
+      "error": "string indices must be integers"
+    },
+    {
+      "line": 78,
+      "error": "string indices must be integers"
+    },
+    {
+      "line": 79,
+      "error": "string indices must be integers"
+    },
+    {
+      "line": 80,
+      "error": "string indices must be integers"
+    },
+    {
+      "line": 81,
+      "error": "string indices must be integers"
+    },
+    {
+      "line": 82,
+      "error": "string indices must be integers"
+    },
+    {
+      "line": 83,
+      "error": "string indices must be integers"
+    },
+    {
+      "line": 109,
+      "error": "string indices must be integers"
+    }
+  ],
+  "invalid_active_window_lines": [
+    50
+  ],
+  "physical_budget_excluded_lines": [
+    27,
+    28,
+    29,
+    30,
+    31,
+    32,
+    33,
+    34
+  ],
+  "quota_throttling_evidence_lines": [
+    38,
+    40,
+    41,
+    42,
+    49,
+    50,
+    98,
+    103,
+    104,
+    112,
+    113,
+    114,
+    115,
+    116,
+    117,
+    118,
+    119,
+    120,
+    121,
+    122,
+    123,
+    124,
+    125
+  ],
+  "checks": [
+    "cpu.max/memory.max/swap.max/hugetlb.max on every active sample",
+    "worker in budget cgroup; pdump primary outside; direct primary inside",
+    "memory.current <= memory.max; no memory max/OOM events",
+    "stable PIDs and nonnegative cumulative counter/tick deltas",
+    "rates recomputed from numerator deltas and individual intervals",
+    "worker CPU <= 102% allowing /proc tick resolution",
+    "drained captured packets equal forwarded packets",
+    "only 512 MiB AF_PACKET diagnostics exceed combined mapped/RSS physical budget",
+    "gzip decompression exactly matches uncompressed artifact",
+    "CSV regeneration from gzip exactly matches retained CSV",
+    "Python syntax compilation passed",
+    "paced generator compiled with -O3 -Wall on laojun during each phase",
+    "git diff --check passed"
+  ],
+  "raw_uncompressed_sha256": "98ea690e11d86c188ab41ff2a25644c0a8bd00a34cbd6391d91267c6ae1d1bb0"
+}

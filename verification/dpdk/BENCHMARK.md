@@ -395,3 +395,393 @@ telemetry or durable pcap at true minimum-frame line rate. Bead
 `cloud-probe-rs-9jo` tracks the primary telemetry backend and sustained 100G
 acceptance gates, including parsing, filtering, global rate-limit/counter
 semantics, external-buffer lifetimes and real outputs.
+
+## Capacity under a worker quota of 1 CPU and 512 MiB — 2026-10-01/02
+
+**The answer depends on execution mode.** The supplied unmodified worker, with
+RTC execution and the null output, captured **2.4 Mpps near loss-free through
+AF_PACKET** and **30.0 Mpps near loss-free through pdump**. The latter requires
+an additional primary consuming **4.0 CPU cores**. The daemon actually defaults
+to **pipeline** execution with an empty CPU affinity; that configuration passed
+**7.5 kpps with zero measured loss**, but lost **5.12% at 10 kpps**. Pinning its
+threads to one CPU raised its zero-loss result to **1.4 Mpps**, followed by a
+collapse at 1.6 Mpps. This is an execution-path defect, not a CPU/RAM capacity
+limit. No production code or supplied binaries were changed for these tests.
+
+“Near loss-free” here means **≤0.1% missing packets over a complete short burst**,
+including drain. Zero loss means no missing packets in that measurement; neither
+is an endurance guarantee. Original outliers and repeats are retained below.
+
+### Budget, workload and counter windows
+
+Each cpworker started *inside* cgroup v2 `/cprs-capacity`, before exec, with
+`cpu.max = 100000 100000`, `memory.max = 536870912`, `memory.swap.max = 0`, and
+`hugetlb.2MB.max = 536870912`. All its internal threads inherited the group.
+The pdump primary was outside it, with four RX queues/workers on CPUs 33–36 and
+a master on CPU 32. RTC AF_PACKET used an allowed mask of 48–49; pdump's EAL
+subsequently pinned the capture thread to CPU 48. A two-CPU mask did not grant
+two CPUs of quota. The primary-only reference used one queue/lcore 32 **inside
+the same budget**. Quota, membership, process ticks, cgroup throttling and
+memory gauges were sampled in every successful run.
+
+Workload: four paced TX lcores on laojun, short serialized bursts, constant
+nominal 64-byte UDP frames, varying flow ports for RSS, no BPF/rate limiter,
+snaplen 2048, one task, null output. The generator passes 64 bytes to the PMD;
+physical frames include four additional FCS bytes, so these are **68-byte
+frames including FCS**, matching the earlier `--txpkts=64` testbed convention.
+The custom [generator](capacity_tx.c) replaces coarse, bursty VF hardware rate
+shaping; rates in the tables are measurements rather than requested rates.
+
+All NIC, cpctl `sample:raw`, primary RX/pdump, `/proc/PID/stat`, and `cpu.stat`
+values in the raw artifact are **cumulative counters**, not per-second samples.
+Table Mpps are differences divided by each counter's own interval: physical
+laojun `tx_packets_phy` is offered; yinjiao `rx_packets_phy` is wire; cpctl
+`cap_packets` is captured. CPU is `(Δutime + Δstime) / CLK_TCK / Δt`, with 100%
+meaning one CPU. cpctl was invoked as `cpctl -u /tmp/cpcap.sock -W 3s -f jsonl
+stats -n 1`; its returned `ts` supplies the capture interval. Timed local
+samplers used a nominal five-second active window, with separate NIC, proc,
+cgroup and primary timestamps. Occasional CPU readings just above 100% reflect
+tick/window resolution, not a changed quota.
+
+Pipeline stats RPCs were starved under traffic. Those cases used **quiet
+pre/post cumulative cpctl snapshots**, a fixed **14-second complete burst**,
+and up to 30 seconds for the final stats RPC. Their captured/drop Mpps divide
+whole-burst deltas by 14 seconds and include buffered drain. Their offered,
+wire and CPU columns remain approximately five-second active measurements;
+these windows must not be treated as simultaneous. The actual longer quiet
+counter interval is also preserved. All completed pipeline runs drained to
+captured = forwarded. Failed RPC cases are retained and excluded from tables.
+
+Burst loss uses generated accepted TX total versus drained capture count;
+small unrelated VF packets can make the measured deficit zero. The CSV also
+contains physical whole-burst TX/wire deltas, raw line numbers, numerator
+packet/tick deltas, every interval and forwarding totals. Different windows,
+pre-VF losses and incomplete driver counters prevent exact conservation of
+all displayed rates. `memory.current` is a gauge; memory/events/throttling
+and drop values in the raw snapshots are cumulative.
+
+### AF_PACKET / TPACKET_V3, RTC execution
+
+The worker used about 10–12% of one CPU at its knee/plateau, with **no quota
+throttling**. Loss at overload is predominantly before the socket, visible in
+VF out-of-buffer counters; worker socket drop counters remained zero.
+The host consumed about **11 aggregate softirq CPU cores** at heavy loads,
+outside the worker cgroup. Increasing the socket ring did not raise sustained
+capture above approximately 2.5 Mpps. This implicates the kernel/NAPI/NIC
+receive path, rather than worker CPU or RAM; the precise kernel/driver substage
+was not profiled.
+
+Mapped RSS was 13.4–13.6 MiB for the 8 MiB ring, 133.8–134.2 for 128,
+261.7–261.9 for 256, and **517.3–517.5 for 512**. The cgroup charged only
+approximately 4–5 MiB: this kernel's AF_PACKET ring allocation bypasses its
+memory accounting. Consequently **512 MiB ring results are diagnostics and
+are excluded from a strict physical 512 MiB ceiling**. A 496 MiB ring fit
+(501.8 MiB RSS) and still captured only 2.516 Mpps at 119.8 Mpps offered.
+A ring set to the entire memory limit leaves no process overhead allowance.
+
+#### Fixed policy: 8 MiB
+
+| Raw line | Offered Mpps | Wire Mpps | Captured Mpps | Worker CPU % | Socket drop Mpps | VF out-of-buffer Mpps | Burst loss % |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 3 | 0.999 | 1.000 | 1.000 | 5.0 | 0.000 | 0.000 | 0.0000 |
+| 5 | 1.998 | 2.000 | 2.000 | 12.4 | 0.000 | 0.000 | 0.0043 |
+| 4 | 5.000 | 5.000 | 2.494 | 12.2 | 0.000 | 2.505 | 50.1130 |
+| 6 | 9.992 | 10.001 | 2.511 | 11.8 | 0.000 | 7.490 | 74.9825 |
+| 7 | 20.000 | 20.001 | 2.457 | 11.6 | 0.000 | 17.543 | 87.7309 |
+| 8 | 39.941 | 39.979 | 2.505 | 12.4 | 0.000 | 37.482 | 93.7359 |
+| 9 | 79.805 | 79.909 | 2.487 | 11.6 | 0.000 | 71.622 | 96.8950 |
+| 10 | 119.681 | 119.797 | 2.505 | 11.8 | 0.000 | 72.585 | 97.9138 |
+
+#### 128 MiB design buffer-size comparison
+
+| Raw line | Offered Mpps | Wire Mpps | Captured Mpps | Worker CPU % | Socket drop Mpps | VF out-of-buffer Mpps | Burst loss % |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 11 | 1.000 | 1.000 | 1.000 | 5.0 | 0.000 | 0.000 | 0.0000 |
+| 12 | 1.998 | 2.000 | 2.000 | 9.6 | 0.000 | 0.000 | 0.0000 |
+| 13 | 4.995 | 5.001 | 2.491 | 11.6 | 0.000 | 2.507 | 50.2468 |
+| 14 | 9.990 | 10.000 | 2.507 | 12.0 | 0.000 | 7.491 | 74.9359 |
+| 15 | 19.978 | 19.997 | 2.509 | 11.8 | 0.000 | 17.487 | 87.4488 |
+| 16 | 39.995 | 39.987 | 2.511 | 11.6 | 0.000 | 37.475 | 93.7062 |
+| 17 | 79.875 | 79.864 | 2.513 | 11.6 | 0.000 | 71.518 | 96.8462 |
+| 18 | 119.718 | 119.832 | 2.468 | 11.2 | 0.000 | 72.180 | 97.9416 |
+
+#### Rust worker default: 256 MiB
+
+| Raw line | Offered Mpps | Wire Mpps | Captured Mpps | Worker CPU % | Socket drop Mpps | VF out-of-buffer Mpps | Burst loss % |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 19 | 0.993 | 1.000 | 1.000 | 4.8 | 0.000 | 0.000 | 0.0000 |
+| 20 | 1.998 | 2.000 | 2.000 | 9.0 | 0.000 | 0.000 | 0.0077 |
+| 21 | 5.001 | 5.001 | 2.511 | 11.8 | 0.000 | 2.489 | 49.9414 |
+| 22 | 9.991 | 9.999 | 2.487 | 11.8 | 0.000 | 7.511 | 75.0673 |
+| 23 | 19.999 | 19.998 | 2.549 | 12.0 | 0.000 | 17.449 | 87.2677 |
+| 24 | 39.980 | 39.981 | 2.520 | 11.4 | 0.000 | 37.455 | 93.7082 |
+| 25 | 79.810 | 79.890 | 2.503 | 11.4 | 0.000 | 71.514 | 96.8700 |
+| 26 | 119.836 | 119.845 | 2.505 | 11.6 | 0.000 | 72.380 | 97.9076 |
+
+#### Auto policy, one task: 512 MiB — exceeds physical budget
+
+| Raw line | Offered Mpps | Wire Mpps | Captured Mpps | Worker CPU % | Socket drop Mpps | VF out-of-buffer Mpps | Burst loss % |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 27 | 0.999 | 1.000 | 1.000 | 5.0 | 0.000 | 0.000 | 0.0000 |
+| 28 | 2.000 | 2.000 | 2.000 | 9.4 | 0.000 | 0.000 | 0.0000 |
+| 29 | 4.996 | 5.003 | 2.586 | 11.6 | 0.000 | 2.416 | 48.4117 |
+| 30 | 9.992 | 10.000 | 2.464 | 11.2 | 0.000 | 7.535 | 75.3494 |
+| 31 | 20.001 | 19.996 | 2.580 | 11.8 | 0.000 | 17.415 | 87.0909 |
+| 32 | 39.946 | 39.987 | 2.472 | 11.2 | 0.000 | 37.515 | 93.8158 |
+| 33 | 79.806 | 79.852 | 2.484 | 11.4 | 0.000 | 71.663 | 96.8912 |
+| 34 | 119.666 | 119.807 | 2.495 | 11.6 | 0.000 | 72.511 | 97.9161 |
+
+Fine sweep and confirmation (highest passing *tested* points: 8 MiB at 2.4,
+128 MiB at 2.3, 256 MiB at 2.3 Mpps; 128/256 were not separately tested at 2.4):
+
+| Ring MiB | Raw line | Offered Mpps | Wire Mpps | Captured Mpps | Worker CPU % | Socket drop Mpps | VF out-of-buffer Mpps | Burst loss % |
+| ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 8 | 88 | 2.200 | 2.200 | 2.200 | 9.6 | 0.000 | 0.000 | 0.0077 |
+| 8 | 89 | 2.300 | 2.300 | 2.299 | 10.0 | 0.000 | 0.001 | 0.0202 |
+| 8 | 90 | 2.401 | 2.400 | 2.400 | 10.6 | 0.000 | 0.000 | 0.0000 |
+| 8 | 91 | 2.500 | 2.500 | 2.498 | 11.0 | 0.000 | 0.003 | 0.1216 |
+| 128 | 92 | 2.300 | 2.300 | 2.300 | 10.6 | 0.000 | 0.000 | 0.0000 |
+| 256 | 93 | 2.299 | 2.300 | 2.299 | 11.2 | 0.000 | 0.001 | 0.0223 |
+| 496 | 94 | 119.799 | 119.829 | 2.516 | 11.2 | 0.000 | 73.128 | 97.8999 |
+| 8 | 126 | 2.400 | 2.400 | 2.399 | 10.6 | 0.000 | 0.001 | 0.0463 |
+
+The 8 MiB ring passed one 2.4 Mpps run with zero loss and a repeat with
+0.0463% loss; at 2.5 Mpps, loss rose to 0.1216%. Thus the measured near-loss-free
+boundary is **2.4 Mpps**, with a knee around **2.5 Mpps**. Larger rings mostly
+buy buffering time, not kernel receive throughput.
+
+### DPDK pdump, one RTC consumer
+
+The separate primary used approximately 4.0 CPU cores at every load. Before
+secondary attachment it mapped **130 MiB of hugepages + 13.5 MiB normal RSS**.
+With the 65,536-entry ring / 131,072-clone pool, the shared mapping grew to
+**448 MiB** (about 318 MiB additional hugepages); primary and worker map those
+same physical pages, so do not add their shared RSS twice. Including *all*
+shared pages, even the primary RX pool, worker RSS + hugetlb was **461.3–461.8
+MiB**, conservatively within 512. The 2,048 ring / 4,096-clone pool used
+153.3–153.7 MiB on the same measure. Both retain snaplen 2048.
+
+The secondary's `memory.current` was only 9–10 MiB and `hugetlb.2MB.current`
+was zero: shared allocations are charged to the primary. The memory controller
+alone therefore does not enforce a combined physical worker budget; pool sizing
+and measured total mappings establish the bound here. No memory max/OOM event
+occurred. Worker CPU approached 100%; overload runs showed quota throttling
+(e.g. 40 of 50 periods for the large-ring 40 Mpps repeat), even though the
+throttled durations were short for a single polling thread. The one consumer's
+CPU and pdump copying/enqueue/dequeue work set the ceiling. Larger rings/pools
+improve batching and tolerate scheduling gaps, with much greater RAM use.
+
+`cpctl.drop_packets` and VF out-of-buffer rates were zero in these RTC runs;
+pdump `nombuf` was zero. **Primary `ringfull` is the actual clone delivery drop
+counter**; cpctl zero drops do not imply loss-free capture. Primary `imissed`
+describes an earlier receive loss stage, and does not account for every frame
+missing between physical wire and primary RX. Primary RX/accepted/ringfull
+cumulative counters are preserved in the raw artifact.
+
+#### 2,048-entry ring
+
+| Raw line | Offered Mpps | Wire Mpps | Captured Mpps | Worker CPU % | Primary CPU cores | Pdump ring-full Mpps | Primary imissed Mpps | Burst loss % |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 35 | 0.999 | 1.000 | 1.000 | 6.2 | 4.00 | 0.000 | 0.000 | 0.0000 |
+| 36 | 1.997 | 2.000 | 2.000 | 10.4 | 4.00 | 0.000 | 0.000 | 0.0000 |
+| 37 | 5.001 | 5.000 | 5.000 | 22.4 | 4.00 | 0.000 | 0.000 | 0.0000 |
+| 38 | 10.000 | 10.000 | 8.662 | 99.5 | 4.00 | 1.334 | 0.000 | 13.5138 |
+| 39 | 20.001 | 20.001 | 19.998 | 87.6 | 4.00 | 0.001 | 0.000 | 0.0049 |
+| 40 | 40.000 | 39.994 | 21.595 | 100.0 | 4.00 | 18.401 | 0.009 | 46.2225 |
+| 41 | 79.738 | 79.851 | 22.661 | 100.0 | 4.00 | 41.334 | 4.511 | 71.8178 |
+| 42 | 119.954 | 119.828 | 22.839 | 99.9 | 4.00 | 43.711 | 3.596 | 80.9385 |
+
+#### 65,536-entry ring
+
+| Raw line | Offered Mpps | Wire Mpps | Captured Mpps | Worker CPU % | Primary CPU cores | Pdump ring-full Mpps | Primary imissed Mpps | Burst loss % |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 43 | 1.000 | 1.000 | 1.000 | 6.4 | 4.00 | 0.000 | 0.000 | 0.0000 |
+| 44 | 1.998 | 2.000 | 2.000 | 10.6 | 4.01 | 0.000 | 0.000 | 0.0000 |
+| 45 | 5.000 | 5.000 | 5.000 | 23.6 | 4.00 | 0.000 | 0.000 | 0.0000 |
+| 46 | 9.992 | 9.998 | 9.999 | 60.7 | 4.01 | 0.000 | 0.000 | 0.0000 |
+| 47 | 19.977 | 19.998 | 19.878 | 91.9 | 4.00 | 0.118 | 0.000 | 1.3251 |
+| 48 | 39.977 | 39.976 | 27.082 | 100.0 | 4.00 | 12.899 | 0.022 | 32.4685 |
+| 49 | 79.872 | 79.863 | 26.866 | 100.0 | 4.00 | 41.005 | 2.557 | 66.5408 |
+| 104 | 119.823 | 119.820 | 30.574 | 100.0 | 4.00 | 44.283 | 1.025 | 74.5412 |
+
+Original low-load outliers are visible above: the 2,048 ring lost 13.5% at
+10 Mpps, despite later passing 20; the 65,536 ring initially lost 1.33% at 20.
+Repeated runs recovered, but this variability limits a guaranteed production
+claim. One initial 65,536-ring 120 Mpps case sampled TX after auto-stop
+(47.933 offered versus 119.779 wire); it is retained with `sampling_valid=False`
+and excluded. The repeated, valid 120 Mpps row is used above.
+
+Repeated knee/overload measurements:
+
+| Ring entries | Raw line | Offered Mpps | Wire Mpps | Captured Mpps | Worker CPU % | Primary CPU cores | Pdump ring-full Mpps | Primary imissed Mpps | Burst loss % |
+| ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 2048 | 95 | 10.001 | 9.999 | 9.999 | 42.6 | 4.00 | 0.000 | 0.000 | 0.0000 |
+| 2048 | 96 | 10.000 | 9.998 | 9.997 | 42.8 | 4.01 | 0.000 | 0.000 | 0.0086 |
+| 2048 | 97 | 20.006 | 19.999 | 19.998 | 85.6 | 4.00 | 0.000 | 0.000 | 0.0029 |
+| 2048 | 98 | 24.993 | 24.994 | 23.445 | 100.0 | 4.00 | 1.546 | 0.000 | 6.2124 |
+| 65536 | 99 | 15.000 | 14.999 | 14.998 | 66.2 | 4.00 | 0.000 | 0.000 | 0.0000 |
+| 65536 | 100 | 18.006 | 17.999 | 17.999 | 77.0 | 4.00 | 0.000 | 0.000 | 0.0000 |
+| 65536 | 101 | 19.999 | 19.998 | 19.997 | 85.2 | 4.00 | 0.000 | 0.000 | 0.0000 |
+| 65536 | 102 | 25.005 | 24.994 | 24.996 | 100.1 | 4.00 | 0.000 | 0.000 | 0.0000 |
+| 65536 | 103 | 39.987 | 39.992 | 30.040 | 100.0 | 4.00 | 9.979 | 0.000 | 24.9959 |
+| 65536 | 104 | 119.823 | 119.820 | 30.574 | 100.0 | 4.00 | 44.283 | 1.025 | 74.5412 |
+| 65536 | 127 | 27.997 | 27.992 | 27.991 | 100.0 | 4.00 | 0.000 | 0.000 | 0.0000 |
+| 65536 | 128 | 29.997 | 29.998 | 29.997 | 99.9 | 4.00 | 0.011 | 0.000 | 0.0210 |
+| 65536 | 129 | 31.992 | 31.991 | 27.593 | 100.0 | 4.00 | 4.397 | 0.000 | 13.8699 |
+
+The small ring passed **20 Mpps with 0.00285% loss**, failed at 25, and peaked
+at 23.445 captured Mpps. The large ring passed **28 Mpps with zero measured
+loss** and **30 Mpps with 0.02096% loss**; 32 Mpps lost 13.87%. Its highest
+observed delivered rate was **30.574 Mpps** at 119.8 Mpps offered. That run's
+primary received 74.883 Mpps, with 44.283 Mpps ring-full drops: the primary
+could feed considerably more traffic than this budgeted consumer could drain.
+
+### Actual daemon default: pipeline + fixed 8 MiB NIC buffer
+
+[Daemon defaults](../../crates/cpdaemon/src/config.rs) select pipeline and empty
+CPU affinity. Its policy assigns 504 MiB to the *maximum* in-flight pipeline
+allocation (512 minus the 8 MiB NIC buffer), lazily allocated. With the factory
+CPU mask, actual mapped RSS was only 13.6–15.3 MiB in these tests; CPU and
+memory quotas did not bind. The first observed loss is between **7.5 and
+10 kpps**, not millions of packets per second. These captured/drop rates use
+the whole-14-second convention described above.
+
+| Raw line | Offered Mpps | Wire Mpps | Captured Mpps | Worker CPU % | Socket drop Mpps | Burst loss % |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| 138 | 0.001997 | 0.001997 | 0.002002 | 4.4 | 0.000000 | 0.0000 |
+| 139 | 0.004992 | 0.004991 | 0.005001 | 5.8 | 0.000000 | 0.0000 |
+| 140 | 0.007499 | 0.007501 | 0.007506 | 8.0 | 0.000000 | 0.0000 |
+| 135 | 0.010009 | 0.009982 | 0.009490 | 10.0 | 0.000512 | 5.1188 |
+| 136 | 0.014998 | 0.015005 | 0.013009 | 13.0 | 0.001995 | 13.2955 |
+| 137 | 0.019986 | 0.019990 | 0.015112 | 13.2 | 0.004893 | 24.4573 |
+| 130 | 0.049993 | 0.050004 | 0.011753 | 11.2 | 0.038249 | 76.4952 |
+| 131 | 0.250026 | 0.249997 | 0.013729 | 12.4 | 0.236273 | 94.5083 |
+| 132 | 0.500077 | 0.500008 | 0.017102 | 12.8 | 0.482880 | 96.5794 |
+| 133 | 1.000185 | 1.000049 | 0.015912 | 12.4 | 0.984088 | 98.4088 |
+
+Affinity sensitivity, with the **same total quota of one CPU**, demonstrates
+that the execution path dominates. Single-CPU pinned pipeline passed 1.4 Mpps
+with zero loss and 71.8% CPU, then collapsed at 1.6 Mpps. An allowed mask of
+48–49 passed only 10 kpps before losing at 20 kpps. Neither behavior is a
+monotonic CPU saturation curve. Selected comparisons:
+
+| Allowed CPUs | Raw line | Offered Mpps | Wire Mpps | Captured Mpps | Worker CPU % | Socket drop Mpps | VF out-of-buffer Mpps | Burst loss % |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 48-49 | 65 | 1.000086 | 1.000062 | 0.091202 | 28.6 | 0.909 | 0.000 | 90.8798 |
+| 48-49 | 66 | 2.000168 | 2.001491 | 0.173544 | 17.4 | 1.826 | 0.000 | 91.3228 |
+| 48-49 | 67 | 5.004595 | 5.000914 | 0.354340 | 13.4 | 4.181 | 0.324 | 92.9129 |
+| 48-49 | 68 | 9.999616 | 9.999190 | 0.111600 | 8.0 | 5.256 | 4.573 | 98.8839 |
+| 48-49 | 69 | 20.020757 | 19.998906 | 0.115696 | 7.8 | 5.313 | 14.483 | 99.4214 |
+| 48-49 | 70 | 39.984705 | 39.980334 | 0.084980 | 7.6 | 5.377 | 34.443 | 99.7874 |
+| 48-49 | 71 | 79.899265 | 79.905020 | 0.087028 | 7.6 | 5.369 | 71.930 | 99.8911 |
+| 48-49 | 72 | 119.799457 | 119.794300 | 0.086516 | 7.6 | 5.374 | 72.365 | 99.9278 |
+| 48 | 75 | 1.000116 | 1.000167 | 1.000000 | 62.2 | 0.000 | 0.000 | 0.0000 |
+| 48 | 76 | 1.999981 | 2.001164 | 0.039930 | 13.8 | 1.960 | 0.000 | 98.0035 |
+| 48-49 | 105 | 0.019993 | 0.019988 | 0.016448 | 14.0 | 0.004 | 0.000 | 17.7788 |
+| 48-49 | 106 | 0.029999 | 0.029997 | 0.017179 | 13.6 | 0.013 | 0.000 | 42.7488 |
+| 48-49 | 107 | 0.010007 | 0.009981 | 0.010002 | 9.2 | 0.000 | 0.000 | 0.0000 |
+| 48 | 108 | 1.199891 | 1.200018 | 1.199945 | 61.2 | 0.000 | 0.000 | 0.0000 |
+| 48 | 110 | 1.599842 | 1.600106 | 0.045747 | 5.8 | 1.554 | 0.000 | 97.1406 |
+| 48 | 111 | 1.000960 | 1.000359 | 0.999982 | 55.2 | 0.000 | 0.000 | 0.0000 |
+| 48 | 134 | 1.400225 | 1.400094 | 1.400009 | 71.8 | 0.000 | 0.000 | 0.0000 |
+
+A pdump pipeline check with a 16,384-entry ring and 228–240 MiB mapped memory
+also collapsed, although its primary kept receiving. Pipeline can dominate
+the backend's otherwise much higher capacity:
+
+| Raw line | Offered Mpps | Wire Mpps | Captured Mpps | Worker CPU % | Primary CPU cores | Pdump ring-full Mpps | Primary imissed Mpps | Burst loss % |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 84 | 1.000083 | 0.999965 | 0.019245 | 6.8 | 4.01 | 0.986 | 0.000 | 98.0754 |
+| 85 | 5.001152 | 5.000312 | 0.018503 | 6.8 | 4.00 | 4.998 | 0.000 | 99.6299 |
+| 86 | 20.004485 | 19.998754 | 0.015214 | 6.8 | 4.00 | 19.996 | 0.000 | 99.9239 |
+| 87 | 119.648259 | 119.641194 | 0.021650 | 7.2 | 4.00 | 92.469 | 0.001 | 99.9819 |
+
+Source inspection identifies a plausible mechanism: in
+[the output loop](../../crates/cpworker/src/task.rs), `match ring.lock().pop()`
+keeps its temporary mutex guard through packet dispatch and the empty-queue
+10 µs sleep. The capture producer competes for that lock. Separately, the
+[capture loop](../../crates/cpworker/src/main.rs) holds the task manager lock
+across 256 capture iterations, starving control snapshots when an iteration
+blocks. Affinity results support synchronization/scheduling as the constraint;
+there was no patch-and-remeasure causal experiment in this task. Bead
+`cloud-probe-rs-mwf` tracks fixing and validating it. Failed live stats and
+128/256 MiB pipeline quiet-stats attempts remain diagnostic data; they do not
+establish capacity for those pipeline configurations.
+
+### One queue / one lcore references, same 1 CPU + 512 MiB budget
+
+These cases have **no cpworker**; the constrained primary's cumulative RX JSON
+is the receive/capture counter, and its `/proc/PID/stat` supplies CPU. Standard
+RX plateaued at **33.792 Mpps**; the configured single-queue MPRQ variant
+reached **39.612 Mpps**, with loss already at 40 offered. Standard in-primary
+pcap writing to `/dev/null` reached **20.394 Mpps**. That path formats packet
+headers, takes one timestamp per burst, and uses buffered `fwrite` for headers
+and payload; it does more work than a null cpworker sink. The MPRQ pcap variant
+was slower (maximum 15.146 Mpps). Both ran at approximately one CPU and used
+less than 150 MiB RSS + hugepages, with observed quota throttling.
+
+MPRQ devargs: `mprq_en=1,rxqs_min_mprq=1,mprq_max_memcpy_len=0,`
+`mprq_log_stride_num=6,mprq_log_stride_size=8`; descriptor count 4096,
+primary mbuf pool 32768. MPRQ was configured here; external-buffer behavior was
+not separately verified during this budget experiment.
+
+| Mode | Raw line | Offered Mpps | Wire Mpps | RX / captured Mpps | Primary CPU cores | Primary imissed Mpps | RSS + huge MiB | Burst loss % |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Standard RX | 112 | 19.997 | 19.998 | 19.995 | 1.000 | 0.001 | 143.5 | 0.0084 |
+| Standard RX | 113 | 39.988 | 39.980 | 33.792 | 1.000 | 0.009 | 143.5 | 15.5264 |
+| Standard RX | 114 | 79.874 | 79.917 | 33.477 | 1.000 | 0.012 | 143.3 | 58.0600 |
+| Standard RX | 115 | 119.963 | 119.846 | 33.559 | 1.000 | 0.011 | 143.4 | 71.9809 |
+| Standard pcap /dev/null | 116 | 10.001 | 10.001 | 10.000 | 0.998 | 0.000 | 143.4 | 0.0000 |
+| Standard pcap /dev/null | 117 | 19.999 | 19.998 | 19.974 | 1.002 | 0.024 | 143.4 | 0.1355 |
+| Standard pcap /dev/null | 118 | 40.023 | 39.990 | 20.394 | 0.999 | 13.308 | 143.4 | 48.9922 |
+| Standard pcap /dev/null | 119 | 119.784 | 119.782 | 20.177 | 1.002 | 13.799 | 143.4 | 83.1636 |
+| MPRQ RX | 120 | 39.993 | 39.995 | 39.612 | 0.998 | 0.375 | 149.4 | 1.0190 |
+| MPRQ RX | 121 | 79.953 | 79.886 | 38.739 | 1.000 | 7.603 | 149.5 | 51.3748 |
+| MPRQ RX | 122 | 119.854 | 119.823 | 38.779 | 1.000 | 8.357 | 149.4 | 67.6068 |
+| MPRQ pcap /dev/null | 123 | 20.000 | 20.002 | 15.033 | 1.000 | 4.967 | 149.4 | 24.7880 |
+| MPRQ pcap /dev/null | 124 | 40.000 | 39.991 | 13.268 | 0.998 | 26.723 | 149.5 | 66.8243 |
+| MPRQ pcap /dev/null | 125 | 119.848 | 119.840 | 15.146 | 1.000 | 29.836 | 149.5 | 87.3373 |
+
+### Interpretation, artifacts and handoff
+
+The **worker's one-core quota** is a real ceiling for the pdump consumer;
+the separate primary adds four cores and shared hugepages outside that quota.
+The **AF_PACKET kernel path** binds well before worker CPU, using significant
+host softirq/NAPI CPU outside the group. **512 MiB does not bind** the valid
+8/128/256 MiB RTC AF_PACKET runs, or either statically sized RTC pdump pool;
+assigning all 512 MiB to the socket ring violates the physical budget despite
+passing the memory controller. Pipeline's **synchronization/scheduling defect**
+overrides all those backend limits in the daemon default. Bead
+`cloud-probe-rs-rbn` tracks overhead reservation and shared/kernel memory
+accounting. These are short-burst laboratory bounds on this host/binary, not
+sustained telemetry/pcap or a portable maximum for arbitrary packet sizes.
+
+**Default recommendation:** use `execution_model=rtc` with
+`fixed_nic_buffer=8 MiB` for the 1 CPU/512 MiB product tier, admit about **2 Mpps**
+for operational margin, and fix/requalify pipeline before retaining it as the
+default; reserve process overhead when implementing auto buffer sizing.
+
+Full evidence: [CSV with counter deltas and intervals](capacity-2026-10-01.csv),
+[raw cumulative snapshots](capacity-2026-10-01.csv) (the 5.5 MiB `capacity-2026-10-01.jsonl.gz` is a lab-local artifact and is not committed),
+[environment and binary hashes](capacity-environment.json),
+[rejected calibration / run diagnostics](capacity-diagnostics.tar.gz),
+[phase case inputs](capacity-cases.json), and
+[restoration audit](capacity-restoration.json) and
+[validation results](capacity-validation.json).
+[Harness](capacity_capture.py), [remote sampler](capacity_probe.py) and
+[report calculator](capacity_report.py) reuse `perf_capture.py` setup/restore.
+To replay a phase, extract its list from `capacity-cases.json` into a cases JSON,
+then run `python3 capacity_capture.py CASES_JSON OUTPUT_JSONL` from this directory.
+The harness needs the same supplied binaries and exclusive lab access.
+Recalculate with `python3 capacity_report.py capacity-2026-10-01.jsonl.gz OUT.csv` (needs the lab-local raw file).
+
+Both hosts were audited after the last burst: **VFs 0, PAUSE RX/TX on, 100G links
+up, no capture/generator/primary processes, `/var/run/dpdk` and core dumps
+clean**, temporary benchmark files/cgroup removed. Unmapped DPDK `rtemap`
+files were removed after checking for open users. Yinjiao retained its original
+628/396 node hugepages, all 1024 pages free; laojun's hugepage counts were
+unchanged. NFS RPC and an NFS `statfs` request succeeded after restoration,
+as they did during testing. Python syntax, raw-counter/budget consistency and
+CSV regeneration were validated; `git diff --check` passed. No commit, push,
+branch switch or production source edit was performed. The observed branch
+remained `main`, with HEAD recorded in the environment artifact.

@@ -24,3 +24,6 @@ mutants.out.old/
 .beads-credential-key
 .beads/proxieddb/
 *.gate.lock*
+
+# Lab-local raw capacity snapshots (multi-MiB; regenerate with capacity_capture.py)
+verification/dpdk/capacity-*.jsonl.gz

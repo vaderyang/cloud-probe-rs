@@ -1,0 +1,941 @@
+{
+  "calibration": [
+    {
+      "backend": "af_packet",
+      "ring_mb": 8,
+      "target_mpps": 1
+    },
+    {
+      "backend": "af_packet",
+      "ring_mb": 128,
+      "target_mpps": 1
+    },
+    {
+      "backend": "af_packet",
+      "ring_mb": 256,
+      "target_mpps": 1
+    },
+    {
+      "backend": "af_packet",
+      "ring_mb": 512,
+      "target_mpps": 1
+    },
+    {
+      "backend": "dpdk_pdump",
+      "ring": 65536,
+      "target_mpps": 1
+    }
+  ],
+  "confirm": [
+    {
+      "backend": "af_packet",
+      "ring_mb": 8,
+      "target_mpps": 2.4,
+      "label": "confirm-knee"
+    },
+    {
+      "backend": "dpdk_pdump",
+      "ring": 65536,
+      "target_mpps": 28,
+      "label": "confirm-knee"
+    },
+    {
+      "backend": "dpdk_pdump",
+      "ring": 65536,
+      "target_mpps": 30,
+      "label": "confirm-knee"
+    },
+    {
+      "backend": "dpdk_pdump",
+      "ring": 65536,
+      "target_mpps": 32,
+      "label": "confirm-knee"
+    },
+    {
+      "backend": "af_packet",
+      "ring_mb": 8,
+      "pipeline": 504,
+      "affinity": "",
+      "burst_capture": true,
+      "label": "factory-affinity-pipeline",
+      "target_mpps": 0.05
+    },
+    {
+      "backend": "af_packet",
+      "ring_mb": 8,
+      "pipeline": 504,
+      "affinity": "",
+      "burst_capture": true,
+      "label": "factory-affinity-pipeline",
+      "target_mpps": 0.25
+    },
+    {
+      "backend": "af_packet",
+      "ring_mb": 8,
+      "pipeline": 504,
+      "affinity": "",
+      "burst_capture": true,
+      "label": "factory-affinity-pipeline",
+      "target_mpps": 0.5
+    },
+    {
+      "backend": "af_packet",
+      "ring_mb": 8,
+      "pipeline": 504,
+      "affinity": "",
+      "burst_capture": true,
+      "label": "factory-affinity-pipeline",
+      "target_mpps": 1
+    },
+    {
+      "backend": "af_packet",
+      "ring_mb": 8,
+      "pipeline": 504,
+      "affinity": "48",
+      "burst_capture": true,
+      "label": "confirm-single-cpu-knee",
+      "target_mpps": 1.4
+    }
+  ],
+  "factory-knee": [
+    {
+      "backend": "af_packet",
+      "ring_mb": 8,
+      "pipeline": 504,
+      "affinity": "",
+      "burst_capture": true,
+      "label": "factory-affinity-knee",
+      "target_mpps": 0.01
+    },
+    {
+      "backend": "af_packet",
+      "ring_mb": 8,
+      "pipeline": 504,
+      "affinity": "",
+      "burst_capture": true,
+      "label": "factory-affinity-knee",
+      "target_mpps": 0.015
+    },
+    {
+      "backend": "af_packet",
+      "ring_mb": 8,
+      "pipeline": 504,
+      "affinity": "",
+      "burst_capture": true,
+      "label": "factory-affinity-knee",
+      "target_mpps": 0.02
+    },
+    {
+      "backend": "af_packet",
+      "ring_mb": 8,
+      "pipeline": 504,
+      "affinity": "",
+      "burst_capture": true,
+      "label": "factory-affinity-low-knee",
+      "target_mpps": 0.002
+    },
+    {
+      "backend": "af_packet",
+      "ring_mb": 8,
+      "pipeline": 504,
+      "affinity": "",
+      "burst_capture": true,
+      "label": "factory-affinity-low-knee",
+      "target_mpps": 0.005
+    },
+    {
+      "backend": "af_packet",
+      "ring_mb": 8,
+      "pipeline": 504,
+      "affinity": "",
+      "burst_capture": true,
+      "label": "factory-affinity-low-knee",
+      "target_mpps": 0.0075
+    }
+  ],
+  "final": [
+    {
+      "backend": "af_packet",
+      "ring_mb": 8,
+      "target_mpps": 2.2,
+      "label": "knee"
+    },
+    {
+      "backend": "af_packet",
+      "ring_mb": 8,
+      "target_mpps": 2.3,
+      "label": "knee"
+    },
+    {
+      "backend": "af_packet",
+      "ring_mb": 8,
+      "target_mpps": 2.4,
+      "label": "knee"
+    },
+    {
+      "backend": "af_packet",
+      "ring_mb": 8,
+      "target_mpps": 2.5,
+      "label": "knee"
+    },
+    {
+      "backend": "af_packet",
+      "ring_mb": 128,
+      "target_mpps": 2.3,
+      "label": "knee"
+    },
+    {
+      "backend": "af_packet",
+      "ring_mb": 256,
+      "target_mpps": 2.3,
+      "label": "knee"
+    },
+    {
+      "backend": "af_packet",
+      "ring_mb": 496,
+      "target_mpps": 120,
+      "label": "physical-budget-safe-ring"
+    },
+    {
+      "backend": "dpdk_pdump",
+      "ring": 2048,
+      "target_mpps": 10,
+      "label": "repeat-knee"
+    },
+    {
+      "backend": "dpdk_pdump",
+      "ring": 2048,
+      "target_mpps": 10,
+      "label": "repeat-knee"
+    },
+    {
+      "backend": "dpdk_pdump",
+      "ring": 2048,
+      "target_mpps": 20,
+      "label": "repeat-knee"
+    },
+    {
+      "backend": "dpdk_pdump",
+      "ring": 2048,
+      "target_mpps": 25,
+      "label": "repeat-knee"
+    },
+    {
+      "backend": "dpdk_pdump",
+      "ring": 65536,
+      "target_mpps": 15,
+      "label": "repeat-knee"
+    },
+    {
+      "backend": "dpdk_pdump",
+      "ring": 65536,
+      "target_mpps": 18,
+      "label": "repeat-knee"
+    },
+    {
+      "backend": "dpdk_pdump",
+      "ring": 65536,
+      "target_mpps": 20,
+      "label": "repeat-knee"
+    },
+    {
+      "backend": "dpdk_pdump",
+      "ring": 65536,
+      "target_mpps": 25,
+      "label": "repeat-knee"
+    },
+    {
+      "backend": "dpdk_pdump",
+      "ring": 65536,
+      "target_mpps": 40,
+      "label": "repeat-knee"
+    },
+    {
+      "backend": "dpdk_pdump",
+      "ring": 65536,
+      "target_mpps": 120,
+      "label": "repeat-knee"
+    },
+    {
+      "backend": "af_packet",
+      "ring_mb": 8,
+      "pipeline": 504,
+      "burst_capture": true,
+      "label": "default-pipeline-knee",
+      "target_mpps": 0.02
+    },
+    {
+      "backend": "af_packet",
+      "ring_mb": 8,
+      "pipeline": 504,
+      "burst_capture": true,
+      "label": "default-pipeline-knee",
+      "target_mpps": 0.03
+    },
+    {
+      "backend": "af_packet",
+      "ring_mb": 8,
+      "pipeline": 504,
+      "burst_capture": true,
+      "label": "default-pipeline-knee",
+      "target_mpps": 0.01
+    },
+    {
+      "backend": "af_packet",
+      "ring_mb": 8,
+      "pipeline": 504,
+      "affinity": "48",
+      "burst_capture": true,
+      "label": "single-cpu-pipeline-knee",
+      "target_mpps": 1.2
+    },
+    {
+      "backend": "af_packet",
+      "ring_mb": 8,
+      "pipeline": 504,
+      "affinity": "48",
+      "burst_capture": true,
+      "label": "single-cpu-pipeline-knee",
+      "target_mpps": 1.4
+    },
+    {
+      "backend": "af_packet",
+      "ring_mb": 8,
+      "pipeline": 504,
+      "affinity": "48",
+      "burst_capture": true,
+      "label": "single-cpu-pipeline-knee",
+      "target_mpps": 1.6
+    },
+    {
+      "backend": "af_packet",
+      "ring_mb": 8,
+      "pipeline": 504,
+      "affinity": "48",
+      "burst_capture": true,
+      "label": "single-cpu-pipeline-knee",
+      "target_mpps": 1
+    },
+    {
+      "backend": "direct_rx",
+      "target_mpps": 20
+    },
+    {
+      "backend": "direct_rx",
+      "target_mpps": 40
+    },
+    {
+      "backend": "direct_rx",
+      "target_mpps": 80
+    },
+    {
+      "backend": "direct_rx",
+      "target_mpps": 120
+    },
+    {
+      "backend": "direct_pcap",
+      "target_mpps": 10
+    },
+    {
+      "backend": "direct_pcap",
+      "target_mpps": 20
+    },
+    {
+      "backend": "direct_pcap",
+      "target_mpps": 40
+    },
+    {
+      "backend": "direct_pcap",
+      "target_mpps": 120
+    },
+    {
+      "backend": "direct_rx",
+      "label": "MPRQ",
+      "device": "0000:b8:00.1,mprq_en=1,rxqs_min_mprq=1,mprq_max_memcpy_len=0,mprq_log_stride_num=6,mprq_log_stride_size=8",
+      "target_mpps": 40
+    },
+    {
+      "backend": "direct_rx",
+      "label": "MPRQ",
+      "device": "0000:b8:00.1,mprq_en=1,rxqs_min_mprq=1,mprq_max_memcpy_len=0,mprq_log_stride_num=6,mprq_log_stride_size=8",
+      "target_mpps": 80
+    },
+    {
+      "backend": "direct_rx",
+      "label": "MPRQ",
+      "device": "0000:b8:00.1,mprq_en=1,rxqs_min_mprq=1,mprq_max_memcpy_len=0,mprq_log_stride_num=6,mprq_log_stride_size=8",
+      "target_mpps": 120
+    },
+    {
+      "backend": "direct_pcap",
+      "label": "MPRQ",
+      "device": "0000:b8:00.1,mprq_en=1,rxqs_min_mprq=1,mprq_max_memcpy_len=0,mprq_log_stride_num=6,mprq_log_stride_size=8",
+      "target_mpps": 20
+    },
+    {
+      "backend": "direct_pcap",
+      "label": "MPRQ",
+      "device": "0000:b8:00.1,mprq_en=1,rxqs_min_mprq=1,mprq_max_memcpy_len=0,mprq_log_stride_num=6,mprq_log_stride_size=8",
+      "target_mpps": 40
+    },
+    {
+      "backend": "direct_pcap",
+      "label": "MPRQ",
+      "device": "0000:b8:00.1,mprq_en=1,rxqs_min_mprq=1,mprq_max_memcpy_len=0,mprq_log_stride_num=6,mprq_log_stride_size=8",
+      "target_mpps": 120
+    }
+  ],
+  "pipeline": [
+    {
+      "backend": "af_packet",
+      "ring_mb": 8,
+      "pipeline": 504,
+      "burst_capture": true,
+      "label": "daemon-default-pipeline",
+      "target_mpps": 0.01
+    },
+    {
+      "backend": "af_packet",
+      "ring_mb": 8,
+      "pipeline": 504,
+      "burst_capture": true,
+      "label": "daemon-default-pipeline",
+      "target_mpps": 0.05
+    },
+    {
+      "backend": "af_packet",
+      "ring_mb": 8,
+      "pipeline": 504,
+      "burst_capture": true,
+      "label": "daemon-default-pipeline",
+      "target_mpps": 0.1
+    },
+    {
+      "backend": "af_packet",
+      "ring_mb": 8,
+      "pipeline": 504,
+      "burst_capture": true,
+      "label": "daemon-default-pipeline",
+      "target_mpps": 0.25
+    },
+    {
+      "backend": "af_packet",
+      "ring_mb": 8,
+      "pipeline": 504,
+      "burst_capture": true,
+      "label": "daemon-default-pipeline",
+      "target_mpps": 0.5
+    },
+    {
+      "backend": "af_packet",
+      "ring_mb": 8,
+      "pipeline": 504,
+      "burst_capture": true,
+      "label": "daemon-default-pipeline",
+      "target_mpps": 0.75
+    },
+    {
+      "backend": "af_packet",
+      "ring_mb": 8,
+      "pipeline": 504,
+      "burst_capture": true,
+      "label": "daemon-default-pipeline",
+      "target_mpps": 1
+    },
+    {
+      "backend": "af_packet",
+      "ring_mb": 8,
+      "pipeline": 504,
+      "burst_capture": true,
+      "label": "daemon-default-pipeline",
+      "target_mpps": 2
+    },
+    {
+      "backend": "af_packet",
+      "ring_mb": 8,
+      "pipeline": 504,
+      "burst_capture": true,
+      "label": "daemon-default-pipeline",
+      "target_mpps": 5
+    },
+    {
+      "backend": "af_packet",
+      "ring_mb": 8,
+      "pipeline": 504,
+      "burst_capture": true,
+      "label": "daemon-default-pipeline",
+      "target_mpps": 10
+    },
+    {
+      "backend": "af_packet",
+      "ring_mb": 8,
+      "pipeline": 504,
+      "burst_capture": true,
+      "label": "daemon-default-pipeline",
+      "target_mpps": 20
+    },
+    {
+      "backend": "af_packet",
+      "ring_mb": 8,
+      "pipeline": 504,
+      "burst_capture": true,
+      "label": "daemon-default-pipeline",
+      "target_mpps": 40
+    },
+    {
+      "backend": "af_packet",
+      "ring_mb": 8,
+      "pipeline": 504,
+      "burst_capture": true,
+      "label": "daemon-default-pipeline",
+      "target_mpps": 80
+    },
+    {
+      "backend": "af_packet",
+      "ring_mb": 8,
+      "pipeline": 504,
+      "burst_capture": true,
+      "label": "daemon-default-pipeline",
+      "target_mpps": 120
+    },
+    {
+      "backend": "af_packet",
+      "ring_mb": 8,
+      "pipeline": 504,
+      "affinity": "48",
+      "burst_capture": true,
+      "label": "pipeline-single-cpu",
+      "target_mpps": 0.05
+    },
+    {
+      "backend": "af_packet",
+      "ring_mb": 8,
+      "pipeline": 504,
+      "affinity": "48",
+      "burst_capture": true,
+      "label": "pipeline-single-cpu",
+      "target_mpps": 0.5
+    },
+    {
+      "backend": "af_packet",
+      "ring_mb": 8,
+      "pipeline": 504,
+      "affinity": "48",
+      "burst_capture": true,
+      "label": "pipeline-single-cpu",
+      "target_mpps": 1
+    },
+    {
+      "backend": "af_packet",
+      "ring_mb": 8,
+      "pipeline": 504,
+      "affinity": "48",
+      "burst_capture": true,
+      "label": "pipeline-single-cpu",
+      "target_mpps": 2
+    },
+    {
+      "backend": "af_packet",
+      "ring_mb": 8,
+      "pipeline": 504,
+      "affinity": "48",
+      "burst_capture": true,
+      "label": "pipeline-single-cpu",
+      "target_mpps": 5
+    },
+    {
+      "backend": "af_packet",
+      "ring_mb": 128,
+      "pipeline": 384,
+      "burst_capture": true,
+      "label": "pipeline",
+      "target_mpps": 0.5
+    },
+    {
+      "backend": "af_packet",
+      "ring_mb": 128,
+      "pipeline": 384,
+      "burst_capture": true,
+      "label": "pipeline",
+      "target_mpps": 2
+    },
+    {
+      "backend": "af_packet",
+      "ring_mb": 128,
+      "pipeline": 384,
+      "burst_capture": true,
+      "label": "pipeline",
+      "target_mpps": 120
+    },
+    {
+      "backend": "af_packet",
+      "ring_mb": 256,
+      "pipeline": 256,
+      "burst_capture": true,
+      "label": "pipeline",
+      "target_mpps": 0.5
+    },
+    {
+      "backend": "af_packet",
+      "ring_mb": 256,
+      "pipeline": 256,
+      "burst_capture": true,
+      "label": "pipeline",
+      "target_mpps": 2
+    },
+    {
+      "backend": "af_packet",
+      "ring_mb": 256,
+      "pipeline": 256,
+      "burst_capture": true,
+      "label": "pipeline",
+      "target_mpps": 120
+    },
+    {
+      "backend": "dpdk_pdump",
+      "ring": 16384,
+      "pipeline": 512,
+      "burst_capture": true,
+      "label": "pipeline-fits-512",
+      "target_mpps": 1
+    },
+    {
+      "backend": "dpdk_pdump",
+      "ring": 16384,
+      "pipeline": 512,
+      "burst_capture": true,
+      "label": "pipeline-fits-512",
+      "target_mpps": 5
+    },
+    {
+      "backend": "dpdk_pdump",
+      "ring": 16384,
+      "pipeline": 512,
+      "burst_capture": true,
+      "label": "pipeline-fits-512",
+      "target_mpps": 20
+    },
+    {
+      "backend": "dpdk_pdump",
+      "ring": 16384,
+      "pipeline": 512,
+      "burst_capture": true,
+      "label": "pipeline-fits-512",
+      "target_mpps": 120
+    }
+  ],
+  "reference": [
+    {
+      "backend": "direct_rx",
+      "target_mpps": 20
+    },
+    {
+      "backend": "direct_rx",
+      "target_mpps": 40
+    },
+    {
+      "backend": "direct_rx",
+      "target_mpps": 80
+    },
+    {
+      "backend": "direct_rx",
+      "target_mpps": 120
+    },
+    {
+      "backend": "direct_pcap",
+      "target_mpps": 10
+    },
+    {
+      "backend": "direct_pcap",
+      "target_mpps": 20
+    },
+    {
+      "backend": "direct_pcap",
+      "target_mpps": 40
+    },
+    {
+      "backend": "direct_pcap",
+      "target_mpps": 120
+    },
+    {
+      "backend": "direct_rx",
+      "label": "MPRQ",
+      "device": "0000:b8:00.1,mprq_en=1,rxqs_min_mprq=1,mprq_max_memcpy_len=0,mprq_log_stride_num=6,mprq_log_stride_size=8",
+      "target_mpps": 40
+    },
+    {
+      "backend": "direct_rx",
+      "label": "MPRQ",
+      "device": "0000:b8:00.1,mprq_en=1,rxqs_min_mprq=1,mprq_max_memcpy_len=0,mprq_log_stride_num=6,mprq_log_stride_size=8",
+      "target_mpps": 80
+    },
+    {
+      "backend": "direct_rx",
+      "label": "MPRQ",
+      "device": "0000:b8:00.1,mprq_en=1,rxqs_min_mprq=1,mprq_max_memcpy_len=0,mprq_log_stride_num=6,mprq_log_stride_size=8",
+      "target_mpps": 120
+    },
+    {
+      "backend": "direct_pcap",
+      "label": "MPRQ",
+      "device": "0000:b8:00.1,mprq_en=1,rxqs_min_mprq=1,mprq_max_memcpy_len=0,mprq_log_stride_num=6,mprq_log_stride_size=8",
+      "target_mpps": 20
+    },
+    {
+      "backend": "direct_pcap",
+      "label": "MPRQ",
+      "device": "0000:b8:00.1,mprq_en=1,rxqs_min_mprq=1,mprq_max_memcpy_len=0,mprq_log_stride_num=6,mprq_log_stride_size=8",
+      "target_mpps": 40
+    },
+    {
+      "backend": "direct_pcap",
+      "label": "MPRQ",
+      "device": "0000:b8:00.1,mprq_en=1,rxqs_min_mprq=1,mprq_max_memcpy_len=0,mprq_log_stride_num=6,mprq_log_stride_size=8",
+      "target_mpps": 120
+    }
+  ],
+  "smoke": [
+    {
+      "backend": "af_packet",
+      "ring_mb": 8,
+      "target_mpps": 1
+    },
+    {
+      "backend": "af_packet",
+      "ring_mb": 8,
+      "target_mpps": 5
+    }
+  ],
+  "sweep": [
+    {
+      "backend": "af_packet",
+      "ring_mb": 8,
+      "target_mpps": 2
+    },
+    {
+      "backend": "af_packet",
+      "ring_mb": 8,
+      "target_mpps": 10
+    },
+    {
+      "backend": "af_packet",
+      "ring_mb": 8,
+      "target_mpps": 20
+    },
+    {
+      "backend": "af_packet",
+      "ring_mb": 8,
+      "target_mpps": 40
+    },
+    {
+      "backend": "af_packet",
+      "ring_mb": 8,
+      "target_mpps": 80
+    },
+    {
+      "backend": "af_packet",
+      "ring_mb": 8,
+      "target_mpps": 120
+    },
+    {
+      "backend": "af_packet",
+      "ring_mb": 128,
+      "target_mpps": 1
+    },
+    {
+      "backend": "af_packet",
+      "ring_mb": 128,
+      "target_mpps": 2
+    },
+    {
+      "backend": "af_packet",
+      "ring_mb": 128,
+      "target_mpps": 5
+    },
+    {
+      "backend": "af_packet",
+      "ring_mb": 128,
+      "target_mpps": 10
+    },
+    {
+      "backend": "af_packet",
+      "ring_mb": 128,
+      "target_mpps": 20
+    },
+    {
+      "backend": "af_packet",
+      "ring_mb": 128,
+      "target_mpps": 40
+    },
+    {
+      "backend": "af_packet",
+      "ring_mb": 128,
+      "target_mpps": 80
+    },
+    {
+      "backend": "af_packet",
+      "ring_mb": 128,
+      "target_mpps": 120
+    },
+    {
+      "backend": "af_packet",
+      "ring_mb": 256,
+      "target_mpps": 1
+    },
+    {
+      "backend": "af_packet",
+      "ring_mb": 256,
+      "target_mpps": 2
+    },
+    {
+      "backend": "af_packet",
+      "ring_mb": 256,
+      "target_mpps": 5
+    },
+    {
+      "backend": "af_packet",
+      "ring_mb": 256,
+      "target_mpps": 10
+    },
+    {
+      "backend": "af_packet",
+      "ring_mb": 256,
+      "target_mpps": 20
+    },
+    {
+      "backend": "af_packet",
+      "ring_mb": 256,
+      "target_mpps": 40
+    },
+    {
+      "backend": "af_packet",
+      "ring_mb": 256,
+      "target_mpps": 80
+    },
+    {
+      "backend": "af_packet",
+      "ring_mb": 256,
+      "target_mpps": 120
+    },
+    {
+      "backend": "af_packet",
+      "ring_mb": 512,
+      "target_mpps": 1
+    },
+    {
+      "backend": "af_packet",
+      "ring_mb": 512,
+      "target_mpps": 2
+    },
+    {
+      "backend": "af_packet",
+      "ring_mb": 512,
+      "target_mpps": 5
+    },
+    {
+      "backend": "af_packet",
+      "ring_mb": 512,
+      "target_mpps": 10
+    },
+    {
+      "backend": "af_packet",
+      "ring_mb": 512,
+      "target_mpps": 20
+    },
+    {
+      "backend": "af_packet",
+      "ring_mb": 512,
+      "target_mpps": 40
+    },
+    {
+      "backend": "af_packet",
+      "ring_mb": 512,
+      "target_mpps": 80
+    },
+    {
+      "backend": "af_packet",
+      "ring_mb": 512,
+      "target_mpps": 120
+    },
+    {
+      "backend": "dpdk_pdump",
+      "ring": 2048,
+      "target_mpps": 1
+    },
+    {
+      "backend": "dpdk_pdump",
+      "ring": 2048,
+      "target_mpps": 2
+    },
+    {
+      "backend": "dpdk_pdump",
+      "ring": 2048,
+      "target_mpps": 5
+    },
+    {
+      "backend": "dpdk_pdump",
+      "ring": 2048,
+      "target_mpps": 10
+    },
+    {
+      "backend": "dpdk_pdump",
+      "ring": 2048,
+      "target_mpps": 20
+    },
+    {
+      "backend": "dpdk_pdump",
+      "ring": 2048,
+      "target_mpps": 40
+    },
+    {
+      "backend": "dpdk_pdump",
+      "ring": 2048,
+      "target_mpps": 80
+    },
+    {
+      "backend": "dpdk_pdump",
+      "ring": 2048,
+      "target_mpps": 120
+    },
+    {
+      "backend": "dpdk_pdump",
+      "ring": 65536,
+      "target_mpps": 1
+    },
+    {
+      "backend": "dpdk_pdump",
+      "ring": 65536,
+      "target_mpps": 2
+    },
+    {
+      "backend": "dpdk_pdump",
+      "ring": 65536,
+      "target_mpps": 5
+    },
+    {
+      "backend": "dpdk_pdump",
+      "ring": 65536,
+      "target_mpps": 10
+    },
+    {
+      "backend": "dpdk_pdump",
+      "ring": 65536,
+      "target_mpps": 20
+    },
+    {
+      "backend": "dpdk_pdump",
+      "ring": 65536,
+      "target_mpps": 40
+    },
+    {
+      "backend": "dpdk_pdump",
+      "ring": 65536,
+      "target_mpps": 80
+    },
+    {
+      "backend": "dpdk_pdump",
+      "ring": 65536,
+      "target_mpps": 120
+    }
+  ]
+}

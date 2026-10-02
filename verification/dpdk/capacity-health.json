@@ -1,0 +1,15 @@
+[
+  {
+    "stage": "during-sweep",
+    "time": 1790898421.5964181,
+    "rc": 0,
+    "stdout": "program 100003 version 4 ready and waiting\ndirectory\nThu Oct  1 23:47:01 UTC 2026\n",
+    "stderr": ""
+  },
+  {
+    "stage": "during-final-knees",
+    "rc": 0,
+    "stdout": "program 100003 version 4 ready and waiting\ndirectory\nFri Oct  2 00:36:41 UTC 2026\n",
+    "stderr": ""
+  }
+]
