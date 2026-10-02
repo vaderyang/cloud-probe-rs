@@ -1077,3 +1077,26 @@ issue #286.
 Evidence (lab-local): build logs, raw cumulative snapshots, counter windows, the
 paced generator and the restoration/NFS audits live under `/tmp/legacy-probe/`.
 Both hosts were restored and verified afterwards; no repository was modified.
+
+## Forwarding and end-to-end (2026-10-02)
+
+Everything above is capture with a `null` (discard) output. What a worker does
+once the packets have to go somewhere — `null`, `pcap_file` (disk and `/dev/shm`),
+`zmq` PUSH and `vxlan`, each behind the same 1 CPU / 512 MiB budget, the Rust ring
+and `recvmsg` backends plus the upstream C worker with real libpcap — is recorded
+separately in
+[`verification/dpdk/forwarding-e2e-2026-10-02/`](forwarding-e2e-2026-10-02/).
+Headlines: `pcap_file` and `zmq` both delivered **2.0 Mpps loss-free** (capture
+still binds); **VXLAN's one-core knee is 0.125–0.15 Mpps** and a strict
+loss-free point could not be demonstrated because the host's egress policy
+rate-limits new unidirectional UDP to the peer and `sendto` returns EPERM (a host
+constraint, not a cloud-probe one); end-to-end accounting closed for 117/117
+selected cases.
+
+That sweep also found three real accounting/stall defects, filed but not fixed
+here: `pcap_file` counts failed writes as forwarded and logs per packet
+(`cloud-probe-rs-5bh`, reproduced on the exact benchmark binary with `/dev/full`),
+`zmq` counts a batch as forwarded when the peer never receives it
+(`cloud-probe-rs-b7b`), and RTC still holds `out_sets` across blocking output I/O
+(`cloud-probe-rs-oim`). The C upstream's `output_file.c` has the same
+unconditional-forwarding shape as the first one.

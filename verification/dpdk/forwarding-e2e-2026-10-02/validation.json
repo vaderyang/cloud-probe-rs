@@ -1,0 +1,939 @@
+[
+  {
+    "id": "rv3-null-2m",
+    "checks": {
+      "no_oom": true,
+      "limits": true,
+      "worker_only": true,
+      "capture_accounting": true,
+      "cap_bytes_64": true,
+      "output_accounting": true,
+      "e2e_accounting": true,
+      "no_receiver_parse_errors": true,
+      "no_unaccounted_downstream_loss": true
+    },
+    "loss_free": true,
+    "downstream_gap": 0,
+    "capture_residual": 0
+  },
+  {
+    "id": "rv3-null-2.4m",
+    "checks": {
+      "no_oom": true,
+      "limits": true,
+      "worker_only": true,
+      "capture_accounting": true,
+      "cap_bytes_64": true,
+      "output_accounting": true,
+      "e2e_accounting": true,
+      "no_receiver_parse_errors": true,
+      "no_unaccounted_downstream_loss": true
+    },
+    "loss_free": false,
+    "downstream_gap": 0,
+    "capture_residual": 0
+  },
+  {
+    "id": "rv3-null-3m",
+    "checks": {
+      "no_oom": true,
+      "limits": true,
+      "worker_only": true,
+      "capture_accounting": true,
+      "cap_bytes_64": true,
+      "output_accounting": true,
+      "e2e_accounting": true,
+      "no_receiver_parse_errors": true,
+      "no_unaccounted_downstream_loss": true
+    },
+    "loss_free": false,
+    "downstream_gap": 0,
+    "capture_residual": 0
+  },
+  {
+    "id": "rv3-file_disk-2m",
+    "checks": {
+      "no_oom": true,
+      "limits": true,
+      "worker_only": true,
+      "capture_accounting": true,
+      "cap_bytes_64": true,
+      "output_accounting": true,
+      "e2e_accounting": true,
+      "no_receiver_parse_errors": true,
+      "no_unaccounted_downstream_loss": true,
+      "reader_equals_parser": true,
+      "file_length": true
+    },
+    "loss_free": true,
+    "downstream_gap": 0,
+    "capture_residual": 0
+  },
+  {
+    "id": "rv3-file_disk-2.4m",
+    "checks": {
+      "no_oom": true,
+      "limits": true,
+      "worker_only": true,
+      "capture_accounting": true,
+      "cap_bytes_64": true,
+      "output_accounting": true,
+      "e2e_accounting": true,
+      "no_receiver_parse_errors": true,
+      "no_unaccounted_downstream_loss": true,
+      "reader_equals_parser": true,
+      "file_length": true
+    },
+    "loss_free": false,
+    "downstream_gap": 0,
+    "capture_residual": 0
+  },
+  {
+    "id": "rv3-file_disk-3m",
+    "checks": {
+      "no_oom": true,
+      "limits": true,
+      "worker_only": true,
+      "capture_accounting": true,
+      "cap_bytes_64": true,
+      "output_accounting": true,
+      "e2e_accounting": true,
+      "no_receiver_parse_errors": true,
+      "no_unaccounted_downstream_loss": true,
+      "reader_equals_parser": true,
+      "file_length": true
+    },
+    "loss_free": false,
+    "downstream_gap": 0,
+    "capture_residual": 0
+  },
+  {
+    "id": "rv3-file_shm-2m",
+    "checks": {
+      "no_oom": true,
+      "limits": true,
+      "worker_only": true,
+      "capture_accounting": true,
+      "cap_bytes_64": true,
+      "output_accounting": true,
+      "e2e_accounting": true,
+      "no_receiver_parse_errors": true,
+      "no_unaccounted_downstream_loss": true,
+      "reader_equals_parser": true,
+      "file_length": true
+    },
+    "loss_free": true,
+    "downstream_gap": 0,
+    "capture_residual": 0
+  },
+  {
+    "id": "rv3-file_shm-2.4m",
+    "checks": {
+      "no_oom": true,
+      "limits": true,
+      "worker_only": true,
+      "capture_accounting": true,
+      "cap_bytes_64": true,
+      "output_accounting": true,
+      "e2e_accounting": true,
+      "no_receiver_parse_errors": true,
+      "no_unaccounted_downstream_loss": true,
+      "reader_equals_parser": true,
+      "file_length": true
+    },
+    "loss_free": false,
+    "downstream_gap": 0,
+    "capture_residual": 0
+  },
+  {
+    "id": "rv3-file_shm-3m",
+    "checks": {
+      "no_oom": true,
+      "limits": true,
+      "worker_only": true,
+      "capture_accounting": true,
+      "cap_bytes_64": true,
+      "output_accounting": true,
+      "e2e_accounting": true,
+      "no_receiver_parse_errors": true,
+      "no_unaccounted_downstream_loss": true,
+      "reader_equals_parser": true,
+      "file_length": true
+    },
+    "loss_free": false,
+    "downstream_gap": 0,
+    "capture_residual": 0
+  },
+  {
+    "id": "rv3-zmq-2m",
+    "checks": {
+      "no_oom": true,
+      "limits": true,
+      "worker_only": true,
+      "capture_accounting": true,
+      "cap_bytes_64": true,
+      "output_accounting": true,
+      "e2e_accounting": true,
+      "no_receiver_parse_errors": true,
+      "no_unaccounted_downstream_loss": true
+    },
+    "loss_free": false,
+    "downstream_gap": 0,
+    "capture_residual": 0
+  },
+  {
+    "id": "rv3-zmq-2.4m",
+    "checks": {
+      "no_oom": true,
+      "limits": true,
+      "worker_only": true,
+      "capture_accounting": true,
+      "cap_bytes_64": true,
+      "output_accounting": true,
+      "e2e_accounting": true,
+      "no_receiver_parse_errors": true,
+      "no_unaccounted_downstream_loss": true
+    },
+    "loss_free": false,
+    "downstream_gap": 0,
+    "capture_residual": 0
+  },
+  {
+    "id": "rv3-zmq-3m",
+    "checks": {
+      "no_oom": true,
+      "limits": true,
+      "worker_only": true,
+      "capture_accounting": true,
+      "cap_bytes_64": true,
+      "output_accounting": true,
+      "e2e_accounting": true,
+      "no_receiver_parse_errors": true,
+      "no_unaccounted_downstream_loss": true
+    },
+    "loss_free": false,
+    "downstream_gap": 0,
+    "capture_residual": 0
+  },
+  {
+    "id": "rv3-vxlan-0.08m",
+    "checks": {
+      "no_oom": true,
+      "limits": true,
+      "worker_only": true,
+      "capture_accounting": true,
+      "cap_bytes_64": true,
+      "output_accounting": true,
+      "e2e_accounting": true,
+      "no_receiver_parse_errors": true,
+      "no_unaccounted_downstream_loss": true
+    },
+    "loss_free": false,
+    "downstream_gap": 0,
+    "capture_residual": 0
+  },
+  {
+    "id": "rv3-vxlan-0.15m",
+    "checks": {
+      "no_oom": true,
+      "limits": true,
+      "worker_only": true,
+      "capture_accounting": true,
+      "cap_bytes_64": true,
+      "output_accounting": true,
+      "e2e_accounting": true,
+      "no_receiver_parse_errors": true,
+      "no_unaccounted_downstream_loss": true
+    },
+    "loss_free": false,
+    "downstream_gap": 0,
+    "capture_residual": 0
+  },
+  {
+    "id": "rv3-vxlan-0.3m",
+    "checks": {
+      "no_oom": true,
+      "limits": true,
+      "worker_only": true,
+      "capture_accounting": true,
+      "cap_bytes_64": true,
+      "output_accounting": true,
+      "e2e_accounting": true,
+      "no_receiver_parse_errors": true,
+      "no_unaccounted_downstream_loss": true
+    },
+    "loss_free": false,
+    "downstream_gap": 0,
+    "capture_residual": 0
+  },
+  {
+    "id": "rv3-gre-0.08m",
+    "checks": {
+      "no_oom": true,
+      "limits": true,
+      "worker_only": true,
+      "capture_accounting": true,
+      "cap_bytes_64": true,
+      "output_accounting": true,
+      "e2e_accounting": true,
+      "no_receiver_parse_errors": true,
+      "no_unaccounted_downstream_loss": true
+    },
+    "loss_free": false,
+    "downstream_gap": 0,
+    "capture_residual": 0
+  },
+  {
+    "id": "rv3-gre-0.15m",
+    "checks": {
+      "no_oom": true,
+      "limits": true,
+      "worker_only": true,
+      "capture_accounting": true,
+      "cap_bytes_64": true,
+      "output_accounting": true,
+      "e2e_accounting": true,
+      "no_receiver_parse_errors": true,
+      "no_unaccounted_downstream_loss": true
+    },
+    "loss_free": false,
+    "downstream_gap": 0,
+    "capture_residual": 0
+  },
+  {
+    "id": "rv3-gre-0.3m",
+    "checks": {
+      "no_oom": true,
+      "limits": true,
+      "worker_only": true,
+      "capture_accounting": true,
+      "cap_bytes_64": true,
+      "output_accounting": true,
+      "e2e_accounting": true,
+      "no_receiver_parse_errors": true,
+      "no_unaccounted_downstream_loss": true
+    },
+    "loss_free": false,
+    "downstream_gap": 0,
+    "capture_residual": 0
+  },
+  {
+    "id": "rrecv-null-0.2m",
+    "checks": {
+      "no_oom": true,
+      "limits": true,
+      "worker_only": true,
+      "capture_accounting": true,
+      "cap_bytes_64": true,
+      "output_accounting": true,
+      "e2e_accounting": true,
+      "no_receiver_parse_errors": true,
+      "no_unaccounted_downstream_loss": true
+    },
+    "loss_free": true,
+    "downstream_gap": 0,
+    "capture_residual": 0
+  },
+  {
+    "id": "rrecv-null-0.35m",
+    "checks": {
+      "no_oom": true,
+      "limits": true,
+      "worker_only": true,
+      "capture_accounting": true,
+      "cap_bytes_64": true,
+      "output_accounting": true,
+      "e2e_accounting": true,
+      "no_receiver_parse_errors": true,
+      "no_unaccounted_downstream_loss": true
+    },
+    "loss_free": true,
+    "downstream_gap": 0,
+    "capture_residual": 0
+  },
+  {
+    "id": "rrecv-null-0.5m",
+    "checks": {
+      "no_oom": true,
+      "limits": true,
+      "worker_only": true,
+      "capture_accounting": true,
+      "cap_bytes_64": true,
+      "output_accounting": true,
+      "e2e_accounting": true,
+      "no_receiver_parse_errors": true,
+      "no_unaccounted_downstream_loss": true
+    },
+    "loss_free": true,
+    "downstream_gap": 0,
+    "capture_residual": 0
+  },
+  {
+    "id": "rrecv-file_disk-0.2m",
+    "checks": {
+      "no_oom": true,
+      "limits": true,
+      "worker_only": true,
+      "capture_accounting": true,
+      "cap_bytes_64": true,
+      "output_accounting": true,
+      "e2e_accounting": true,
+      "no_receiver_parse_errors": true,
+      "no_unaccounted_downstream_loss": true,
+      "reader_equals_parser": true,
+      "file_length": true
+    },
+    "loss_free": true,
+    "downstream_gap": 0,
+    "capture_residual": 0
+  },
+  {
+    "id": "rrecv-file_disk-0.35m",
+    "checks": {
+      "no_oom": true,
+      "limits": true,
+      "worker_only": true,
+      "capture_accounting": true,
+      "cap_bytes_64": true,
+      "output_accounting": true,
+      "e2e_accounting": true,
+      "no_receiver_parse_errors": true,
+      "no_unaccounted_downstream_loss": true,
+      "reader_equals_parser": true,
+      "file_length": true
+    },
+    "loss_free": true,
+    "downstream_gap": 0,
+    "capture_residual": 0
+  },
+  {
+    "id": "rrecv-file_disk-0.5m",
+    "checks": {
+      "no_oom": true,
+      "limits": true,
+      "worker_only": true,
+      "capture_accounting": true,
+      "cap_bytes_64": true,
+      "output_accounting": true,
+      "e2e_accounting": true,
+      "no_receiver_parse_errors": true,
+      "no_unaccounted_downstream_loss": true,
+      "reader_equals_parser": true,
+      "file_length": true
+    },
+    "loss_free": true,
+    "downstream_gap": 0,
+    "capture_residual": 0
+  },
+  {
+    "id": "rrecv-file_shm-0.2m",
+    "checks": {
+      "no_oom": true,
+      "limits": true,
+      "worker_only": true,
+      "capture_accounting": true,
+      "cap_bytes_64": true,
+      "output_accounting": true,
+      "e2e_accounting": true,
+      "no_receiver_parse_errors": true,
+      "no_unaccounted_downstream_loss": true,
+      "reader_equals_parser": true,
+      "file_length": true
+    },
+    "loss_free": true,
+    "downstream_gap": 0,
+    "capture_residual": 0
+  },
+  {
+    "id": "rrecv-file_shm-0.35m",
+    "checks": {
+      "no_oom": true,
+      "limits": true,
+      "worker_only": true,
+      "capture_accounting": true,
+      "cap_bytes_64": true,
+      "output_accounting": true,
+      "e2e_accounting": true,
+      "no_receiver_parse_errors": true,
+      "no_unaccounted_downstream_loss": true,
+      "reader_equals_parser": true,
+      "file_length": true
+    },
+    "loss_free": true,
+    "downstream_gap": 0,
+    "capture_residual": 0
+  },
+  {
+    "id": "rrecv-file_shm-0.5m",
+    "checks": {
+      "no_oom": true,
+      "limits": true,
+      "worker_only": true,
+      "capture_accounting": true,
+      "cap_bytes_64": true,
+      "output_accounting": true,
+      "e2e_accounting": true,
+      "no_receiver_parse_errors": true,
+      "no_unaccounted_downstream_loss": true,
+      "reader_equals_parser": true,
+      "file_length": true
+    },
+    "loss_free": true,
+    "downstream_gap": 0,
+    "capture_residual": 0
+  },
+  {
+    "id": "rrecv-zmq-0.2m",
+    "checks": {
+      "no_oom": true,
+      "limits": true,
+      "worker_only": true,
+      "capture_accounting": true,
+      "cap_bytes_64": true,
+      "output_accounting": true,
+      "e2e_accounting": true,
+      "no_receiver_parse_errors": true,
+      "no_unaccounted_downstream_loss": true
+    },
+    "loss_free": false,
+    "downstream_gap": 0,
+    "capture_residual": 0
+  },
+  {
+    "id": "rrecv-zmq-0.35m",
+    "checks": {
+      "no_oom": true,
+      "limits": true,
+      "worker_only": true,
+      "capture_accounting": true,
+      "cap_bytes_64": true,
+      "output_accounting": true,
+      "e2e_accounting": true,
+      "no_receiver_parse_errors": true,
+      "no_unaccounted_downstream_loss": true
+    },
+    "loss_free": true,
+    "downstream_gap": 0,
+    "capture_residual": 0
+  },
+  {
+    "id": "rrecv-zmq-0.5m",
+    "checks": {
+      "no_oom": true,
+      "limits": true,
+      "worker_only": true,
+      "capture_accounting": true,
+      "cap_bytes_64": true,
+      "output_accounting": true,
+      "e2e_accounting": true,
+      "no_receiver_parse_errors": true,
+      "no_unaccounted_downstream_loss": true
+    },
+    "loss_free": true,
+    "downstream_gap": 0,
+    "capture_residual": 0
+  },
+  {
+    "id": "rrecv-vxlan-0.08m",
+    "checks": {
+      "no_oom": true,
+      "limits": true,
+      "worker_only": true,
+      "capture_accounting": true,
+      "cap_bytes_64": true,
+      "output_accounting": true,
+      "e2e_accounting": true,
+      "no_receiver_parse_errors": true,
+      "no_unaccounted_downstream_loss": true
+    },
+    "loss_free": false,
+    "downstream_gap": 0,
+    "capture_residual": 0
+  },
+  {
+    "id": "rrecv-vxlan-0.15m",
+    "checks": {
+      "no_oom": true,
+      "limits": true,
+      "worker_only": true,
+      "capture_accounting": true,
+      "cap_bytes_64": true,
+      "output_accounting": true,
+      "e2e_accounting": true,
+      "no_receiver_parse_errors": true,
+      "no_unaccounted_downstream_loss": true
+    },
+    "loss_free": false,
+    "downstream_gap": 0,
+    "capture_residual": 0
+  },
+  {
+    "id": "rrecv-vxlan-0.3m",
+    "checks": {
+      "no_oom": true,
+      "limits": true,
+      "worker_only": true,
+      "capture_accounting": true,
+      "cap_bytes_64": true,
+      "output_accounting": true,
+      "e2e_accounting": true,
+      "no_receiver_parse_errors": true,
+      "no_unaccounted_downstream_loss": true
+    },
+    "loss_free": false,
+    "downstream_gap": 0,
+    "capture_residual": 0
+  },
+  {
+    "id": "rrecv-gre-0.08m",
+    "checks": {
+      "no_oom": true,
+      "limits": true,
+      "worker_only": true,
+      "capture_accounting": true,
+      "cap_bytes_64": true,
+      "output_accounting": true,
+      "e2e_accounting": true,
+      "no_receiver_parse_errors": true,
+      "no_unaccounted_downstream_loss": true
+    },
+    "loss_free": false,
+    "downstream_gap": 0,
+    "capture_residual": 0
+  },
+  {
+    "id": "rrecv-gre-0.15m",
+    "checks": {
+      "no_oom": true,
+      "limits": true,
+      "worker_only": true,
+      "capture_accounting": true,
+      "cap_bytes_64": true,
+      "output_accounting": true,
+      "e2e_accounting": true,
+      "no_receiver_parse_errors": true,
+      "no_unaccounted_downstream_loss": true
+    },
+    "loss_free": false,
+    "downstream_gap": 0,
+    "capture_residual": 0
+  },
+  {
+    "id": "rrecv-gre-0.3m",
+    "checks": {
+      "no_oom": true,
+      "limits": true,
+      "worker_only": true,
+      "capture_accounting": true,
+      "cap_bytes_64": true,
+      "output_accounting": true,
+      "e2e_accounting": true,
+      "no_receiver_parse_errors": true,
+      "no_unaccounted_downstream_loss": true
+    },
+    "loss_free": false,
+    "downstream_gap": 0,
+    "capture_residual": 0
+  },
+  {
+    "id": "cv3-null-1.5m",
+    "checks": {
+      "no_oom": true,
+      "limits": true,
+      "worker_only": true,
+      "capture_accounting": true,
+      "cap_bytes_64": true,
+      "output_accounting": true,
+      "e2e_accounting": true,
+      "no_receiver_parse_errors": true,
+      "no_unaccounted_downstream_loss": true
+    },
+    "loss_free": true,
+    "downstream_gap": 0,
+    "capture_residual": 0
+  },
+  {
+    "id": "cv3-null-2.4m",
+    "checks": {
+      "no_oom": true,
+      "limits": true,
+      "worker_only": true,
+      "capture_accounting": true,
+      "cap_bytes_64": true,
+      "output_accounting": true,
+      "e2e_accounting": true,
+      "no_receiver_parse_errors": true,
+      "no_unaccounted_downstream_loss": true
+    },
+    "loss_free": false,
+    "downstream_gap": 0,
+    "capture_residual": 0
+  },
+  {
+    "id": "cv3-null-3m",
+    "checks": {
+      "no_oom": true,
+      "limits": true,
+      "worker_only": true,
+      "capture_accounting": true,
+      "cap_bytes_64": true,
+      "output_accounting": true,
+      "e2e_accounting": true,
+      "no_receiver_parse_errors": true,
+      "no_unaccounted_downstream_loss": true
+    },
+    "loss_free": false,
+    "downstream_gap": 0,
+    "capture_residual": 0
+  },
+  {
+    "id": "cv3-file_disk-1.5m",
+    "checks": {
+      "no_oom": true,
+      "limits": true,
+      "worker_only": true,
+      "capture_accounting": true,
+      "cap_bytes_64": true,
+      "output_accounting": true,
+      "e2e_accounting": true,
+      "no_receiver_parse_errors": true,
+      "no_unaccounted_downstream_loss": true,
+      "reader_equals_parser": true,
+      "file_length": true
+    },
+    "loss_free": true,
+    "downstream_gap": 0,
+    "capture_residual": 0
+  },
+  {
+    "id": "cv3-file_disk-2.4m",
+    "checks": {
+      "no_oom": true,
+      "limits": true,
+      "worker_only": true,
+      "capture_accounting": true,
+      "cap_bytes_64": true,
+      "output_accounting": true,
+      "e2e_accounting": true,
+      "no_receiver_parse_errors": true,
+      "no_unaccounted_downstream_loss": true,
+      "reader_equals_parser": true,
+      "file_length": true
+    },
+    "loss_free": false,
+    "downstream_gap": 0,
+    "capture_residual": 0
+  },
+  {
+    "id": "cv3-file_disk-3m",
+    "checks": {
+      "no_oom": true,
+      "limits": true,
+      "worker_only": true,
+      "capture_accounting": true,
+      "cap_bytes_64": true,
+      "output_accounting": true,
+      "e2e_accounting": true,
+      "no_receiver_parse_errors": true,
+      "no_unaccounted_downstream_loss": true,
+      "reader_equals_parser": true,
+      "file_length": true
+    },
+    "loss_free": false,
+    "downstream_gap": 0,
+    "capture_residual": 0
+  },
+  {
+    "id": "cv3-file_shm-1.5m",
+    "checks": {
+      "no_oom": true,
+      "limits": true,
+      "worker_only": true,
+      "capture_accounting": true,
+      "cap_bytes_64": true,
+      "output_accounting": true,
+      "e2e_accounting": true,
+      "no_receiver_parse_errors": true,
+      "no_unaccounted_downstream_loss": true,
+      "reader_equals_parser": true,
+      "file_length": true
+    },
+    "loss_free": true,
+    "downstream_gap": 0,
+    "capture_residual": 0
+  },
+  {
+    "id": "cv3-file_shm-2.4m",
+    "checks": {
+      "no_oom": true,
+      "limits": true,
+      "worker_only": true,
+      "capture_accounting": true,
+      "cap_bytes_64": true,
+      "output_accounting": true,
+      "e2e_accounting": true,
+      "no_receiver_parse_errors": true,
+      "no_unaccounted_downstream_loss": true,
+      "reader_equals_parser": true,
+      "file_length": true
+    },
+    "loss_free": false,
+    "downstream_gap": 0,
+    "capture_residual": 0
+  },
+  {
+    "id": "cv3-file_shm-3m",
+    "checks": {
+      "no_oom": true,
+      "limits": true,
+      "worker_only": true,
+      "capture_accounting": true,
+      "cap_bytes_64": true,
+      "output_accounting": true,
+      "e2e_accounting": true,
+      "no_receiver_parse_errors": true,
+      "no_unaccounted_downstream_loss": true,
+      "reader_equals_parser": true,
+      "file_length": true
+    },
+    "loss_free": false,
+    "downstream_gap": 0,
+    "capture_residual": 0
+  },
+  {
+    "id": "cv3-zmq-1.5m",
+    "checks": {
+      "no_oom": true,
+      "limits": true,
+      "worker_only": true,
+      "capture_accounting": true,
+      "cap_bytes_64": true,
+      "output_accounting": true,
+      "e2e_accounting": true,
+      "no_receiver_parse_errors": true,
+      "no_unaccounted_downstream_loss": true
+    },
+    "loss_free": true,
+    "downstream_gap": 0,
+    "capture_residual": 0
+  },
+  {
+    "id": "cv3-zmq-2.4m",
+    "checks": {
+      "no_oom": true,
+      "limits": true,
+      "worker_only": true,
+      "capture_accounting": true,
+      "cap_bytes_64": true,
+      "output_accounting": true,
+      "e2e_accounting": true,
+      "no_receiver_parse_errors": true,
+      "no_unaccounted_downstream_loss": true
+    },
+    "loss_free": false,
+    "downstream_gap": 0,
+    "capture_residual": 0
+  },
+  {
+    "id": "cv3-zmq-3m",
+    "checks": {
+      "no_oom": true,
+      "limits": true,
+      "worker_only": true,
+      "capture_accounting": true,
+      "cap_bytes_64": true,
+      "output_accounting": true,
+      "e2e_accounting": true,
+      "no_receiver_parse_errors": true,
+      "no_unaccounted_downstream_loss": true
+    },
+    "loss_free": false,
+    "downstream_gap": 0,
+    "capture_residual": 0
+  },
+  {
+    "id": "cv3-vxlan-0.08m",
+    "checks": {
+      "no_oom": true,
+      "limits": true,
+      "worker_only": true,
+      "capture_accounting": true,
+      "cap_bytes_64": true,
+      "output_accounting": true,
+      "e2e_accounting": true,
+      "no_receiver_parse_errors": true,
+      "no_unaccounted_downstream_loss": true
+    },
+    "loss_free": false,
+    "downstream_gap": 0,
+    "capture_residual": 0
+  },
+  {
+    "id": "cv3-vxlan-0.15m",
+    "checks": {
+      "no_oom": true,
+      "limits": true,
+      "worker_only": true,
+      "capture_accounting": true,
+      "cap_bytes_64": true,
+      "output_accounting": true,
+      "e2e_accounting": true,
+      "no_receiver_parse_errors": true,
+      "no_unaccounted_downstream_loss": true
+    },
+    "loss_free": false,
+    "downstream_gap": 0,
+    "capture_residual": 0
+  },
+  {
+    "id": "cv3-vxlan-0.3m",
+    "checks": {
+      "no_oom": true,
+      "limits": true,
+      "worker_only": true,
+      "capture_accounting": true,
+      "cap_bytes_64": true,
+      "output_accounting": true,
+      "e2e_accounting": true,
+      "no_receiver_parse_errors": true,
+      "no_unaccounted_downstream_loss": true
+    },
+    "loss_free": false,
+    "downstream_gap": 0,
+    "capture_residual": 0
+  },
+  {
+    "id": "cv3-gre-0.08m",
+    "checks": {
+      "no_oom": true,
+      "limits": true,
+      "worker_only": true,
+      "capture_accounting": true,
+      "cap_bytes_64": true,
+      "output_accounting": true,
+      "e2e_accounting": true,
+      "no_receiver_parse_errors": true,
+      "no_unaccounted_downstream_loss": false
+    },
+    "loss_free": false,
+    "downstream_gap": 3,
+    "capture_residual": 0
+  },
+  {
+    "id": "cv3-gre-0.15m",
+    "checks": {
+      "no_oom": true,
+      "limits": true,
+      "worker_only": true,
+      "capture_accounting": true,
+      "cap_bytes_64": true,
+      "output_accounting": true,
+      "e2e_accounting": true,
+      "no_receiver_parse_errors": true,
+      "no_unaccounted_downstream_loss": true
+    },
+    "loss_free": false,
+    "downstream_gap": 0,
+    "capture_residual": 0
+  }
+]

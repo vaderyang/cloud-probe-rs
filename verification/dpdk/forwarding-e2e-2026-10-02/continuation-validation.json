@@ -1,0 +1,1920 @@
+[
+  {
+    "id": "cv2-null-0.5m",
+    "checks": {
+      "worker_limits": true,
+      "worker_only": true,
+      "capture_closed": true,
+      "output_closed": true,
+      "e2e_closed": true,
+      "no_malformed": true,
+      "no_oom": true,
+      "cap_bytes_64": true
+    },
+    "capture_drops": 0,
+    "peer_drops": 0,
+    "independent_e2e_residual": null
+  },
+  {
+    "id": "cv2-null-1.5m",
+    "checks": {
+      "worker_limits": true,
+      "worker_only": true,
+      "capture_closed": true,
+      "output_closed": true,
+      "e2e_closed": true,
+      "no_malformed": true,
+      "no_oom": true,
+      "cap_bytes_64": true
+    },
+    "capture_drops": 502685,
+    "peer_drops": 0,
+    "independent_e2e_residual": null
+  },
+  {
+    "id": "cv2-null-1m",
+    "checks": {
+      "worker_limits": true,
+      "worker_only": true,
+      "capture_closed": true,
+      "output_closed": true,
+      "e2e_closed": true,
+      "no_malformed": true,
+      "no_oom": true,
+      "cap_bytes_64": true
+    },
+    "capture_drops": 628,
+    "peer_drops": 0,
+    "independent_e2e_residual": null
+  },
+  {
+    "id": "cv3-file_disk-1.5m",
+    "checks": {
+      "worker_limits": true,
+      "worker_only": true,
+      "capture_closed": true,
+      "output_closed": true,
+      "e2e_closed": true,
+      "no_malformed": true,
+      "no_oom": true,
+      "cap_bytes_64": true,
+      "pcap_parser_reader": true
+    },
+    "capture_drops": 0,
+    "peer_drops": 0,
+    "independent_e2e_residual": 0
+  },
+  {
+    "id": "cv3-file_disk-2.4m",
+    "checks": {
+      "worker_limits": true,
+      "worker_only": true,
+      "capture_closed": true,
+      "output_closed": true,
+      "e2e_closed": true,
+      "no_malformed": true,
+      "no_oom": true,
+      "cap_bytes_64": true,
+      "pcap_parser_reader": true
+    },
+    "capture_drops": 8214,
+    "peer_drops": 0,
+    "independent_e2e_residual": 0
+  },
+  {
+    "id": "cv3-file_disk-3m",
+    "checks": {
+      "worker_limits": true,
+      "worker_only": true,
+      "capture_closed": true,
+      "output_closed": true,
+      "e2e_closed": true,
+      "no_malformed": true,
+      "no_oom": true,
+      "cap_bytes_64": true,
+      "pcap_parser_reader": true
+    },
+    "capture_drops": 2110754,
+    "peer_drops": 0,
+    "independent_e2e_residual": 0
+  },
+  {
+    "id": "cv3-file_shm-1.5m",
+    "checks": {
+      "worker_limits": true,
+      "worker_only": true,
+      "capture_closed": true,
+      "output_closed": true,
+      "e2e_closed": true,
+      "no_malformed": true,
+      "no_oom": true,
+      "cap_bytes_64": true,
+      "pcap_parser_reader": true
+    },
+    "capture_drops": 0,
+    "peer_drops": 0,
+    "independent_e2e_residual": 0
+  },
+  {
+    "id": "cv3-file_shm-2.4m",
+    "checks": {
+      "worker_limits": true,
+      "worker_only": true,
+      "capture_closed": true,
+      "output_closed": true,
+      "e2e_closed": true,
+      "no_malformed": true,
+      "no_oom": true,
+      "cap_bytes_64": true,
+      "pcap_parser_reader": true
+    },
+    "capture_drops": 53867,
+    "peer_drops": 0,
+    "independent_e2e_residual": 0
+  },
+  {
+    "id": "cv3-file_shm-3m",
+    "checks": {
+      "worker_limits": true,
+      "worker_only": true,
+      "capture_closed": true,
+      "output_closed": true,
+      "e2e_closed": true,
+      "no_malformed": true,
+      "no_oom": true,
+      "cap_bytes_64": true,
+      "pcap_parser_reader": true
+    },
+    "capture_drops": 648337,
+    "peer_drops": 0,
+    "independent_e2e_residual": 0
+  },
+  {
+    "id": "cv3-null-1.5m",
+    "checks": {
+      "worker_limits": true,
+      "worker_only": true,
+      "capture_closed": true,
+      "output_closed": true,
+      "e2e_closed": true,
+      "no_malformed": true,
+      "no_oom": true,
+      "cap_bytes_64": true
+    },
+    "capture_drops": 0,
+    "peer_drops": 0,
+    "independent_e2e_residual": null
+  },
+  {
+    "id": "cv3-null-2.4m",
+    "checks": {
+      "worker_limits": true,
+      "worker_only": true,
+      "capture_closed": true,
+      "output_closed": true,
+      "e2e_closed": true,
+      "no_malformed": true,
+      "no_oom": true,
+      "cap_bytes_64": true
+    },
+    "capture_drops": 160971,
+    "peer_drops": 0,
+    "independent_e2e_residual": null
+  },
+  {
+    "id": "cv3-null-3m",
+    "checks": {
+      "worker_limits": true,
+      "worker_only": true,
+      "capture_closed": true,
+      "output_closed": true,
+      "e2e_closed": true,
+      "no_malformed": true,
+      "no_oom": true,
+      "cap_bytes_64": true
+    },
+    "capture_drops": 2198955,
+    "peer_drops": 0,
+    "independent_e2e_residual": null
+  },
+  {
+    "id": "rrecv-file_disk-0.2m",
+    "checks": {
+      "worker_limits": true,
+      "worker_only": true,
+      "capture_closed": true,
+      "output_closed": true,
+      "e2e_closed": true,
+      "no_malformed": true,
+      "no_oom": true,
+      "cap_bytes_64": true,
+      "pcap_parser_reader": true
+    },
+    "capture_drops": 0,
+    "peer_drops": 0,
+    "independent_e2e_residual": 0
+  },
+  {
+    "id": "rrecv-file_disk-0.35m",
+    "checks": {
+      "worker_limits": true,
+      "worker_only": true,
+      "capture_closed": true,
+      "output_closed": true,
+      "e2e_closed": true,
+      "no_malformed": true,
+      "no_oom": true,
+      "cap_bytes_64": true,
+      "pcap_parser_reader": true
+    },
+    "capture_drops": 0,
+    "peer_drops": 0,
+    "independent_e2e_residual": 0
+  },
+  {
+    "id": "rrecv-file_disk-0.5m",
+    "checks": {
+      "worker_limits": true,
+      "worker_only": true,
+      "capture_closed": true,
+      "output_closed": true,
+      "e2e_closed": true,
+      "no_malformed": true,
+      "no_oom": true,
+      "cap_bytes_64": true,
+      "pcap_parser_reader": true
+    },
+    "capture_drops": 0,
+    "peer_drops": 0,
+    "independent_e2e_residual": 0
+  },
+  {
+    "id": "rrecv-file_shm-0.2m",
+    "checks": {
+      "worker_limits": true,
+      "worker_only": true,
+      "capture_closed": true,
+      "output_closed": true,
+      "e2e_closed": true,
+      "no_malformed": true,
+      "no_oom": true,
+      "cap_bytes_64": true,
+      "pcap_parser_reader": true
+    },
+    "capture_drops": 0,
+    "peer_drops": 0,
+    "independent_e2e_residual": 0
+  },
+  {
+    "id": "rrecv-file_shm-0.35m",
+    "checks": {
+      "worker_limits": true,
+      "worker_only": true,
+      "capture_closed": true,
+      "output_closed": true,
+      "e2e_closed": true,
+      "no_malformed": true,
+      "no_oom": true,
+      "cap_bytes_64": true,
+      "pcap_parser_reader": true
+    },
+    "capture_drops": 0,
+    "peer_drops": 0,
+    "independent_e2e_residual": 0
+  },
+  {
+    "id": "rrecv-file_shm-0.5m",
+    "checks": {
+      "worker_limits": true,
+      "worker_only": true,
+      "capture_closed": true,
+      "output_closed": true,
+      "e2e_closed": true,
+      "no_malformed": true,
+      "no_oom": true,
+      "cap_bytes_64": true,
+      "pcap_parser_reader": true
+    },
+    "capture_drops": 0,
+    "peer_drops": 0,
+    "independent_e2e_residual": 0
+  },
+  {
+    "id": "rrecv-null-0.2m",
+    "checks": {
+      "worker_limits": true,
+      "worker_only": true,
+      "capture_closed": true,
+      "output_closed": true,
+      "e2e_closed": true,
+      "no_malformed": true,
+      "no_oom": true,
+      "cap_bytes_64": true
+    },
+    "capture_drops": 0,
+    "peer_drops": 0,
+    "independent_e2e_residual": null
+  },
+  {
+    "id": "rrecv-null-0.35m",
+    "checks": {
+      "worker_limits": true,
+      "worker_only": true,
+      "capture_closed": true,
+      "output_closed": true,
+      "e2e_closed": true,
+      "no_malformed": true,
+      "no_oom": true,
+      "cap_bytes_64": true
+    },
+    "capture_drops": 0,
+    "peer_drops": 0,
+    "independent_e2e_residual": null
+  },
+  {
+    "id": "rrecv-null-0.5m",
+    "checks": {
+      "worker_limits": true,
+      "worker_only": true,
+      "capture_closed": true,
+      "output_closed": true,
+      "e2e_closed": true,
+      "no_malformed": true,
+      "no_oom": true,
+      "cap_bytes_64": true
+    },
+    "capture_drops": 0,
+    "peer_drops": 0,
+    "independent_e2e_residual": null
+  },
+  {
+    "id": "rv3-file_disk-2.4m",
+    "checks": {
+      "worker_limits": true,
+      "worker_only": true,
+      "capture_closed": true,
+      "output_closed": true,
+      "e2e_closed": true,
+      "no_malformed": true,
+      "no_oom": true,
+      "cap_bytes_64": true,
+      "pcap_parser_reader": true
+    },
+    "capture_drops": 57067,
+    "peer_drops": 0,
+    "independent_e2e_residual": 0
+  },
+  {
+    "id": "rv3-file_disk-2m",
+    "checks": {
+      "worker_limits": true,
+      "worker_only": true,
+      "capture_closed": true,
+      "output_closed": true,
+      "e2e_closed": true,
+      "no_malformed": true,
+      "no_oom": true,
+      "cap_bytes_64": true,
+      "pcap_parser_reader": true
+    },
+    "capture_drops": 0,
+    "peer_drops": 0,
+    "independent_e2e_residual": 0
+  },
+  {
+    "id": "rv3-file_disk-3m",
+    "checks": {
+      "worker_limits": true,
+      "worker_only": true,
+      "capture_closed": true,
+      "output_closed": true,
+      "e2e_closed": true,
+      "no_malformed": true,
+      "no_oom": true,
+      "cap_bytes_64": true,
+      "pcap_parser_reader": true
+    },
+    "capture_drops": 2194500,
+    "peer_drops": 0,
+    "independent_e2e_residual": 0
+  },
+  {
+    "id": "rv3-file_shm-2.4m",
+    "checks": {
+      "worker_limits": true,
+      "worker_only": true,
+      "capture_closed": true,
+      "output_closed": true,
+      "e2e_closed": true,
+      "no_malformed": true,
+      "no_oom": true,
+      "cap_bytes_64": true,
+      "pcap_parser_reader": true
+    },
+    "capture_drops": 20852,
+    "peer_drops": 0,
+    "independent_e2e_residual": 0
+  },
+  {
+    "id": "rv3-file_shm-2m",
+    "checks": {
+      "worker_limits": true,
+      "worker_only": true,
+      "capture_closed": true,
+      "output_closed": true,
+      "e2e_closed": true,
+      "no_malformed": true,
+      "no_oom": true,
+      "cap_bytes_64": true,
+      "pcap_parser_reader": true
+    },
+    "capture_drops": 0,
+    "peer_drops": 0,
+    "independent_e2e_residual": 0
+  },
+  {
+    "id": "rv3-file_shm-3m",
+    "checks": {
+      "worker_limits": true,
+      "worker_only": true,
+      "capture_closed": true,
+      "output_closed": true,
+      "e2e_closed": true,
+      "no_malformed": true,
+      "no_oom": true,
+      "cap_bytes_64": true,
+      "pcap_parser_reader": true
+    },
+    "capture_drops": 552691,
+    "peer_drops": 0,
+    "independent_e2e_residual": 0
+  },
+  {
+    "id": "rv3-null-2.4m",
+    "checks": {
+      "worker_limits": true,
+      "worker_only": true,
+      "capture_closed": true,
+      "output_closed": true,
+      "e2e_closed": true,
+      "no_malformed": true,
+      "no_oom": true,
+      "cap_bytes_64": true
+    },
+    "capture_drops": 23298,
+    "peer_drops": 0,
+    "independent_e2e_residual": null
+  },
+  {
+    "id": "rv3-null-2m",
+    "checks": {
+      "worker_limits": true,
+      "worker_only": true,
+      "capture_closed": true,
+      "output_closed": true,
+      "e2e_closed": true,
+      "no_malformed": true,
+      "no_oom": true,
+      "cap_bytes_64": true
+    },
+    "capture_drops": 0,
+    "peer_drops": 0,
+    "independent_e2e_residual": null
+  },
+  {
+    "id": "rv3-null-3m",
+    "checks": {
+      "worker_limits": true,
+      "worker_only": true,
+      "capture_closed": true,
+      "output_closed": true,
+      "e2e_closed": true,
+      "no_malformed": true,
+      "no_oom": true,
+      "cap_bytes_64": true
+    },
+    "capture_drops": 2210840,
+    "peer_drops": 0,
+    "independent_e2e_residual": null
+  },
+  {
+    "id": "cont-cv2-file_disk-0.25m",
+    "checks": {
+      "worker_limits": true,
+      "worker_only": true,
+      "capture_closed": true,
+      "output_closed": true,
+      "e2e_closed": true,
+      "no_malformed": true,
+      "no_oom": true,
+      "cap_bytes_64": true,
+      "pcap_parser_reader": true
+    },
+    "capture_drops": 0,
+    "peer_drops": 0,
+    "independent_e2e_residual": 0
+  },
+  {
+    "id": "cont-cv2-file_disk-0.5m",
+    "checks": {
+      "worker_limits": true,
+      "worker_only": true,
+      "capture_closed": true,
+      "output_closed": true,
+      "e2e_closed": true,
+      "no_malformed": true,
+      "no_oom": true,
+      "cap_bytes_64": true,
+      "pcap_parser_reader": true
+    },
+    "capture_drops": 0,
+    "peer_drops": 0,
+    "independent_e2e_residual": 0
+  },
+  {
+    "id": "cont-cv2-file_disk-1.5m",
+    "checks": {
+      "worker_limits": true,
+      "worker_only": true,
+      "capture_closed": true,
+      "output_closed": true,
+      "e2e_closed": true,
+      "no_malformed": true,
+      "no_oom": true,
+      "cap_bytes_64": true,
+      "pcap_parser_reader": true
+    },
+    "capture_drops": 1182272,
+    "peer_drops": 0,
+    "independent_e2e_residual": 0
+  },
+  {
+    "id": "cont-cv2-file_disk-1m",
+    "checks": {
+      "worker_limits": true,
+      "worker_only": true,
+      "capture_closed": true,
+      "output_closed": true,
+      "e2e_closed": true,
+      "no_malformed": true,
+      "no_oom": true,
+      "cap_bytes_64": true,
+      "pcap_parser_reader": true
+    },
+    "capture_drops": 1269515,
+    "peer_drops": 0,
+    "independent_e2e_residual": 0
+  },
+  {
+    "id": "cont-cv2-file_disk-2.4m",
+    "checks": {
+      "worker_limits": true,
+      "worker_only": true,
+      "capture_closed": true,
+      "output_closed": true,
+      "e2e_closed": true,
+      "no_malformed": true,
+      "no_oom": true,
+      "cap_bytes_64": true,
+      "pcap_parser_reader": true
+    },
+    "capture_drops": 5152088,
+    "peer_drops": 0,
+    "independent_e2e_residual": 0
+  },
+  {
+    "id": "cont-cv2-file_disk-2m",
+    "checks": {
+      "worker_limits": true,
+      "worker_only": true,
+      "capture_closed": true,
+      "output_closed": true,
+      "e2e_closed": true,
+      "no_malformed": true,
+      "no_oom": true,
+      "cap_bytes_64": true,
+      "pcap_parser_reader": true
+    },
+    "capture_drops": 3289325,
+    "peer_drops": 0,
+    "independent_e2e_residual": 0
+  },
+  {
+    "id": "cont-cv2-file_shm-0.25m",
+    "checks": {
+      "worker_limits": true,
+      "worker_only": true,
+      "capture_closed": true,
+      "output_closed": true,
+      "e2e_closed": true,
+      "no_malformed": true,
+      "no_oom": true,
+      "cap_bytes_64": true,
+      "pcap_parser_reader": true
+    },
+    "capture_drops": 0,
+    "peer_drops": 0,
+    "independent_e2e_residual": 0
+  },
+  {
+    "id": "cont-cv2-file_shm-0.5m",
+    "checks": {
+      "worker_limits": true,
+      "worker_only": true,
+      "capture_closed": true,
+      "output_closed": true,
+      "e2e_closed": true,
+      "no_malformed": true,
+      "no_oom": true,
+      "cap_bytes_64": true,
+      "pcap_parser_reader": true
+    },
+    "capture_drops": 0,
+    "peer_drops": 0,
+    "independent_e2e_residual": 0
+  },
+  {
+    "id": "cont-cv2-file_shm-1.5m",
+    "checks": {
+      "worker_limits": true,
+      "worker_only": true,
+      "capture_closed": true,
+      "output_closed": true,
+      "e2e_closed": true,
+      "no_malformed": true,
+      "no_oom": true,
+      "cap_bytes_64": true,
+      "pcap_parser_reader": true
+    },
+    "capture_drops": 709319,
+    "peer_drops": 0,
+    "independent_e2e_residual": 0
+  },
+  {
+    "id": "cont-cv2-file_shm-1m",
+    "checks": {
+      "worker_limits": true,
+      "worker_only": true,
+      "capture_closed": true,
+      "output_closed": true,
+      "e2e_closed": true,
+      "no_malformed": true,
+      "no_oom": true,
+      "cap_bytes_64": true,
+      "pcap_parser_reader": true
+    },
+    "capture_drops": 141128,
+    "peer_drops": 0,
+    "independent_e2e_residual": 0
+  },
+  {
+    "id": "cont-cv2-file_shm-2.4m",
+    "checks": {
+      "worker_limits": true,
+      "worker_only": true,
+      "capture_closed": true,
+      "output_closed": true,
+      "e2e_closed": true,
+      "no_malformed": true,
+      "no_oom": true,
+      "cap_bytes_64": true,
+      "pcap_parser_reader": true
+    },
+    "capture_drops": 2617663,
+    "peer_drops": 0,
+    "independent_e2e_residual": 0
+  },
+  {
+    "id": "cont-cv2-file_shm-2m",
+    "checks": {
+      "worker_limits": true,
+      "worker_only": true,
+      "capture_closed": true,
+      "output_closed": true,
+      "e2e_closed": true,
+      "no_malformed": true,
+      "no_oom": true,
+      "cap_bytes_64": true,
+      "pcap_parser_reader": true
+    },
+    "capture_drops": 1398810,
+    "peer_drops": 0,
+    "independent_e2e_residual": 0
+  },
+  {
+    "id": "cont-cv2-null-0.25m",
+    "checks": {
+      "worker_limits": true,
+      "worker_only": true,
+      "capture_closed": true,
+      "output_closed": true,
+      "e2e_closed": true,
+      "no_malformed": true,
+      "no_oom": true,
+      "cap_bytes_64": true
+    },
+    "capture_drops": 0,
+    "peer_drops": 0,
+    "independent_e2e_residual": null
+  },
+  {
+    "id": "cont-cv2-null-2.4m",
+    "checks": {
+      "worker_limits": true,
+      "worker_only": true,
+      "capture_closed": true,
+      "output_closed": true,
+      "e2e_closed": true,
+      "no_malformed": true,
+      "no_oom": true,
+      "cap_bytes_64": true
+    },
+    "capture_drops": 4601244,
+    "peer_drops": 0,
+    "independent_e2e_residual": null
+  },
+  {
+    "id": "cont-cv2-null-2m",
+    "checks": {
+      "worker_limits": true,
+      "worker_only": true,
+      "capture_closed": true,
+      "output_closed": true,
+      "e2e_closed": true,
+      "no_malformed": true,
+      "no_oom": true,
+      "cap_bytes_64": true
+    },
+    "capture_drops": 3327506,
+    "peer_drops": 0,
+    "independent_e2e_residual": null
+  },
+  {
+    "id": "cont-cv2-vxlan-0.05m",
+    "checks": {
+      "worker_limits": true,
+      "worker_only": true,
+      "capture_closed": true,
+      "output_closed": true,
+      "e2e_closed": true,
+      "no_malformed": true,
+      "no_oom": true,
+      "cap_bytes_64": true
+    },
+    "capture_drops": 0,
+    "peer_drops": 0,
+    "independent_e2e_residual": 0
+  },
+  {
+    "id": "cont-cv2-vxlan-0.125m",
+    "checks": {
+      "worker_limits": true,
+      "worker_only": true,
+      "capture_closed": true,
+      "output_closed": true,
+      "e2e_closed": true,
+      "no_malformed": true,
+      "no_oom": true,
+      "cap_bytes_64": true
+    },
+    "capture_drops": 0,
+    "peer_drops": 0,
+    "independent_e2e_residual": 0
+  },
+  {
+    "id": "cont-cv2-vxlan-0.15m",
+    "checks": {
+      "worker_limits": true,
+      "worker_only": true,
+      "capture_closed": true,
+      "output_closed": true,
+      "e2e_closed": true,
+      "no_malformed": true,
+      "no_oom": true,
+      "cap_bytes_64": true
+    },
+    "capture_drops": 53813,
+    "peer_drops": 0,
+    "independent_e2e_residual": 0
+  },
+  {
+    "id": "cont-cv2-vxlan-0.1m",
+    "checks": {
+      "worker_limits": true,
+      "worker_only": true,
+      "capture_closed": true,
+      "output_closed": true,
+      "e2e_closed": true,
+      "no_malformed": true,
+      "no_oom": true,
+      "cap_bytes_64": true
+    },
+    "capture_drops": 0,
+    "peer_drops": 0,
+    "independent_e2e_residual": 0
+  },
+  {
+    "id": "cont-cv2-vxlan-0.25m",
+    "checks": {
+      "worker_limits": true,
+      "worker_only": true,
+      "capture_closed": true,
+      "output_closed": true,
+      "e2e_closed": true,
+      "no_malformed": true,
+      "no_oom": true,
+      "cap_bytes_64": true
+    },
+    "capture_drops": 513860,
+    "peer_drops": 0,
+    "independent_e2e_residual": 0
+  },
+  {
+    "id": "cont-cv2-vxlan-0.5m",
+    "checks": {
+      "worker_limits": true,
+      "worker_only": true,
+      "capture_closed": true,
+      "output_closed": true,
+      "e2e_closed": true,
+      "no_malformed": true,
+      "no_oom": true,
+      "cap_bytes_64": true
+    },
+    "capture_drops": 1500892,
+    "peer_drops": 0,
+    "independent_e2e_residual": 0
+  },
+  {
+    "id": "cont-cv2-vxlan-1.5m",
+    "checks": {
+      "worker_limits": true,
+      "worker_only": true,
+      "capture_closed": true,
+      "output_closed": true,
+      "e2e_closed": true,
+      "no_malformed": true,
+      "no_oom": true,
+      "cap_bytes_64": true
+    },
+    "capture_drops": 5638359,
+    "peer_drops": 0,
+    "independent_e2e_residual": 0
+  },
+  {
+    "id": "cont-cv2-vxlan-1m",
+    "checks": {
+      "worker_limits": true,
+      "worker_only": true,
+      "capture_closed": true,
+      "output_closed": true,
+      "e2e_closed": true,
+      "no_malformed": true,
+      "no_oom": true,
+      "cap_bytes_64": true
+    },
+    "capture_drops": 3424011,
+    "peer_drops": 0,
+    "independent_e2e_residual": 0
+  },
+  {
+    "id": "cont-cv2-vxlan-2.4m",
+    "checks": {
+      "worker_limits": true,
+      "worker_only": true,
+      "capture_closed": true,
+      "output_closed": true,
+      "e2e_closed": true,
+      "no_malformed": true,
+      "no_oom": true,
+      "cap_bytes_64": true
+    },
+    "capture_drops": 9332225,
+    "peer_drops": 0,
+    "independent_e2e_residual": 0
+  },
+  {
+    "id": "cont-cv2-vxlan-2m",
+    "checks": {
+      "worker_limits": true,
+      "worker_only": true,
+      "capture_closed": true,
+      "output_closed": true,
+      "e2e_closed": true,
+      "no_malformed": true,
+      "no_oom": true,
+      "cap_bytes_64": true
+    },
+    "capture_drops": 7748239,
+    "peer_drops": 0,
+    "independent_e2e_residual": 0
+  },
+  {
+    "id": "cont-cv2-zmq-0.25m",
+    "checks": {
+      "worker_limits": true,
+      "worker_only": true,
+      "capture_closed": true,
+      "output_closed": true,
+      "e2e_closed": true,
+      "no_malformed": true,
+      "no_oom": true,
+      "cap_bytes_64": true
+    },
+    "capture_drops": 0,
+    "peer_drops": 0,
+    "independent_e2e_residual": 0
+  },
+  {
+    "id": "cont-cv2-zmq-0.5m",
+    "checks": {
+      "worker_limits": true,
+      "worker_only": true,
+      "capture_closed": true,
+      "output_closed": true,
+      "e2e_closed": true,
+      "no_malformed": true,
+      "no_oom": true,
+      "cap_bytes_64": true
+    },
+    "capture_drops": 0,
+    "peer_drops": 0,
+    "independent_e2e_residual": 0
+  },
+  {
+    "id": "cont-cv2-zmq-1.5m",
+    "checks": {
+      "worker_limits": true,
+      "worker_only": true,
+      "capture_closed": true,
+      "output_closed": true,
+      "e2e_closed": true,
+      "no_malformed": true,
+      "no_oom": true,
+      "cap_bytes_64": true
+    },
+    "capture_drops": 1748166,
+    "peer_drops": 0,
+    "independent_e2e_residual": 0
+  },
+  {
+    "id": "cont-cv2-zmq-1m",
+    "checks": {
+      "worker_limits": true,
+      "worker_only": true,
+      "capture_closed": true,
+      "output_closed": true,
+      "e2e_closed": true,
+      "no_malformed": true,
+      "no_oom": true,
+      "cap_bytes_64": true
+    },
+    "capture_drops": 0,
+    "peer_drops": 0,
+    "independent_e2e_residual": 0
+  },
+  {
+    "id": "cont-cv2-zmq-2.4m",
+    "checks": {
+      "worker_limits": true,
+      "worker_only": true,
+      "capture_closed": true,
+      "output_closed": true,
+      "e2e_closed": true,
+      "no_malformed": true,
+      "no_oom": true,
+      "cap_bytes_64": true
+    },
+    "capture_drops": 5625082,
+    "peer_drops": 0,
+    "independent_e2e_residual": 0
+  },
+  {
+    "id": "cont-cv2-zmq-2m",
+    "checks": {
+      "worker_limits": true,
+      "worker_only": true,
+      "capture_closed": true,
+      "output_closed": true,
+      "e2e_closed": true,
+      "no_malformed": true,
+      "no_oom": true,
+      "cap_bytes_64": true
+    },
+    "capture_drops": 2781322,
+    "peer_drops": 0,
+    "independent_e2e_residual": 0
+  },
+  {
+    "id": "cont-cv3-file_disk-0.25m",
+    "checks": {
+      "worker_limits": true,
+      "worker_only": true,
+      "capture_closed": true,
+      "output_closed": true,
+      "e2e_closed": true,
+      "no_malformed": true,
+      "no_oom": true,
+      "cap_bytes_64": true,
+      "pcap_parser_reader": true
+    },
+    "capture_drops": 0,
+    "peer_drops": 0,
+    "independent_e2e_residual": 0
+  },
+  {
+    "id": "cont-cv3-file_disk-0.5m",
+    "checks": {
+      "worker_limits": true,
+      "worker_only": true,
+      "capture_closed": true,
+      "output_closed": true,
+      "e2e_closed": true,
+      "no_malformed": true,
+      "no_oom": true,
+      "cap_bytes_64": true,
+      "pcap_parser_reader": true
+    },
+    "capture_drops": 0,
+    "peer_drops": 0,
+    "independent_e2e_residual": 0
+  },
+  {
+    "id": "cont-cv3-file_disk-1m",
+    "checks": {
+      "worker_limits": true,
+      "worker_only": true,
+      "capture_closed": true,
+      "output_closed": true,
+      "e2e_closed": true,
+      "no_malformed": true,
+      "no_oom": true,
+      "cap_bytes_64": true,
+      "pcap_parser_reader": true
+    },
+    "capture_drops": 0,
+    "peer_drops": 0,
+    "independent_e2e_residual": 0
+  },
+  {
+    "id": "cont-cv3-file_disk-2m",
+    "checks": {
+      "worker_limits": true,
+      "worker_only": true,
+      "capture_closed": true,
+      "output_closed": true,
+      "e2e_closed": true,
+      "no_malformed": true,
+      "no_oom": true,
+      "cap_bytes_64": true,
+      "pcap_parser_reader": true
+    },
+    "capture_drops": 1974,
+    "peer_drops": 0,
+    "independent_e2e_residual": 0
+  },
+  {
+    "id": "cont-cv3-file_shm-0.25m",
+    "checks": {
+      "worker_limits": true,
+      "worker_only": true,
+      "capture_closed": true,
+      "output_closed": true,
+      "e2e_closed": true,
+      "no_malformed": true,
+      "no_oom": true,
+      "cap_bytes_64": true,
+      "pcap_parser_reader": true
+    },
+    "capture_drops": 0,
+    "peer_drops": 0,
+    "independent_e2e_residual": 0
+  },
+  {
+    "id": "cont-cv3-file_shm-0.5m",
+    "checks": {
+      "worker_limits": true,
+      "worker_only": true,
+      "capture_closed": true,
+      "output_closed": true,
+      "e2e_closed": true,
+      "no_malformed": true,
+      "no_oom": true,
+      "cap_bytes_64": true,
+      "pcap_parser_reader": true
+    },
+    "capture_drops": 0,
+    "peer_drops": 0,
+    "independent_e2e_residual": 0
+  },
+  {
+    "id": "cont-cv3-file_shm-1m",
+    "checks": {
+      "worker_limits": true,
+      "worker_only": true,
+      "capture_closed": true,
+      "output_closed": true,
+      "e2e_closed": true,
+      "no_malformed": true,
+      "no_oom": true,
+      "cap_bytes_64": true,
+      "pcap_parser_reader": true
+    },
+    "capture_drops": 0,
+    "peer_drops": 0,
+    "independent_e2e_residual": 0
+  },
+  {
+    "id": "cont-cv3-file_shm-2m",
+    "checks": {
+      "worker_limits": true,
+      "worker_only": true,
+      "capture_closed": true,
+      "output_closed": true,
+      "e2e_closed": true,
+      "no_malformed": true,
+      "no_oom": true,
+      "cap_bytes_64": true,
+      "pcap_parser_reader": true
+    },
+    "capture_drops": 0,
+    "peer_drops": 0,
+    "independent_e2e_residual": 0
+  },
+  {
+    "id": "cont-cv3-null-0.25m",
+    "checks": {
+      "worker_limits": true,
+      "worker_only": true,
+      "capture_closed": true,
+      "output_closed": true,
+      "e2e_closed": true,
+      "no_malformed": true,
+      "no_oom": true,
+      "cap_bytes_64": true
+    },
+    "capture_drops": 0,
+    "peer_drops": 0,
+    "independent_e2e_residual": null
+  },
+  {
+    "id": "cont-cv3-null-0.5m",
+    "checks": {
+      "worker_limits": true,
+      "worker_only": true,
+      "capture_closed": true,
+      "output_closed": true,
+      "e2e_closed": true,
+      "no_malformed": true,
+      "no_oom": true,
+      "cap_bytes_64": true
+    },
+    "capture_drops": 0,
+    "peer_drops": 0,
+    "independent_e2e_residual": null
+  },
+  {
+    "id": "cont-cv3-null-1m",
+    "checks": {
+      "worker_limits": true,
+      "worker_only": true,
+      "capture_closed": true,
+      "output_closed": true,
+      "e2e_closed": true,
+      "no_malformed": true,
+      "no_oom": true,
+      "cap_bytes_64": true
+    },
+    "capture_drops": 0,
+    "peer_drops": 0,
+    "independent_e2e_residual": null
+  },
+  {
+    "id": "cont-cv3-null-2m",
+    "checks": {
+      "worker_limits": true,
+      "worker_only": true,
+      "capture_closed": true,
+      "output_closed": true,
+      "e2e_closed": true,
+      "no_malformed": true,
+      "no_oom": true,
+      "cap_bytes_64": true
+    },
+    "capture_drops": 0,
+    "peer_drops": 0,
+    "independent_e2e_residual": null
+  },
+  {
+    "id": "cont-cv3-vxlan-0.05m",
+    "checks": {
+      "worker_limits": true,
+      "worker_only": true,
+      "capture_closed": true,
+      "output_closed": true,
+      "e2e_closed": true,
+      "no_malformed": true,
+      "no_oom": true,
+      "cap_bytes_64": true
+    },
+    "capture_drops": 0,
+    "peer_drops": 0,
+    "independent_e2e_residual": 0
+  },
+  {
+    "id": "cont-cv3-vxlan-0.125m",
+    "checks": {
+      "worker_limits": true,
+      "worker_only": true,
+      "capture_closed": true,
+      "output_closed": true,
+      "e2e_closed": true,
+      "no_malformed": true,
+      "no_oom": true,
+      "cap_bytes_64": true
+    },
+    "capture_drops": 0,
+    "peer_drops": 0,
+    "independent_e2e_residual": 0
+  },
+  {
+    "id": "cont-cv3-vxlan-0.15m",
+    "checks": {
+      "worker_limits": true,
+      "worker_only": true,
+      "capture_closed": true,
+      "output_closed": true,
+      "e2e_closed": true,
+      "no_malformed": true,
+      "no_oom": true,
+      "cap_bytes_64": true
+    },
+    "capture_drops": 3304,
+    "peer_drops": 0,
+    "independent_e2e_residual": 0
+  },
+  {
+    "id": "cont-cv3-vxlan-0.1m",
+    "checks": {
+      "worker_limits": true,
+      "worker_only": true,
+      "capture_closed": true,
+      "output_closed": true,
+      "e2e_closed": true,
+      "no_malformed": true,
+      "no_oom": true,
+      "cap_bytes_64": true
+    },
+    "capture_drops": 0,
+    "peer_drops": 0,
+    "independent_e2e_residual": 0
+  },
+  {
+    "id": "cont-cv3-vxlan-0.25m",
+    "checks": {
+      "worker_limits": true,
+      "worker_only": true,
+      "capture_closed": true,
+      "output_closed": true,
+      "e2e_closed": true,
+      "no_malformed": true,
+      "no_oom": true,
+      "cap_bytes_64": true
+    },
+    "capture_drops": 443400,
+    "peer_drops": 0,
+    "independent_e2e_residual": 0
+  },
+  {
+    "id": "cont-cv3-vxlan-0.5m",
+    "checks": {
+      "worker_limits": true,
+      "worker_only": true,
+      "capture_closed": true,
+      "output_closed": true,
+      "e2e_closed": true,
+      "no_malformed": true,
+      "no_oom": true,
+      "cap_bytes_64": true
+    },
+    "capture_drops": 1420736,
+    "peer_drops": 0,
+    "independent_e2e_residual": 0
+  },
+  {
+    "id": "cont-cv3-vxlan-1.5m",
+    "checks": {
+      "worker_limits": true,
+      "worker_only": true,
+      "capture_closed": true,
+      "output_closed": true,
+      "e2e_closed": true,
+      "no_malformed": true,
+      "no_oom": true,
+      "cap_bytes_64": true
+    },
+    "capture_drops": 5583716,
+    "peer_drops": 0,
+    "independent_e2e_residual": 0
+  },
+  {
+    "id": "cont-cv3-vxlan-1m",
+    "checks": {
+      "worker_limits": true,
+      "worker_only": true,
+      "capture_closed": true,
+      "output_closed": true,
+      "e2e_closed": true,
+      "no_malformed": true,
+      "no_oom": true,
+      "cap_bytes_64": true
+    },
+    "capture_drops": 3372464,
+    "peer_drops": 0,
+    "independent_e2e_residual": 0
+  },
+  {
+    "id": "cont-cv3-vxlan-2.4m",
+    "checks": {
+      "worker_limits": true,
+      "worker_only": true,
+      "capture_closed": true,
+      "output_closed": true,
+      "e2e_closed": true,
+      "no_malformed": true,
+      "no_oom": true,
+      "cap_bytes_64": true
+    },
+    "capture_drops": 9275433,
+    "peer_drops": 0,
+    "independent_e2e_residual": 0
+  },
+  {
+    "id": "cont-cv3-vxlan-2m",
+    "checks": {
+      "worker_limits": true,
+      "worker_only": true,
+      "capture_closed": true,
+      "output_closed": true,
+      "e2e_closed": true,
+      "no_malformed": true,
+      "no_oom": true,
+      "cap_bytes_64": true
+    },
+    "capture_drops": 7489632,
+    "peer_drops": 0,
+    "independent_e2e_residual": 0
+  },
+  {
+    "id": "cont-cv3-zmq-0.25m",
+    "checks": {
+      "worker_limits": true,
+      "worker_only": true,
+      "capture_closed": true,
+      "output_closed": true,
+      "e2e_closed": true,
+      "no_malformed": true,
+      "no_oom": true,
+      "cap_bytes_64": true
+    },
+    "capture_drops": 0,
+    "peer_drops": 0,
+    "independent_e2e_residual": 0
+  },
+  {
+    "id": "cont-cv3-zmq-0.5m",
+    "checks": {
+      "worker_limits": true,
+      "worker_only": true,
+      "capture_closed": true,
+      "output_closed": true,
+      "e2e_closed": true,
+      "no_malformed": true,
+      "no_oom": true,
+      "cap_bytes_64": true
+    },
+    "capture_drops": 0,
+    "peer_drops": 0,
+    "independent_e2e_residual": 0
+  },
+  {
+    "id": "cont-cv3-zmq-1.5m-recheck",
+    "checks": {
+      "worker_limits": true,
+      "worker_only": true,
+      "capture_closed": true,
+      "output_closed": true,
+      "e2e_closed": true,
+      "no_malformed": true,
+      "no_oom": true,
+      "cap_bytes_64": true
+    },
+    "capture_drops": 0,
+    "peer_drops": 0,
+    "independent_e2e_residual": 0
+  },
+  {
+    "id": "cont-cv3-zmq-1m",
+    "checks": {
+      "worker_limits": true,
+      "worker_only": true,
+      "capture_closed": true,
+      "output_closed": true,
+      "e2e_closed": true,
+      "no_malformed": true,
+      "no_oom": true,
+      "cap_bytes_64": true
+    },
+    "capture_drops": 0,
+    "peer_drops": 0,
+    "independent_e2e_residual": 0
+  },
+  {
+    "id": "cont-cv3-zmq-2.4m",
+    "checks": {
+      "worker_limits": true,
+      "worker_only": true,
+      "capture_closed": true,
+      "output_closed": true,
+      "e2e_closed": true,
+      "no_malformed": true,
+      "no_oom": true,
+      "cap_bytes_64": true
+    },
+    "capture_drops": 374373,
+    "peer_drops": 0,
+    "independent_e2e_residual": 0
+  },
+  {
+    "id": "cont-cv3-zmq-2m",
+    "checks": {
+      "worker_limits": true,
+      "worker_only": true,
+      "capture_closed": true,
+      "output_closed": true,
+      "e2e_closed": true,
+      "no_malformed": true,
+      "no_oom": true,
+      "cap_bytes_64": true
+    },
+    "capture_drops": 22410,
+    "peer_drops": 0,
+    "independent_e2e_residual": 0
+  },
+  {
+    "id": "cont-rv3-file_disk-0.25m",
+    "checks": {
+      "worker_limits": true,
+      "worker_only": true,
+      "capture_closed": true,
+      "output_closed": true,
+      "e2e_closed": true,
+      "no_malformed": true,
+      "no_oom": true,
+      "cap_bytes_64": true,
+      "pcap_parser_reader": true
+    },
+    "capture_drops": 0,
+    "peer_drops": 0,
+    "independent_e2e_residual": 0
+  },
+  {
+    "id": "cont-rv3-file_disk-0.5m",
+    "checks": {
+      "worker_limits": true,
+      "worker_only": true,
+      "capture_closed": true,
+      "output_closed": true,
+      "e2e_closed": true,
+      "no_malformed": true,
+      "no_oom": true,
+      "cap_bytes_64": true,
+      "pcap_parser_reader": true
+    },
+    "capture_drops": 0,
+    "peer_drops": 0,
+    "independent_e2e_residual": 0
+  },
+  {
+    "id": "cont-rv3-file_disk-1.5m",
+    "checks": {
+      "worker_limits": true,
+      "worker_only": true,
+      "capture_closed": true,
+      "output_closed": true,
+      "e2e_closed": true,
+      "no_malformed": true,
+      "no_oom": true,
+      "cap_bytes_64": true,
+      "pcap_parser_reader": true
+    },
+    "capture_drops": 0,
+    "peer_drops": 0,
+    "independent_e2e_residual": 0
+  },
+  {
+    "id": "cont-rv3-file_disk-1m",
+    "checks": {
+      "worker_limits": true,
+      "worker_only": true,
+      "capture_closed": true,
+      "output_closed": true,
+      "e2e_closed": true,
+      "no_malformed": true,
+      "no_oom": true,
+      "cap_bytes_64": true,
+      "pcap_parser_reader": true
+    },
+    "capture_drops": 0,
+    "peer_drops": 0,
+    "independent_e2e_residual": 0
+  },
+  {
+    "id": "cont-rv3-file_shm-0.25m",
+    "checks": {
+      "worker_limits": true,
+      "worker_only": true,
+      "capture_closed": true,
+      "output_closed": true,
+      "e2e_closed": true,
+      "no_malformed": true,
+      "no_oom": true,
+      "cap_bytes_64": true,
+      "pcap_parser_reader": true
+    },
+    "capture_drops": 0,
+    "peer_drops": 0,
+    "independent_e2e_residual": 0
+  },
+  {
+    "id": "cont-rv3-file_shm-0.5m",
+    "checks": {
+      "worker_limits": true,
+      "worker_only": true,
+      "capture_closed": true,
+      "output_closed": true,
+      "e2e_closed": true,
+      "no_malformed": true,
+      "no_oom": true,
+      "cap_bytes_64": true,
+      "pcap_parser_reader": true
+    },
+    "capture_drops": 0,
+    "peer_drops": 0,
+    "independent_e2e_residual": 0
+  },
+  {
+    "id": "cont-rv3-file_shm-1.5m",
+    "checks": {
+      "worker_limits": true,
+      "worker_only": true,
+      "capture_closed": true,
+      "output_closed": true,
+      "e2e_closed": true,
+      "no_malformed": true,
+      "no_oom": true,
+      "cap_bytes_64": true,
+      "pcap_parser_reader": true
+    },
+    "capture_drops": 0,
+    "peer_drops": 0,
+    "independent_e2e_residual": 0
+  },
+  {
+    "id": "cont-rv3-file_shm-1m",
+    "checks": {
+      "worker_limits": true,
+      "worker_only": true,
+      "capture_closed": true,
+      "output_closed": true,
+      "e2e_closed": true,
+      "no_malformed": true,
+      "no_oom": true,
+      "cap_bytes_64": true,
+      "pcap_parser_reader": true
+    },
+    "capture_drops": 0,
+    "peer_drops": 0,
+    "independent_e2e_residual": 0
+  },
+  {
+    "id": "cont-rv3-null-0.25m",
+    "checks": {
+      "worker_limits": true,
+      "worker_only": true,
+      "capture_closed": true,
+      "output_closed": true,
+      "e2e_closed": true,
+      "no_malformed": true,
+      "no_oom": true,
+      "cap_bytes_64": true
+    },
+    "capture_drops": 0,
+    "peer_drops": 0,
+    "independent_e2e_residual": null
+  },
+  {
+    "id": "cont-rv3-null-0.5m",
+    "checks": {
+      "worker_limits": true,
+      "worker_only": true,
+      "capture_closed": true,
+      "output_closed": true,
+      "e2e_closed": true,
+      "no_malformed": true,
+      "no_oom": true,
+      "cap_bytes_64": true
+    },
+    "capture_drops": 0,
+    "peer_drops": 0,
+    "independent_e2e_residual": null
+  },
+  {
+    "id": "cont-rv3-null-1.5m",
+    "checks": {
+      "worker_limits": true,
+      "worker_only": true,
+      "capture_closed": true,
+      "output_closed": true,
+      "e2e_closed": true,
+      "no_malformed": true,
+      "no_oom": true,
+      "cap_bytes_64": true
+    },
+    "capture_drops": 0,
+    "peer_drops": 0,
+    "independent_e2e_residual": null
+  },
+  {
+    "id": "cont-rv3-null-1m",
+    "checks": {
+      "worker_limits": true,
+      "worker_only": true,
+      "capture_closed": true,
+      "output_closed": true,
+      "e2e_closed": true,
+      "no_malformed": true,
+      "no_oom": true,
+      "cap_bytes_64": true
+    },
+    "capture_drops": 0,
+    "peer_drops": 0,
+    "independent_e2e_residual": null
+  },
+  {
+    "id": "cont-rv3-vxlan-0.05m",
+    "checks": {
+      "worker_limits": true,
+      "worker_only": true,
+      "capture_closed": true,
+      "output_closed": true,
+      "e2e_closed": true,
+      "no_malformed": true,
+      "no_oom": true,
+      "cap_bytes_64": true
+    },
+    "capture_drops": 0,
+    "peer_drops": 0,
+    "independent_e2e_residual": 0
+  },
+  {
+    "id": "cont-rv3-vxlan-0.125m",
+    "checks": {
+      "worker_limits": true,
+      "worker_only": true,
+      "capture_closed": true,
+      "output_closed": true,
+      "e2e_closed": true,
+      "no_malformed": true,
+      "no_oom": true,
+      "cap_bytes_64": true
+    },
+    "capture_drops": 0,
+    "peer_drops": 0,
+    "independent_e2e_residual": 0
+  },
+  {
+    "id": "cont-rv3-vxlan-0.15m",
+    "checks": {
+      "worker_limits": true,
+      "worker_only": true,
+      "capture_closed": true,
+      "output_closed": true,
+      "e2e_closed": true,
+      "no_malformed": true,
+      "no_oom": true,
+      "cap_bytes_64": true
+    },
+    "capture_drops": 55053,
+    "peer_drops": 0,
+    "independent_e2e_residual": 0
+  },
+  {
+    "id": "cont-rv3-vxlan-0.1m",
+    "checks": {
+      "worker_limits": true,
+      "worker_only": true,
+      "capture_closed": true,
+      "output_closed": true,
+      "e2e_closed": true,
+      "no_malformed": true,
+      "no_oom": true,
+      "cap_bytes_64": true
+    },
+    "capture_drops": 0,
+    "peer_drops": 0,
+    "independent_e2e_residual": 0
+  },
+  {
+    "id": "cont-rv3-vxlan-0.25m",
+    "checks": {
+      "worker_limits": true,
+      "worker_only": true,
+      "capture_closed": true,
+      "output_closed": true,
+      "e2e_closed": true,
+      "no_malformed": true,
+      "no_oom": true,
+      "cap_bytes_64": true
+    },
+    "capture_drops": 461756,
+    "peer_drops": 0,
+    "independent_e2e_residual": 0
+  },
+  {
+    "id": "cont-rv3-vxlan-0.5m",
+    "checks": {
+      "worker_limits": true,
+      "worker_only": true,
+      "capture_closed": true,
+      "output_closed": true,
+      "e2e_closed": true,
+      "no_malformed": true,
+      "no_oom": true,
+      "cap_bytes_64": true
+    },
+    "capture_drops": 1486874,
+    "peer_drops": 0,
+    "independent_e2e_residual": 0
+  },
+  {
+    "id": "cont-rv3-vxlan-1.5m",
+    "checks": {
+      "worker_limits": true,
+      "worker_only": true,
+      "capture_closed": true,
+      "output_closed": true,
+      "e2e_closed": true,
+      "no_malformed": true,
+      "no_oom": true,
+      "cap_bytes_64": true
+    },
+    "capture_drops": 5603684,
+    "peer_drops": 0,
+    "independent_e2e_residual": 0
+  },
+  {
+    "id": "cont-rv3-vxlan-1m-recheck",
+    "checks": {
+      "worker_limits": true,
+      "worker_only": true,
+      "capture_closed": true,
+      "output_closed": true,
+      "e2e_closed": true,
+      "no_malformed": true,
+      "no_oom": true,
+      "cap_bytes_64": true
+    },
+    "capture_drops": 3522199,
+    "peer_drops": 0,
+    "independent_e2e_residual": 0
+  },
+  {
+    "id": "cont-rv3-vxlan-2.4m",
+    "checks": {
+      "worker_limits": true,
+      "worker_only": true,
+      "capture_closed": true,
+      "output_closed": true,
+      "e2e_closed": true,
+      "no_malformed": true,
+      "no_oom": true,
+      "cap_bytes_64": true
+    },
+    "capture_drops": 8976471,
+    "peer_drops": 0,
+    "independent_e2e_residual": 0
+  },
+  {
+    "id": "cont-rv3-vxlan-2m",
+    "checks": {
+      "worker_limits": true,
+      "worker_only": true,
+      "capture_closed": true,
+      "output_closed": true,
+      "e2e_closed": true,
+      "no_malformed": true,
+      "no_oom": true,
+      "cap_bytes_64": true
+    },
+    "capture_drops": 7383574,
+    "peer_drops": 0,
+    "independent_e2e_residual": 0
+  },
+  {
+    "id": "cont-rv3-zmq-0.25m",
+    "checks": {
+      "worker_limits": true,
+      "worker_only": true,
+      "capture_closed": true,
+      "output_closed": true,
+      "e2e_closed": true,
+      "no_malformed": true,
+      "no_oom": true,
+      "cap_bytes_64": true
+    },
+    "capture_drops": 0,
+    "peer_drops": 0,
+    "independent_e2e_residual": 0
+  },
+  {
+    "id": "cont-rv3-zmq-0.5m",
+    "checks": {
+      "worker_limits": true,
+      "worker_only": true,
+      "capture_closed": true,
+      "output_closed": true,
+      "e2e_closed": true,
+      "no_malformed": true,
+      "no_oom": true,
+      "cap_bytes_64": true
+    },
+    "capture_drops": 0,
+    "peer_drops": 0,
+    "independent_e2e_residual": 0
+  },
+  {
+    "id": "cont-rv3-zmq-1.5m",
+    "checks": {
+      "worker_limits": true,
+      "worker_only": true,
+      "capture_closed": true,
+      "output_closed": true,
+      "e2e_closed": true,
+      "no_malformed": true,
+      "no_oom": true,
+      "cap_bytes_64": true
+    },
+    "capture_drops": 0,
+    "peer_drops": 0,
+    "independent_e2e_residual": 0
+  },
+  {
+    "id": "cont-rv3-zmq-1m",
+    "checks": {
+      "worker_limits": true,
+      "worker_only": true,
+      "capture_closed": true,
+      "output_closed": true,
+      "e2e_closed": true,
+      "no_malformed": true,
+      "no_oom": true,
+      "cap_bytes_64": true
+    },
+    "capture_drops": 0,
+    "peer_drops": 0,
+    "independent_e2e_residual": 0
+  },
+  {
+    "id": "cont-rv3-zmq-2.4m",
+    "checks": {
+      "worker_limits": true,
+      "worker_only": true,
+      "capture_closed": true,
+      "output_closed": true,
+      "e2e_closed": true,
+      "no_malformed": true,
+      "no_oom": true,
+      "cap_bytes_64": true
+    },
+    "capture_drops": 66065,
+    "peer_drops": 0,
+    "independent_e2e_residual": 0
+  },
+  {
+    "id": "cont-rv3-zmq-2m",
+    "checks": {
+      "worker_limits": true,
+      "worker_only": true,
+      "capture_closed": true,
+      "output_closed": true,
+      "e2e_closed": true,
+      "no_malformed": true,
+      "no_oom": true,
+      "cap_bytes_64": true
+    },
+    "capture_drops": 0,
+    "peer_drops": 0,
+    "independent_e2e_residual": 0
+  }
+]
