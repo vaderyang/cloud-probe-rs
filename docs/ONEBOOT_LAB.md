@@ -309,7 +309,10 @@ macOS 保持现状（OneBoot 只做 x86/ARM/LoongArch 的 Linux PXE，无法验�
    当前靠 `--trigger manual`（人工点一下）或 `--trigger ipmi` + 菜单。
    长期方案（择一）：
    - 给 OneBoot 增 `POST /api/v1/boot/next {mac, source, ks}`，由 dnsmasq 按 MAC
-     下发对应 `/boot/.../go`；
+     下发对应 `/boot/.../go`。**仓库侧已就绪**：`oneboot_client.OneBoot.boot_next()`
+     与 `lab_verify.py --trigger oneboot-api` 已实现（不在 CLI 暴露，CLI 保持只读）。
+     2026-10-02 实测该端点 **404**（OneBoot 是 Flask 应用），因此服务端实现仍需
+     OneBoot 源码；客户端在此前的行为是给出可执行的失败信息并退回 `--trigger manual`；
    - 或把目标机一次性装成 self-hosted runner，日常只走 `--verify-ssh`。
 2. **Ubuntu/Debian**：`casper` autoinstall 已生成并在 `lab_verify.py` 中支持；
    Debian `debian-installer` 与 VMware ESXi 未覆盖。
