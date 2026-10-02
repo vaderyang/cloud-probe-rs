@@ -16,6 +16,13 @@ Two conventions worth knowing before reading:
 
 ### Added
 
+- **x86_64-unknown-linux-musl 可构建（`cloud-probe-rs-2hs.1`）**：此前 12 处编译错误全部来自
+  glibc/musl 的 `libc` 结构体字段类型差异（control message 的 `msg_controllen`/`cmsg_len` 等
+  `u32` vs `usize`），且不能用整数 `as`（P5-15 禁止）绕过。新增 `checked_control_len` 用
+  `TryFrom` 做检查转换（glibc 下为恒等，musl 读时无损扩展、写时检查缩窄），产出 static-pie。
+  验证：`cargo build --release -p cpworker --locked --target x86_64-unknown-linux-musl`，
+  以及 glibc/musl 两个 target 下的 `capturer::af_packet` 单测与需要 root 的 AF_PACKET live 测试（各 8 项）。
+
 - **DPDK pdump 运行时可在真实 DPDK 上链接并运行（`cloud-probe-rs-1eu`）**：新增
   `crates/cpworker/src/capturer/dpdk_shim.c`，以宏改名方式重导出 DPDK 头文件中
   `static __rte_always_inline`、未被 `librte_ring` 导出的 `rte_ring_sc_dequeue_burst_elem`
@@ -183,6 +190,29 @@ Two conventions worth knowing before reading:
   docstring for why `cap_packets` has to be read before the CPU number.
 
 ### Changed
+
+- **输出记账变诚实：写失败与断连丢帧不再被算作"已转发"（`cloud-probe-rs-5bh` / `cloud-probe-rs-b7b`）**：
+  `pcap_file` 的写失败此前只 `log_error!` 后**无条件**计入 `fwd_bytes`/`fwd_packets` 并返回成功，
+  导致 1000 个包写 `/dev/full` 时上报 `fwd_packets=1000, error_drop_packets=0` 而实际一字节未落盘
+  （上游 `output_file.c` 用 void `pcap_dump` + 无条件计数，**同一缺陷**）；现在写失败计入
+  `error_drop_*`、失败一次即 latch、`destroy` 的 flush 失败也计入。ZMQ 输出此前把「transport 已接收
+  但随后断连丢掉的半帧」永久漏账，现在按每帧实际包数/字节数回报 `error_drop_*`。
+  **语义变化**：`fwd_*` = 已被输出层接收，`error_drop_*` = 未持久/未送达，两者**可以重叠**，
+  因此不可用 `error_drop/(fwd+error_drop)` 求丢包率（见 `PARITY.md` §2.4）。
+  验证：`output::file::tests::a_failing_savefile_is_counted_as_dropped_not_forwarded`、
+  `output::zmq::tests::a_batch_lost_after_acceptance_shows_up_as_dropped`（均为红→绿）。
+- **RTC 采集不再在等待输出 I/O 期间占着 manager/out_sets，关机不再排在整批采集之后
+  （`cloud-probe-rs-brh` / `cloud-probe-rs-oim` / `cloud-probe-rs-fo7`）**：`poll_packets_batch` 对
+  RTC 与 pipeline 统一为「短持 manager 锁取走 entries → 释放 manager → 采集 → 归还」，并在
+  `stop()`/`Drop` 先置停止标志再等待采集锁、完成当前采集后排空输出、跳过剩余批次。
+  验证：`task::tests::rtc_capture_wait_does_not_hold_the_manager_lock` 等（红→绿）。
+- **`task.rs` 的公有方法不再绕过 `polling` 锁（`cloud-probe-rs-cx0`）**：`TaskManager::poll_packets_batch`
+  / `poll_packets` 降为 `pub(crate)`（唯一外部调用方已迁移到自由函数），避免「方法 reload 与自由函数
+  采集并发」互相覆盖 `entries`。验证：`crates/cpworker/tests/output_lifecycle.rs`。
+- **pipeline 输出线程不再静默退出（`cloud-probe-rs-qjx`）**：消费者端点已被取走时显式 `log_error!`
+  并保留原线程 join handle，而不是打印"started"后什么都不做。验证：红→绿的可见性测试。
+- **AF_PACKET 环缺失不再永久静默抓 0（`cloud-probe-rs-ch9`）**：每个 capturer 只 `log_error!` 一次
+  （仍返回 0、不 panic），并加调试断言。验证：`capturer::af_packet::tests` 中直接构造异常状态的回归测试。
 
 - **Reload now reuses unchanged tasks (bead 4mv.2, PARITY.md §5.1).**
   `TaskManager::reload` used to rebuild every task, recompiling each BPF filter and
