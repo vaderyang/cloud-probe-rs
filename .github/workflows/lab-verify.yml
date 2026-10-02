@@ -102,17 +102,25 @@ jobs:
         run: |
           inv=tools/oneboot/inventory.json
           [ -f "$inv" ] || inv=tools/oneboot/inventory.example.json
+          # Inventories outside the tree (the LAB_INVENTORY_JSON secret) can
+          # still carry the `-glibc217` artifact suffix that release.yml dropped
+          # once the glibc 2.17 container build became the default
+          # `*-unknown-linux-gnu` recipe.  Normalise it here too, or the
+          # `gh release download` pattern below matches nothing.
           if [ -n "$DISPATCH_TARGETS" ]; then
             want="$(printf '%s' "$DISPATCH_TARGETS" \
               | jq -Rc 'split(",") | map(gsub("^\\s+|\\s+$";""))')"
             matrix="$(jq -c --argjson want "$want" '
               .targets
               | map(select(.name as $n | $want | index($n)))
-              | {include: map({name, artifact})}
+              | map({name, artifact: (.artifact | sub("-glibc217$"; ""))})
+              | {include: .}
             ' "$inv")"
           else
             matrix="$(jq -c '
-              {include: [.targets[] | {name, artifact}]}
+              [.targets[]
+                | {name, artifact: (.artifact | sub("-glibc217$"; ""))}]
+              | {include: .}
             ' "$inv")"
           fi
           echo "matrix=$matrix" >> "$GITHUB_OUTPUT"

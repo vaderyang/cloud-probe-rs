@@ -36,7 +36,7 @@ tools/oneboot/run_inventory.py --artifact-dir dist --junit-dir build/lab-junit \
 # 4b. 没有物理机/BMC 时，用本机虚拟机跑同一套流程（需 KVM + sudo）
 tools/oneboot/run_inventory.py --driver vm --artifact-dir dist \
   --junit-dir build/lab-junit
-# 或单台：tools/oneboot/vm_verify.py --artifact dist/...-glibc217.tar.gz \
+# 或单台：tools/oneboot/vm_verify.py --artifact dist/cloud-probe-rs-x86_64-unknown-linux-gnu.tar.gz \
 #            --source centos_7_9_x86_64_dvd_2009 --junit-out build/vm.xml
 ```
 

@@ -49,6 +49,18 @@ def _resolve_secret(spec: dict[str, Any], value_key: str, env_key: str,
 
 
 def _find_artifact(artifact_dir: pathlib.Path, target: str) -> pathlib.Path:
+    # Inventories kept outside the tree (the LAB_INVENTORY_JSON secret, a local
+    # inventory.json) still name the Linux targets with the `-glibc217` suffix,
+    # which release.yml dropped when the glibc 2.17 container build became the
+    # default `*-unknown-linux-gnu` recipe.  Accepting the old spelling keeps a
+    # stale inventory pointing at the tarball that is actually published.
+    target = target.removesuffix("-glibc217")
+    # Exact name first: a leftover `-glibc217` tarball in the same dist directory
+    # sorts *before* the plain one (b'-' < b'.'), so a bare glob could pick the
+    # stale artifact.
+    exact = artifact_dir / f"cloud-probe-rs-{target}.tar.gz"
+    if exact.is_file():
+        return exact
     matches = sorted(artifact_dir.glob(f"cloud-probe-rs-{target}*.tar.gz"))
     if not matches:
         raise SystemExit(f"no cloud-probe-rs-{target}*.tar.gz under {artifact_dir}")

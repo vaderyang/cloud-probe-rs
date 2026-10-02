@@ -13,9 +13,6 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
-  # Cross-linker for the aarch64-linux artifact (installed in the Linux system
-  # deps step below). Ignored by the other matrix targets.
-  CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
 
 jobs:
   build:
@@ -27,10 +24,31 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # Linux `*-unknown-linux-gnu` is built inside the manylinux2014 images
+          # (CentOS 7, glibc 2.17) so that *one* gnu artifact per triple exists
+          # and it is the portable one. Measured floor on x86_64: GLIBC_2.16.
+          #
+          # A host build on ubuntu-latest (glibc 2.39) needs GLIBC_2.34 and
+          # aborts with "GLIBC_2.34 not found" on CentOS 7 / RHEL 7-8 / Kylin
+          # V10 / UOS / OpenEuler 20.03 -- most of the OneBoot ISO fleet
+          # (docs/ONEBOOT_LAB.md). Publishing both was a choice the lab
+          # inventory had to resolve with a `-glibc217` suffix, so the native
+          # Linux build is gone rather than shadowed by an alias.
+          #
+          # The image only runs on its own architecture, so each Linux entry
+          # picks the matching runner and cargo writes plain `target/release`
+          # (no --target, no cross-linker).
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
-          - os: ubuntu-latest
+            image: quay.io/pypa/manylinux2014_x86_64
+            protoc_arch: x86_64
+          # Same recipe as x86_64; the arm64 image needs an arm64 runner
+          # (ubuntu-24.04-arm). First run of this entry is the confirmation.
+          - os: ubuntu-24.04-arm
             target: aarch64-unknown-linux-gnu
+            image: quay.io/pypa/manylinux2014_aarch64
+            # protobuf names the arm asset "aarch_64", not "aarch64".
+            protoc_arch: aarch_64
           - os: macos-14
             target: aarch64-apple-darwin
           - os: macos-15-intel
@@ -39,34 +57,105 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - name: System dependencies (Linux)
-        if: runner.os == 'Linux'
+      - name: System dependencies (macOS)
+        if: runner.os == 'macOS'
         # protoc is a *build-time* tool for cripid's `build.rs` (prost/tonic
         # code generation from the vendored proto/api.proto). Nothing links a C
         # library: AUDIT4 P5-25 removed the macOS `brew install libpcap zeromq`,
         # which was a leftover from before the pure-Rust pcap/ZMTP ports
         # and only made the release job depend on packages the build
         # never reads.
-        run: |
-          sudo apt-get update
-          # libc6-dev-arm64-cross is only a *recommendation* of
-          # gcc-aarch64-linux-gnu; --no-install-recommends skipped it, and
-          # ring's C build then failed on missing bits/libc-header-start.h when
-          # cross-compiling to aarch64.
-          sudo apt-get install -y --no-install-recommends \
-            protobuf-compiler gcc-aarch64-linux-gnu libc6-dev-arm64-cross
-
-      - name: System dependencies (macOS)
-        if: runner.os == 'macOS'
         run: brew install protobuf
 
+      # Only the macOS jobs build on the runner; the Linux jobs get their
+      # toolchain from rustup inside the container, which also means the
+      # runner-side toolchain action and its cache do not apply there.
       - uses: dtolnay/rust-toolchain@stable
+        if: runner.os == 'macOS'
         with:
           targets: ${{ matrix.target }}
 
       - uses: Swatinem/rust-cache@v2
+        if: runner.os == 'macOS'
 
-      - name: Build
+      - name: Fetch protoc on the runner
+        if: runner.os == 'Linux'
+        env:
+          PROTOC_ARCH: ${{ matrix.protoc_arch }}
+        run: |
+          set -euo pipefail
+          pv=27.3
+          base=https://github.com/protocolbuffers/protobuf/releases
+          mkdir -p .protoc
+          curl -sSL --retry 5 --retry-connrefused -o .protoc/protoc.zip \
+            "$base/download/v${pv}/protoc-${pv}-linux-${PROTOC_ARCH}.zip"
+          ls -la .protoc
+
+      - name: Build inside the glibc 2.17 container
+        if: runner.os == 'Linux'
+        env:
+          IMAGE: ${{ matrix.image }}
+        run: |
+          # The build runs via `docker run` (not a container job) so the normal
+          # ubuntu runner performs checkout/package/upload; that also keeps the
+          # glibc floor check below on a runner that has binutils, which the
+          # CentOS 7 image is not guaranteed to provide in a usable form.
+          #
+          # The container has no route to the protoc release CDN, so the runner
+          # fetches it above and mounts it in. UID_HOST/GID_HOST give the
+          # root-owned build tree back to the runner user for packaging.
+          host_uid="$(id -u)"
+          host_gid="$(id -g)"
+          docker run --rm \
+            -v "$PWD":/src -w /src \
+            -v "$PWD/.protoc/protoc.zip":/tmp/protoc.zip:ro \
+            -e "HOST_UID=$host_uid" -e "HOST_GID=$host_gid" \
+            "$IMAGE" \
+            bash -lc '
+              set -euo pipefail
+              # Rust toolchain (the image ships none).  The CentOS 7 curl is
+              # too old for --retry-connrefused, so only --retry here.
+              curl -sSf --retry 5 \
+                https://sh.rustup.rs \
+                | sh -s -- -y --profile minimal >/dev/null 2>&1
+              . "$HOME/.cargo/env"
+              # cripid build.rs needs protoc; the image has no package for it.
+              unzip -q -o /tmp/protoc.zip -d /usr/local
+              chmod +x /usr/local/bin/protoc
+              rustc --version
+              protoc --version
+              cargo build --release --workspace --locked \
+                --bin cpworker --bin cpctl --bin cpdaemon \
+                --bin dockerpid --bin cripid
+              # Hand the build tree back so the runner user can package it.
+              chown -R "$HOST_UID:$HOST_GID" target
+            '
+
+      - name: Verify the glibc floor
+        if: runner.os == 'Linux'
+        run: |
+          set -euo pipefail
+          # Highest `2.<minor>` versioned symbol the binary imports.  Symbols
+          # like GLIBC_2.2.5 collapse to minor 2, so compare the max minor
+          # numerically rather than the version string.
+          minor="$(objdump -T target/release/cpworker \
+            | grep -oE 'GLIBC_2\.[0-9]+' \
+            | sed 's/^GLIBC_2\.//' | sort -n | tail -1)"
+          case "$minor" in
+            ''|*[!0-9]*)
+              echo "::error::could not parse a glibc floor from cpworker"
+              exit 1
+              ;;
+          esac
+          echo "cpworker requires glibc 2.$minor"
+          if [ "$minor" -gt 17 ]; then
+            echo "::error::glibc floor regressed above 2.17 (2.$minor)"
+            exit 1
+          fi
+          echo "glibc floor OK (<= 2.17)"
+
+      - name: Build (macOS)
+        if: runner.os == 'macOS'
         # --locked: the artifact must be reproducible from the committed
         # Cargo.lock, not from whatever crates.io resolves to today.
         run: |
@@ -80,7 +169,13 @@ jobs:
         run: |
           # shellcheck disable=SC2015
           set -euo pipefail
-          bin="target/${{ matrix.target }}/release"
+          # The container build is native to its runner, hence target/release;
+          # the macOS jobs pass --target, hence the triple-nested directory.
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            bin="target/release"
+          else
+            bin="target/${{ matrix.target }}/release"
+          fi
           name="cloud-probe-rs-${{ matrix.target }}"
           mkdir -p "dist/$name"
           for b in cpworker cpctl cpdaemon dockerpid cripid; do
