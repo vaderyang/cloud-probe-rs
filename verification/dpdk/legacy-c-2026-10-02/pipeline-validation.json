@@ -1,0 +1,850 @@
+{
+  "completed": 31,
+  "excluded_attempts": [
+    {
+      "raw_row": 19,
+      "id": "pipeline-default-0.75m-fine",
+      "error": "{'cap_bytes': 672006214, 'cap_packets': 10500097, 'drop_packets': 0, 'ifdrop_packets': 0, 'fwd_bytes': 672006214, 'fwd_packets': 10500097, 'direction_drop_bytes': 0, 'direction_drop_packets': 0, 'error_drop_bytes': 0, 'error_drop_packets': 0, 'ratelimit_drop_bytes': 0, 'ratelimit_drop_packets': 0, 'heartbeat_packets': 0}"
+    }
+  ],
+  "checks": [
+    {
+      "id": "pipeline-default-0.01m",
+      "checks": {
+        "captured_equals_forwarded": true,
+        "captured_bytes_64": true,
+        "loss_reconciles_with_socket_and_vf": true,
+        "no_oom": true,
+        "limits": true,
+        "pipeline_sizing": true,
+        "drained": true,
+        "nic_tx_matches": true,
+        "nic_rx_matches": true,
+        "ring_version": true,
+        "pause_off": true,
+        "thread_affinity_default": true,
+        "worker_only_cgroup": true
+      },
+      "physical_tx_minus_accepted": 2,
+      "physical_rx_minus_accepted": 2,
+      "memory_events_delta": {
+        "low": 0,
+        "high": 0,
+        "max": 0,
+        "oom": 0,
+        "oom_kill": 0
+      }
+    },
+    {
+      "id": "pipeline-default-0.05m",
+      "checks": {
+        "captured_equals_forwarded": true,
+        "captured_bytes_64": true,
+        "loss_reconciles_with_socket_and_vf": true,
+        "no_oom": true,
+        "limits": true,
+        "pipeline_sizing": true,
+        "drained": true,
+        "nic_tx_matches": true,
+        "nic_rx_matches": true,
+        "ring_version": true,
+        "pause_off": true,
+        "thread_affinity_default": true,
+        "worker_only_cgroup": true
+      },
+      "physical_tx_minus_accepted": 0,
+      "physical_rx_minus_accepted": 0,
+      "memory_events_delta": {
+        "low": 0,
+        "high": 0,
+        "max": 0,
+        "oom": 0,
+        "oom_kill": 0
+      }
+    },
+    {
+      "id": "pipeline-default-0.1m",
+      "checks": {
+        "captured_equals_forwarded": true,
+        "captured_bytes_64": true,
+        "loss_reconciles_with_socket_and_vf": true,
+        "no_oom": true,
+        "limits": true,
+        "pipeline_sizing": true,
+        "drained": true,
+        "nic_tx_matches": true,
+        "nic_rx_matches": true,
+        "ring_version": true,
+        "pause_off": true,
+        "thread_affinity_default": true,
+        "worker_only_cgroup": true
+      },
+      "physical_tx_minus_accepted": 0,
+      "physical_rx_minus_accepted": 0,
+      "memory_events_delta": {
+        "low": 0,
+        "high": 0,
+        "max": 0,
+        "oom": 0,
+        "oom_kill": 0
+      }
+    },
+    {
+      "id": "pipeline-default-0.5m",
+      "checks": {
+        "captured_equals_forwarded": true,
+        "captured_bytes_64": true,
+        "loss_reconciles_with_socket_and_vf": true,
+        "no_oom": true,
+        "limits": true,
+        "pipeline_sizing": true,
+        "drained": true,
+        "nic_tx_matches": true,
+        "nic_rx_matches": true,
+        "ring_version": true,
+        "pause_off": true,
+        "thread_affinity_default": true,
+        "worker_only_cgroup": true
+      },
+      "physical_tx_minus_accepted": 0,
+      "physical_rx_minus_accepted": 0,
+      "memory_events_delta": {
+        "low": 0,
+        "high": 0,
+        "max": 0,
+        "oom": 0,
+        "oom_kill": 0
+      }
+    },
+    {
+      "id": "pipeline-default-1m",
+      "checks": {
+        "captured_equals_forwarded": true,
+        "captured_bytes_64": true,
+        "loss_reconciles_with_socket_and_vf": true,
+        "no_oom": true,
+        "limits": true,
+        "pipeline_sizing": true,
+        "drained": true,
+        "nic_tx_matches": true,
+        "nic_rx_matches": true,
+        "ring_version": true,
+        "pause_off": true,
+        "thread_affinity_default": true,
+        "worker_only_cgroup": true
+      },
+      "physical_tx_minus_accepted": 1,
+      "physical_rx_minus_accepted": 1,
+      "memory_events_delta": {
+        "low": 0,
+        "high": 0,
+        "max": 0,
+        "oom": 0,
+        "oom_kill": 0
+      }
+    },
+    {
+      "id": "pipeline-default-2.4m",
+      "checks": {
+        "captured_equals_forwarded": true,
+        "captured_bytes_64": true,
+        "loss_reconciles_with_socket_and_vf": true,
+        "no_oom": true,
+        "limits": true,
+        "pipeline_sizing": true,
+        "drained": true,
+        "nic_tx_matches": true,
+        "nic_rx_matches": true,
+        "ring_version": true,
+        "pause_off": true,
+        "thread_affinity_default": true,
+        "worker_only_cgroup": true
+      },
+      "physical_tx_minus_accepted": 1,
+      "physical_rx_minus_accepted": 1,
+      "memory_events_delta": {
+        "low": 0,
+        "high": 0,
+        "max": 0,
+        "oom": 0,
+        "oom_kill": 0
+      }
+    },
+    {
+      "id": "pipeline-default-2.5m",
+      "checks": {
+        "captured_equals_forwarded": true,
+        "captured_bytes_64": true,
+        "loss_reconciles_with_socket_and_vf": true,
+        "no_oom": true,
+        "limits": true,
+        "pipeline_sizing": true,
+        "drained": true,
+        "nic_tx_matches": true,
+        "nic_rx_matches": true,
+        "ring_version": true,
+        "pause_off": true,
+        "thread_affinity_default": true,
+        "worker_only_cgroup": true
+      },
+      "physical_tx_minus_accepted": 2,
+      "physical_rx_minus_accepted": 2,
+      "memory_events_delta": {
+        "low": 0,
+        "high": 0,
+        "max": 0,
+        "oom": 0,
+        "oom_kill": 0
+      }
+    },
+    {
+      "id": "pipeline-default-5m",
+      "checks": {
+        "captured_equals_forwarded": true,
+        "captured_bytes_64": true,
+        "loss_reconciles_with_socket_and_vf": true,
+        "no_oom": true,
+        "limits": true,
+        "pipeline_sizing": true,
+        "drained": true,
+        "nic_tx_matches": true,
+        "nic_rx_matches": true,
+        "ring_version": true,
+        "pause_off": true,
+        "thread_affinity_default": true,
+        "worker_only_cgroup": true
+      },
+      "physical_tx_minus_accepted": 1,
+      "physical_rx_minus_accepted": 1,
+      "memory_events_delta": {
+        "low": 0,
+        "high": 0,
+        "max": 0,
+        "oom": 0,
+        "oom_kill": 0
+      }
+    },
+    {
+      "id": "pipeline-default-20m",
+      "checks": {
+        "captured_equals_forwarded": true,
+        "captured_bytes_64": true,
+        "loss_reconciles_with_socket_and_vf": true,
+        "no_oom": true,
+        "limits": true,
+        "pipeline_sizing": true,
+        "drained": true,
+        "nic_tx_matches": true,
+        "nic_rx_matches": true,
+        "ring_version": true,
+        "pause_off": true,
+        "thread_affinity_default": true,
+        "worker_only_cgroup": true
+      },
+      "physical_tx_minus_accepted": 2,
+      "physical_rx_minus_accepted": 2,
+      "memory_events_delta": {
+        "low": 0,
+        "high": 0,
+        "max": 0,
+        "oom": 0,
+        "oom_kill": 0
+      }
+    },
+    {
+      "id": "pipeline-v3-0.01m",
+      "checks": {
+        "captured_equals_forwarded": true,
+        "captured_bytes_64": true,
+        "loss_reconciles_with_socket_and_vf": true,
+        "no_oom": true,
+        "limits": true,
+        "pipeline_sizing": true,
+        "drained": true,
+        "nic_tx_matches": true,
+        "nic_rx_matches": true,
+        "ring_version": true,
+        "pause_off": true,
+        "thread_affinity_default": true,
+        "worker_only_cgroup": true
+      },
+      "physical_tx_minus_accepted": 2,
+      "physical_rx_minus_accepted": 2,
+      "memory_events_delta": {
+        "low": 0,
+        "high": 0,
+        "max": 0,
+        "oom": 0,
+        "oom_kill": 0
+      }
+    },
+    {
+      "id": "pipeline-v3-0.05m",
+      "checks": {
+        "captured_equals_forwarded": true,
+        "captured_bytes_64": true,
+        "loss_reconciles_with_socket_and_vf": true,
+        "no_oom": true,
+        "limits": true,
+        "pipeline_sizing": true,
+        "drained": true,
+        "nic_tx_matches": true,
+        "nic_rx_matches": true,
+        "ring_version": true,
+        "pause_off": true,
+        "thread_affinity_default": true,
+        "worker_only_cgroup": true
+      },
+      "physical_tx_minus_accepted": 2,
+      "physical_rx_minus_accepted": 2,
+      "memory_events_delta": {
+        "low": 0,
+        "high": 0,
+        "max": 0,
+        "oom": 0,
+        "oom_kill": 0
+      }
+    },
+    {
+      "id": "pipeline-v3-0.1m",
+      "checks": {
+        "captured_equals_forwarded": true,
+        "captured_bytes_64": true,
+        "loss_reconciles_with_socket_and_vf": true,
+        "no_oom": true,
+        "limits": true,
+        "pipeline_sizing": true,
+        "drained": true,
+        "nic_tx_matches": true,
+        "nic_rx_matches": true,
+        "ring_version": true,
+        "pause_off": true,
+        "thread_affinity_default": true,
+        "worker_only_cgroup": true
+      },
+      "physical_tx_minus_accepted": 1,
+      "physical_rx_minus_accepted": 1,
+      "memory_events_delta": {
+        "low": 0,
+        "high": 0,
+        "max": 0,
+        "oom": 0,
+        "oom_kill": 0
+      }
+    },
+    {
+      "id": "pipeline-v3-0.5m",
+      "checks": {
+        "captured_equals_forwarded": true,
+        "captured_bytes_64": true,
+        "loss_reconciles_with_socket_and_vf": true,
+        "no_oom": true,
+        "limits": true,
+        "pipeline_sizing": true,
+        "drained": true,
+        "nic_tx_matches": true,
+        "nic_rx_matches": true,
+        "ring_version": true,
+        "pause_off": true,
+        "thread_affinity_default": true,
+        "worker_only_cgroup": true
+      },
+      "physical_tx_minus_accepted": 3,
+      "physical_rx_minus_accepted": 3,
+      "memory_events_delta": {
+        "low": 0,
+        "high": 0,
+        "max": 0,
+        "oom": 0,
+        "oom_kill": 0
+      }
+    },
+    {
+      "id": "pipeline-v3-1m",
+      "checks": {
+        "captured_equals_forwarded": true,
+        "captured_bytes_64": true,
+        "loss_reconciles_with_socket_and_vf": true,
+        "no_oom": true,
+        "limits": true,
+        "pipeline_sizing": true,
+        "drained": true,
+        "nic_tx_matches": true,
+        "nic_rx_matches": true,
+        "ring_version": true,
+        "pause_off": true,
+        "thread_affinity_default": true,
+        "worker_only_cgroup": true
+      },
+      "physical_tx_minus_accepted": 1,
+      "physical_rx_minus_accepted": 1,
+      "memory_events_delta": {
+        "low": 0,
+        "high": 0,
+        "max": 0,
+        "oom": 0,
+        "oom_kill": 0
+      }
+    },
+    {
+      "id": "pipeline-v3-2.4m",
+      "checks": {
+        "captured_equals_forwarded": true,
+        "captured_bytes_64": true,
+        "loss_reconciles_with_socket_and_vf": true,
+        "no_oom": true,
+        "limits": true,
+        "pipeline_sizing": true,
+        "drained": true,
+        "nic_tx_matches": true,
+        "nic_rx_matches": true,
+        "ring_version": true,
+        "pause_off": true,
+        "thread_affinity_default": true,
+        "worker_only_cgroup": true
+      },
+      "physical_tx_minus_accepted": 2,
+      "physical_rx_minus_accepted": 2,
+      "memory_events_delta": {
+        "low": 0,
+        "high": 0,
+        "max": 0,
+        "oom": 0,
+        "oom_kill": 0
+      }
+    },
+    {
+      "id": "pipeline-v3-2.5m",
+      "checks": {
+        "captured_equals_forwarded": true,
+        "captured_bytes_64": true,
+        "loss_reconciles_with_socket_and_vf": true,
+        "no_oom": true,
+        "limits": true,
+        "pipeline_sizing": true,
+        "drained": true,
+        "nic_tx_matches": true,
+        "nic_rx_matches": true,
+        "ring_version": true,
+        "pause_off": true,
+        "thread_affinity_default": true,
+        "worker_only_cgroup": true
+      },
+      "physical_tx_minus_accepted": 1,
+      "physical_rx_minus_accepted": 1,
+      "memory_events_delta": {
+        "low": 0,
+        "high": 0,
+        "max": 0,
+        "oom": 0,
+        "oom_kill": 0
+      }
+    },
+    {
+      "id": "pipeline-v3-5m",
+      "checks": {
+        "captured_equals_forwarded": true,
+        "captured_bytes_64": true,
+        "loss_reconciles_with_socket_and_vf": true,
+        "no_oom": true,
+        "limits": true,
+        "pipeline_sizing": true,
+        "drained": true,
+        "nic_tx_matches": true,
+        "nic_rx_matches": true,
+        "ring_version": true,
+        "pause_off": true,
+        "thread_affinity_default": true,
+        "worker_only_cgroup": true
+      },
+      "physical_tx_minus_accepted": 2,
+      "physical_rx_minus_accepted": 2,
+      "memory_events_delta": {
+        "low": 0,
+        "high": 0,
+        "max": 0,
+        "oom": 0,
+        "oom_kill": 0
+      }
+    },
+    {
+      "id": "pipeline-v3-20m",
+      "checks": {
+        "captured_equals_forwarded": true,
+        "captured_bytes_64": true,
+        "loss_reconciles_with_socket_and_vf": true,
+        "no_oom": true,
+        "limits": true,
+        "pipeline_sizing": true,
+        "drained": true,
+        "nic_tx_matches": true,
+        "nic_rx_matches": true,
+        "ring_version": true,
+        "pause_off": true,
+        "thread_affinity_default": true,
+        "worker_only_cgroup": true
+      },
+      "physical_tx_minus_accepted": 1,
+      "physical_rx_minus_accepted": 1,
+      "memory_events_delta": {
+        "low": 0,
+        "high": 0,
+        "max": 0,
+        "oom": 0,
+        "oom_kill": 0
+      }
+    },
+    {
+      "id": "pipeline-default-0.75m-fine-retry",
+      "checks": {
+        "captured_equals_forwarded": true,
+        "captured_bytes_64": true,
+        "loss_reconciles_with_socket_and_vf": true,
+        "no_oom": true,
+        "limits": true,
+        "pipeline_sizing": true,
+        "drained": true,
+        "nic_tx_matches": true,
+        "nic_rx_matches": true,
+        "ring_version": true,
+        "pause_off": true,
+        "thread_affinity_default": true,
+        "worker_only_cgroup": true
+      },
+      "physical_tx_minus_accepted": 4,
+      "physical_rx_minus_accepted": 4,
+      "memory_events_delta": {
+        "low": 0,
+        "high": 0,
+        "max": 0,
+        "oom": 0,
+        "oom_kill": 0
+      }
+    },
+    {
+      "id": "pipeline-default-0.9m-fine",
+      "checks": {
+        "captured_equals_forwarded": true,
+        "captured_bytes_64": true,
+        "loss_reconciles_with_socket_and_vf": true,
+        "no_oom": true,
+        "limits": true,
+        "pipeline_sizing": true,
+        "drained": true,
+        "nic_tx_matches": true,
+        "nic_rx_matches": true,
+        "ring_version": true,
+        "pause_off": true,
+        "thread_affinity_default": true,
+        "worker_only_cgroup": true
+      },
+      "physical_tx_minus_accepted": 0,
+      "physical_rx_minus_accepted": 0,
+      "memory_events_delta": {
+        "low": 0,
+        "high": 0,
+        "max": 0,
+        "oom": 0,
+        "oom_kill": 0
+      }
+    },
+    {
+      "id": "pipeline-default-0.95m-fine",
+      "checks": {
+        "captured_equals_forwarded": true,
+        "captured_bytes_64": true,
+        "loss_reconciles_with_socket_and_vf": true,
+        "no_oom": true,
+        "limits": true,
+        "pipeline_sizing": true,
+        "drained": true,
+        "nic_tx_matches": true,
+        "nic_rx_matches": true,
+        "ring_version": true,
+        "pause_off": true,
+        "thread_affinity_default": true,
+        "worker_only_cgroup": true
+      },
+      "physical_tx_minus_accepted": 0,
+      "physical_rx_minus_accepted": 0,
+      "memory_events_delta": {
+        "low": 0,
+        "high": 0,
+        "max": 0,
+        "oom": 0,
+        "oom_kill": 0
+      }
+    },
+    {
+      "id": "pipeline-default-1m-fine",
+      "checks": {
+        "captured_equals_forwarded": true,
+        "captured_bytes_64": true,
+        "loss_reconciles_with_socket_and_vf": true,
+        "no_oom": true,
+        "limits": true,
+        "pipeline_sizing": true,
+        "drained": true,
+        "nic_tx_matches": true,
+        "nic_rx_matches": true,
+        "ring_version": true,
+        "pause_off": true,
+        "thread_affinity_default": true,
+        "worker_only_cgroup": true
+      },
+      "physical_tx_minus_accepted": 0,
+      "physical_rx_minus_accepted": 0,
+      "memory_events_delta": {
+        "low": 0,
+        "high": 0,
+        "max": 0,
+        "oom": 0,
+        "oom_kill": 0
+      }
+    },
+    {
+      "id": "pipeline-default-1.1m-fine",
+      "checks": {
+        "captured_equals_forwarded": true,
+        "captured_bytes_64": true,
+        "loss_reconciles_with_socket_and_vf": true,
+        "no_oom": true,
+        "limits": true,
+        "pipeline_sizing": true,
+        "drained": true,
+        "nic_tx_matches": true,
+        "nic_rx_matches": true,
+        "ring_version": true,
+        "pause_off": true,
+        "thread_affinity_default": true,
+        "worker_only_cgroup": true
+      },
+      "physical_tx_minus_accepted": 0,
+      "physical_rx_minus_accepted": 0,
+      "memory_events_delta": {
+        "low": 0,
+        "high": 0,
+        "max": 0,
+        "oom": 0,
+        "oom_kill": 0
+      }
+    },
+    {
+      "id": "pipeline-v3-1.5m-fine",
+      "checks": {
+        "captured_equals_forwarded": true,
+        "captured_bytes_64": true,
+        "loss_reconciles_with_socket_and_vf": true,
+        "no_oom": true,
+        "limits": true,
+        "pipeline_sizing": true,
+        "drained": true,
+        "nic_tx_matches": true,
+        "nic_rx_matches": true,
+        "ring_version": true,
+        "pause_off": true,
+        "thread_affinity_default": true,
+        "worker_only_cgroup": true
+      },
+      "physical_tx_minus_accepted": 0,
+      "physical_rx_minus_accepted": 0,
+      "memory_events_delta": {
+        "low": 0,
+        "high": 0,
+        "max": 0,
+        "oom": 0,
+        "oom_kill": 0
+      }
+    },
+    {
+      "id": "pipeline-v3-1.8m-fine",
+      "checks": {
+        "captured_equals_forwarded": true,
+        "captured_bytes_64": true,
+        "loss_reconciles_with_socket_and_vf": true,
+        "no_oom": true,
+        "limits": true,
+        "pipeline_sizing": true,
+        "drained": true,
+        "nic_tx_matches": true,
+        "nic_rx_matches": true,
+        "ring_version": true,
+        "pause_off": true,
+        "thread_affinity_default": true,
+        "worker_only_cgroup": true
+      },
+      "physical_tx_minus_accepted": 1,
+      "physical_rx_minus_accepted": 1,
+      "memory_events_delta": {
+        "low": 0,
+        "high": 0,
+        "max": 0,
+        "oom": 0,
+        "oom_kill": 0
+      }
+    },
+    {
+      "id": "pipeline-v3-2m-fine",
+      "checks": {
+        "captured_equals_forwarded": true,
+        "captured_bytes_64": true,
+        "loss_reconciles_with_socket_and_vf": true,
+        "no_oom": true,
+        "limits": true,
+        "pipeline_sizing": true,
+        "drained": true,
+        "nic_tx_matches": true,
+        "nic_rx_matches": true,
+        "ring_version": true,
+        "pause_off": true,
+        "thread_affinity_default": true,
+        "worker_only_cgroup": true
+      },
+      "physical_tx_minus_accepted": 1,
+      "physical_rx_minus_accepted": 1,
+      "memory_events_delta": {
+        "low": 0,
+        "high": 0,
+        "max": 0,
+        "oom": 0,
+        "oom_kill": 0
+      }
+    },
+    {
+      "id": "pipeline-v3-2.1m-fine",
+      "checks": {
+        "captured_equals_forwarded": true,
+        "captured_bytes_64": true,
+        "loss_reconciles_with_socket_and_vf": true,
+        "no_oom": true,
+        "limits": true,
+        "pipeline_sizing": true,
+        "drained": true,
+        "nic_tx_matches": true,
+        "nic_rx_matches": true,
+        "ring_version": true,
+        "pause_off": true,
+        "thread_affinity_default": true,
+        "worker_only_cgroup": true
+      },
+      "physical_tx_minus_accepted": 3,
+      "physical_rx_minus_accepted": 3,
+      "memory_events_delta": {
+        "low": 0,
+        "high": 0,
+        "max": 0,
+        "oom": 0,
+        "oom_kill": 0
+      }
+    },
+    {
+      "id": "pipeline-default-0.95m-confirm1",
+      "checks": {
+        "captured_equals_forwarded": true,
+        "captured_bytes_64": true,
+        "loss_reconciles_with_socket_and_vf": true,
+        "no_oom": true,
+        "limits": true,
+        "pipeline_sizing": true,
+        "drained": true,
+        "nic_tx_matches": true,
+        "nic_rx_matches": true,
+        "ring_version": true,
+        "pause_off": true,
+        "thread_affinity_default": true,
+        "worker_only_cgroup": true
+      },
+      "physical_tx_minus_accepted": 4,
+      "physical_rx_minus_accepted": 4,
+      "memory_events_delta": {
+        "low": 0,
+        "high": 0,
+        "max": 0,
+        "oom": 0,
+        "oom_kill": 0
+      }
+    },
+    {
+      "id": "pipeline-default-1m-confirm1",
+      "checks": {
+        "captured_equals_forwarded": true,
+        "captured_bytes_64": true,
+        "loss_reconciles_with_socket_and_vf": true,
+        "no_oom": true,
+        "limits": true,
+        "pipeline_sizing": true,
+        "drained": true,
+        "nic_tx_matches": true,
+        "nic_rx_matches": true,
+        "ring_version": true,
+        "pause_off": true,
+        "thread_affinity_default": true,
+        "worker_only_cgroup": true
+      },
+      "physical_tx_minus_accepted": 1,
+      "physical_rx_minus_accepted": 1,
+      "memory_events_delta": {
+        "low": 0,
+        "high": 0,
+        "max": 0,
+        "oom": 0,
+        "oom_kill": 0
+      }
+    },
+    {
+      "id": "pipeline-v3-2.1m-confirm1",
+      "checks": {
+        "captured_equals_forwarded": true,
+        "captured_bytes_64": true,
+        "loss_reconciles_with_socket_and_vf": true,
+        "no_oom": true,
+        "limits": true,
+        "pipeline_sizing": true,
+        "drained": true,
+        "nic_tx_matches": true,
+        "nic_rx_matches": true,
+        "ring_version": true,
+        "pause_off": true,
+        "thread_affinity_default": true,
+        "worker_only_cgroup": true
+      },
+      "physical_tx_minus_accepted": 3,
+      "physical_rx_minus_accepted": 3,
+      "memory_events_delta": {
+        "low": 0,
+        "high": 0,
+        "max": 0,
+        "oom": 0,
+        "oom_kill": 0
+      }
+    },
+    {
+      "id": "pipeline-v3-2.1m-confirm2",
+      "checks": {
+        "captured_equals_forwarded": true,
+        "captured_bytes_64": true,
+        "loss_reconciles_with_socket_and_vf": true,
+        "no_oom": true,
+        "limits": true,
+        "pipeline_sizing": true,
+        "drained": true,
+        "nic_tx_matches": true,
+        "nic_rx_matches": true,
+        "ring_version": true,
+        "pause_off": true,
+        "thread_affinity_default": true,
+        "worker_only_cgroup": true
+      },
+      "physical_tx_minus_accepted": 1,
+      "physical_rx_minus_accepted": 1,
+      "memory_events_delta": {
+        "low": 0,
+        "high": 0,
+        "max": 0,
+        "oom": 0,
+        "oom_kill": 0
+      }
+    }
+  ],
+  "all_pass": true
+}

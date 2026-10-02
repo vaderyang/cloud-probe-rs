@@ -24,12 +24,14 @@
 
 （已报过的：[#231](https://github.com/Netis/cloud-probe/issues/231) ZMQ VLAN 越界。）
 
-## 已提交的上游 issue（2026-10-01，DPDK 现场测试发现）
+## 已提交的上游 issue（2026-10-01 起，DPDK 现场测试发现）
 
 | # | 主题 | 上游链接 |
 |---|---|---|
 | S4-1 | DPDK pdump 克隆内存池用 `ring_mp_sc`（单消费者 get）：`RTE_PDUMP_ALL_QUEUES` 下多队列 primary 并发分配 → 池损坏 → 二级 `__rte_pktmbuf_read` SIGSEGV | [#286](https://github.com/Netis/cloud-probe/issues/286) |
-| S4-2 | DPDK pdump capturer 从不初始化 EAL：`dpdk_init()`（全仓唯一调用 `rte_eal_init()` 的地方）无调用点，且从不调用 `rte_pdump_init()`（≥25.11 必需）→ `rte_eth_dev_get_port_by_name()` 失败、起 0 个任务；另 CMake 未应用 `LIBDPDK_CFLAGS` | [#289](https://github.com/Netis/cloud-probe/issues/289) |
+| S4-2 | DPDK pdump capturer 从不初始化 EAL：`dpdk_init()`（全仓唯一调用 `rte_eal_init()` 的地方）无调用点，且从不调用 `rte_pdump_init()`（≥25.11 必需）→ `rte_eth_dev_get_port_by_name()` 失败、起 0 个任务；另 CMake 未应用 `LIBDPDK_CFLAGS`（2026-10-02 提交） | [#289](https://github.com/Netis/cloud-probe/issues/289) |
+
+**可达性提醒（#286）**：#286 的崩溃是在**我们的 Rust 二级 + 我们的实验室 primary**上复现的；上游树里的同一缺陷是**潜在的（latent）**，在 `d302572` 上**根本触发不到**——因为 `ENABLE_DPDK` 默认 OFF，且 `dpdk_init()` 无调用点（即 S4-2/#289）。所以引用 #286 时应写“同一处源码缺陷（潜在，见 #289）”，不要说成上游线上可复现。
 
 本地已修复（#286 改用 `ring_mp_mc`，与 DPDK 自带 `app/pdump` 一致，提交 `00cf775`；#289 在 Rust 端本就调用了 `rte_pdump_init()`，提交 `77492d6`）。复现/实测见 `verification/dpdk/BENCHMARK.md`。两个问题互相独立：即使补上 EAL 初始化，#286 的池仍会在多队列下损坏。
 

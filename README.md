@@ -353,9 +353,9 @@ reached the wire.
 | Capture backend | Captured | Notes |
 |---|---:|---|
 | AF_PACKET `recvmsg` (one syscall per packet) | 0.47 Mpps | ~100% of one core, ~94% of it inside the kernel receive path |
-| **AF_PACKET `TPACKET_V3` mmap ring** (default) | **2.5 Mpps** | ~7% of one core; beats libpcap's own `TPACKET_V3` (1.93 Mpps) at the same offered load |
+| **AF_PACKET `TPACKET_V3` mmap ring** (default) | **2.5 Mpps** | ~7% of one core at *that* offered load; **~10–12%** in the 1 CPU budget sweep below. Beats libpcap's own `TPACKET_V3` (1.93 Mpps) at the same offered load |
 | DPDK `pdump`, shared ring, 2048 entries | 4.3–5.9 Mpps | before tuning |
-| DPDK `pdump`, NUMA-local pool/consumer, 65536-entry ring, burst counters | **~29 Mpps** | one consumer; the primary's `ringfull` counter takes the rest |
+| DPDK `pdump`, NUMA-local pool/consumer, 65536-entry ring, burst counters | **~29 Mpps** | one consumer; the primary's `ringfull` counter takes the rest. A 2026-10-02 re-run of the same configuration measured 28/30 Mpps at **0.20%** whole-burst loss, so treat "28–30" as the *throughput* point, not a strictly loss-free guarantee |
 | DPDK `pdump`, four per-queue rings and consumers (prototype) | 54.1 Mpps | not a product configuration |
 | NIC `SAMPLE` mirror to a second VF | 66.5 Mpps | switchdev representors, per copy |
 | in-primary DPDK RX with no capture (reference) | 95–139 Mpps | what the NIC and one lcore can do |
@@ -364,6 +364,10 @@ The pdump figures exclude the **primary**, which has to own the port: it costs
 four lcores and its own hugepages. pdump copies every mirrored frame
 (`rte_pktmbuf_copy`) and hands the clone over a ring, so despite DPDK's
 zero-copy RX it is **not** a zero-copy capture path — that copy is what caps it.
+**They also do not apply to the shipping NIC:** the product's own **nbl** PMD
+refuses a secondary process (see `PARITY.md` §5.1 and `FIELD_CONFIRMATION.md`
+§7), so pdump is not a deployable backend on it — the numbers here characterise
+the mechanism, not a shipping configuration.
 
 ### What one worker captures under the product's own budget: 1 CPU / 512 MiB
 
@@ -374,25 +378,40 @@ applied to `cpworker` alone, in RTC execution:
 
 | Path | Near-loss-free | Binding constraint |
 |---|---:|---|
-| AF_PACKET, 8 MiB ring | **2.4 Mpps** | the kernel receive path — the worker uses ~11% of its core while ~11 host softirq cores work outside the cgroup |
+| AF_PACKET, 8 MiB ring | **2.4 Mpps** | not the worker's core: it uses ~11%, socket drops stay 0 and the loss shows up in VF `rx_out_of_buffer`, so packets are lost *before* the socket. The kernel/NAPI substage was **not profiled**, and ~11 host softirq cores work outside the cgroup to reach this number |
 | DPDK pdump, 2048-entry ring | 20 Mpps | the worker's one-core quota |
 | DPDK pdump, 65536-entry ring | **28–30 Mpps** | the worker's one-core quota; ≤462 MiB, plus the 4-core primary |
 
-512 MiB does not bind any of these (a ring sized to the whole limit exceeds the
-physical budget, and the kernel does not charge the mmap'd ring to the cgroup).
+512 MiB **does not bind the tested configurations** (8/128/256 MiB AF_PACKET
+rings, and either statically sized pdump pool; the kernel does not charge the
+mmap'd ring to the cgroup). It is not a general statement: assigning the whole
+limit to the socket ring maps ~517 MiB and exceeds the physical budget, and the
+upstream C worker's requested 256 MiB `TPACKET_V2` ring maps ~492 MiB.
 Enlarging the AF_PACKET ring does not raise its ceiling. For reference, one
 lcore receives 33.8 Mpps (39.6 Mpps with mlx5 MPRQ) and writes pcap to
 `/dev/null` at 20.4 Mpps.
 
-**Pipeline execution** — the daemon's default — used to lose three to four
-orders of magnitude to RTC under this budget (7.5 kpps loss-free, 5% loss at
-10 kpps), because the output thread held the ring mutex across
-`dispatch_ring_msg` and its idle sleep while the capture loop blocked on the same
-mutex with the manager lock held, starving `cpctl stats` as well. The ring is now
-split into owned SPSC endpoints and a capture batch releases the manager lock;
-the same measurement now reaches 1.6 Mpps (AF_PACKET, pinned) and ~6 Mpps
-(pdump), with control requests answered in ≤2 ms. Pipeline still trails RTC; the
-remaining gap is tracked as `cloud-probe-rs-2kx`.
+**Pipeline execution** — the daemon's default — used to lose ~2.5 orders of
+magnitude to RTC AF_PACKET (and more against pdump) under this budget: 7.5 kpps
+with zero *measured* loss, 5% loss at 10 kpps, because the output thread held the
+ring mutex across `dispatch_ring_msg` and its idle sleep while the capture loop
+blocked on the same mutex with the manager lock held, starving `cpctl stats` as
+well. The ring is now split into owned SPSC endpoints and a capture batch
+releases the manager lock; the same measurement now reaches 1.6 Mpps (AF_PACKET,
+pinned to one CPU) and ~6 Mpps (pdump), with pipeline control requests answered
+in ≤2.05 ms. That is still **below** the upstream C worker's shipped default
+(0.95–1.0 Mpps loss-free, and 2.1 Mpps with its `TPACKET_V3` timeout) on a
+like-for-like unrestricted basis; the remaining gap is tracked as
+`cloud-probe-rs-2kx`.
+
+Two caveats the sweep data itself shows and this summary used to hide:
+
+* The control-plane fix applies to the pipeline path only. On the **RTC** path a
+  `capture_once_ring` that finds the ring empty blocks in `poll()` for up to
+  `timeout_ms` *while the manager lock is held*, and the same dataset contains
+  live-`cpctl stats` responses of **650 ms and 753 ms** in RTC AF_PACKET runs
+  (every other sample is ~1–2 ms). Tracked as `cloud-probe-rs-brh`.
+* The 1.6 Mpps pipeline figure is the *pinned* one; unrestricted it is 0.8 Mpps.
 
 These are **short-burst laboratory bounds** on this host and binary. They are not
 a sustained-endurance or real-output guarantee.

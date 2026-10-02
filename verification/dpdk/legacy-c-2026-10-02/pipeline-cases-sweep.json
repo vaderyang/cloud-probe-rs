@@ -1,0 +1,146 @@
+[
+  {
+    "id": "pipeline-default-0.01m",
+    "backend": "pcap",
+    "timeout_ms": 0,
+    "buffer_mb": 8,
+    "target_mpps": 0.01,
+    "omit_timeout": true
+  },
+  {
+    "id": "pipeline-default-0.05m",
+    "backend": "pcap",
+    "timeout_ms": 0,
+    "buffer_mb": 8,
+    "target_mpps": 0.05,
+    "omit_timeout": true
+  },
+  {
+    "id": "pipeline-default-0.1m",
+    "backend": "pcap",
+    "timeout_ms": 0,
+    "buffer_mb": 8,
+    "target_mpps": 0.1,
+    "omit_timeout": true
+  },
+  {
+    "id": "pipeline-default-0.5m",
+    "backend": "pcap",
+    "timeout_ms": 0,
+    "buffer_mb": 8,
+    "target_mpps": 0.5,
+    "omit_timeout": true
+  },
+  {
+    "id": "pipeline-default-1m",
+    "backend": "pcap",
+    "timeout_ms": 0,
+    "buffer_mb": 8,
+    "target_mpps": 1,
+    "omit_timeout": true
+  },
+  {
+    "id": "pipeline-default-2.4m",
+    "backend": "pcap",
+    "timeout_ms": 0,
+    "buffer_mb": 8,
+    "target_mpps": 2.4,
+    "omit_timeout": true
+  },
+  {
+    "id": "pipeline-default-2.5m",
+    "backend": "pcap",
+    "timeout_ms": 0,
+    "buffer_mb": 8,
+    "target_mpps": 2.5,
+    "omit_timeout": true
+  },
+  {
+    "id": "pipeline-default-5m",
+    "backend": "pcap",
+    "timeout_ms": 0,
+    "buffer_mb": 8,
+    "target_mpps": 5,
+    "omit_timeout": true
+  },
+  {
+    "id": "pipeline-default-20m",
+    "backend": "pcap",
+    "timeout_ms": 0,
+    "buffer_mb": 8,
+    "target_mpps": 20,
+    "omit_timeout": true
+  },
+  {
+    "id": "pipeline-v3-0.01m",
+    "backend": "pcap",
+    "timeout_ms": 1000,
+    "buffer_mb": 8,
+    "target_mpps": 0.01,
+    "omit_timeout": false
+  },
+  {
+    "id": "pipeline-v3-0.05m",
+    "backend": "pcap",
+    "timeout_ms": 1000,
+    "buffer_mb": 8,
+    "target_mpps": 0.05,
+    "omit_timeout": false
+  },
+  {
+    "id": "pipeline-v3-0.1m",
+    "backend": "pcap",
+    "timeout_ms": 1000,
+    "buffer_mb": 8,
+    "target_mpps": 0.1,
+    "omit_timeout": false
+  },
+  {
+    "id": "pipeline-v3-0.5m",
+    "backend": "pcap",
+    "timeout_ms": 1000,
+    "buffer_mb": 8,
+    "target_mpps": 0.5,
+    "omit_timeout": false
+  },
+  {
+    "id": "pipeline-v3-1m",
+    "backend": "pcap",
+    "timeout_ms": 1000,
+    "buffer_mb": 8,
+    "target_mpps": 1,
+    "omit_timeout": false
+  },
+  {
+    "id": "pipeline-v3-2.4m",
+    "backend": "pcap",
+    "timeout_ms": 1000,
+    "buffer_mb": 8,
+    "target_mpps": 2.4,
+    "omit_timeout": false
+  },
+  {
+    "id": "pipeline-v3-2.5m",
+    "backend": "pcap",
+    "timeout_ms": 1000,
+    "buffer_mb": 8,
+    "target_mpps": 2.5,
+    "omit_timeout": false
+  },
+  {
+    "id": "pipeline-v3-5m",
+    "backend": "pcap",
+    "timeout_ms": 1000,
+    "buffer_mb": 8,
+    "target_mpps": 5,
+    "omit_timeout": false
+  },
+  {
+    "id": "pipeline-v3-20m",
+    "backend": "pcap",
+    "timeout_ms": 1000,
+    "buffer_mb": 8,
+    "target_mpps": 20,
+    "omit_timeout": false
+  }
+]

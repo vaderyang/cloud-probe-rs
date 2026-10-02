@@ -1,0 +1,125 @@
+{
+  "successful_measurements": 17,
+  "failed_attempts": 1,
+  "checks": [
+    {
+      "raw_row": 1,
+      "id": "v3-1m",
+      "counter_consistency": true,
+      "offered_phy_background_packets": 4,
+      "wire_offered_difference": 0
+    },
+    {
+      "raw_row": 2,
+      "id": "v3-2m",
+      "counter_consistency": true,
+      "offered_phy_background_packets": 5,
+      "wire_offered_difference": 0
+    },
+    {
+      "raw_row": 3,
+      "id": "v3-2.5m",
+      "counter_consistency": true,
+      "offered_phy_background_packets": 2,
+      "wire_offered_difference": 0
+    },
+    {
+      "raw_row": 4,
+      "id": "v3-5m",
+      "counter_consistency": true,
+      "offered_phy_background_packets": 2,
+      "wire_offered_difference": 0
+    },
+    {
+      "raw_row": 5,
+      "id": "v3-20m",
+      "counter_consistency": true,
+      "offered_phy_background_packets": 2,
+      "wire_offered_difference": 0
+    },
+    {
+      "raw_row": 6,
+      "id": "v3-120m",
+      "counter_consistency": true,
+      "offered_phy_background_packets": 3,
+      "wire_offered_difference": 0
+    },
+    {
+      "raw_row": 7,
+      "id": "default-1m",
+      "counter_consistency": true,
+      "offered_phy_background_packets": 3,
+      "wire_offered_difference": 0
+    },
+    {
+      "raw_row": 8,
+      "id": "default-2m",
+      "counter_consistency": true,
+      "offered_phy_background_packets": 3,
+      "wire_offered_difference": 0
+    },
+    {
+      "raw_row": 9,
+      "id": "default-5m",
+      "counter_consistency": true,
+      "offered_phy_background_packets": 2,
+      "wire_offered_difference": 0
+    },
+    {
+      "raw_row": 11,
+      "id": "v3-2.4m-repeat1",
+      "counter_consistency": true,
+      "offered_phy_background_packets": 2,
+      "wire_offered_difference": 0
+    },
+    {
+      "raw_row": 12,
+      "id": "v3-2.4m-repeat2",
+      "counter_consistency": true,
+      "offered_phy_background_packets": 0,
+      "wire_offered_difference": 0
+    },
+    {
+      "raw_row": 13,
+      "id": "v3-256mb-120m",
+      "counter_consistency": true,
+      "offered_phy_background_packets": 0,
+      "wire_offered_difference": 0
+    },
+    {
+      "raw_row": 14,
+      "id": "default-2.5m",
+      "counter_consistency": true,
+      "offered_phy_background_packets": 0,
+      "wire_offered_difference": 0
+    },
+    {
+      "raw_row": 15,
+      "id": "default-20m",
+      "counter_consistency": true,
+      "offered_phy_background_packets": 0,
+      "wire_offered_difference": 0
+    },
+    {
+      "raw_row": 16,
+      "id": "v3-2.4m-repeat3",
+      "counter_consistency": true,
+      "offered_phy_background_packets": 6,
+      "wire_offered_difference": 0
+    },
+    {
+      "raw_row": 17,
+      "id": "v3-2.4m-repeat4",
+      "counter_consistency": true,
+      "offered_phy_background_packets": 4,
+      "wire_offered_difference": 0
+    },
+    {
+      "raw_row": 18,
+      "id": "v3-256mb-2.4m",
+      "counter_consistency": true,
+      "offered_phy_background_packets": 4,
+      "wire_offered_difference": 0
+    }
+  ]
+}

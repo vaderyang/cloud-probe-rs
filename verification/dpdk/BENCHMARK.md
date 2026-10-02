@@ -352,8 +352,12 @@ Only two production changes were retained in `dpdk_pdump.rs`:
 * Publish capture packet/byte counters once per burst, retaining the same
   per-packet headers, sink calls, direction checks and invalid-mbuf exclusions.
   All four post-change windows had exactly equal captured/forwarded packet and
-  byte totals with the null sink. The task polling lock keeps control snapshots
-  outside an incomplete burst.
+  byte totals with the null sink. On the RTC path the task polling lock keeps
+  control snapshots outside an incomplete burst. **After the pipeline fix below
+  this is no longer true on the pipeline path**: a pipeline snapshot can run
+  during a capture batch and see the preceding completed burst. Because the
+  counters are published once per burst the snapshot is still internally
+  consistent, but it can be one burst stale.
 * Disable primary pdump callbacks before freeing the shared ring, clone pool
   and BPF parameters on shutdown/reload. A live SIGTERM test left the primary
   alive, stopped its pdump accepted counter, and let primary RX continue at
@@ -756,10 +760,36 @@ overrides all those backend limits in the daemon default. Bead
 accounting. These are short-burst laboratory bounds on this host/binary, not
 sustained telemetry/pcap or a portable maximum for arbitrary packet sizes.
 
+Two further limits on what this section supports, added after an independent
+review of the record:
+
+* **The AF_PACKET binding stage is not identified, only localised.** Worker CPU
+  is ~10–12%, socket drops stay 0 and VF `rx_out_of_buffer` rises, so the loss is
+  *before* the worker's socket. The kernel/NAPI substage was **not profiled**, and
+  the file also carries an older, competing explanation ("a single `AF_PACKET`
+  socket serialises on the ring block lock", `BENCHMARK.md` fix-history section).
+  The experiment that would separate them — `PACKET_FANOUT` across queues — was
+  never run; the "4 RX queues did not help" observation was taken **without**
+  fanout, so all queues still fed one socket and it does not discriminate. Read
+  the constraint as "loss occurs before the socket".
+* **The control plane is not solved everywhere.** The pipeline fix removed the
+  pipeline starvation, but on the **RTC** path an empty ring makes
+  `capture_once_ring` block in `poll()` for up to `timeout_ms` while the manager
+  lock is held. The same dataset contains live-`cpctl stats` maxima of **650 ms
+  and 753 ms** in RTC AF_PACKET runs at 2.4 Mpps (every other sample is
+  1.1–2.0 ms), i.e. the RTC configuration this section recommends as the tier
+  default can still stall a control request for ~0.75 s. Tracked as
+  `cloud-probe-rs-brh`.
+* **The shipping NIC cannot use pdump.** The product's own **nbl** PMD refuses a
+  secondary process (`PARITY.md` §5.1, `FIELD_CONFIRMATION.md` §7), so every
+  pdump number in this document characterises the DPDK mechanism rather than a
+  deployable backend on the product's NIC.
+
 **Default recommendation:** use `execution_model=rtc` with
 `fixed_nic_buffer=8 MiB` for the 1 CPU/512 MiB product tier, admit about **2 Mpps**
 for operational margin, and fix/requalify pipeline before retaining it as the
-default; reserve process overhead when implementing auto buffer sizing.
+default; reserve process overhead when implementing auto buffer sizing. Note the
+RTC control-plane stall recorded above before treating RTC as fully solved.
 
 Full evidence: [CSV with counter deltas and intervals](capacity-2026-10-01.csv),
 [raw cumulative snapshots](capacity-2026-10-01.csv) (the 5.5 MiB `capacity-2026-10-01.jsonl.gz` is a lab-local artifact and is not committed),
@@ -798,15 +828,24 @@ These are the highest passing *tested* points, using the existing ≤0.1%
 near-loss-free definition. Unrestricted affinity still materially affects
 pipeline capacity; this fix does not establish RTC throughput parity.
 
-The confirmed cause was temporary mutex-guard lifetime: the consumer's match
-scrutinee retained the shared ring mutex during output dispatch and the 10 µs
-idle sleep. The full-ring producer's match likewise retained its guard during
+Two changes shipped together and were only ever measured jointly — the
+mutex-guard lifetime and capture running beneath the manager mutex — so the final
+numbers are not attributable to either alone. What the intermediate data shows:
+the mutex-guard lifetime alone was temporary, i.e. the consumer's match scrutinee
+retained the shared ring mutex during output dispatch and the 10 µs idle sleep
+(the guard was released at the end of the match, so this blocked `push` for up to
+`dispatch + 10 µs` per empty poll — it was *not* held into the next iteration,
+which would have self-deadlocked a non-reentrant mutex). The full-ring producer's
+match likewise retained its guard during
 `yield_now`. Capture ran beneath the manager mutex for up to 256 iterations;
 a single AF_PACKET iteration can drain many packets, so merely shrinking that
 batch would still leave stats blocked by output backpressure.
 
-A scoped-pop fix restored stats responsiveness but retained substantial ring
-contention. A 64-message consumer batch was also measured and remained
+A scoped-pop fix alone restored stats responsiveness but retained substantial
+ring contention, and at one AF_PACKET operating point (1.0 Mpps) its recorded loss
+(11.78%) was *lower* than the shipped two-change version's (30.29% at 100.3% CPU)
+— so the shipped combination is not uniformly better at every rate. A 64-message
+consumer batch was also measured and remained
 insufficient with unrestricted affinity. The final implementation uses the
 existing atomic SPSC algorithm with unique, non-cloneable owned producer and
 consumer endpoints. The producer ownership mutex is acquired once per capture
@@ -954,8 +993,12 @@ bursts, so the two implementations are compared under one setup.
 So the C probe does **not** reproduce the historical 1.93 Mpps tcpdump/libpcap
 reference. Its batched path lands on the same ~2.5 Mpps kernel/NIC ceiling as the
 Rust `TPACKET_V3` ring (2.4 Mpps near-loss-free), and its default path sits at
-~1.2 Mpps on one full core. No language or framework speedup follows — the
-ceiling is the receive path, and at equal rate C spent more process CPU. At
+~1.2 Mpps on one full core. No **throughput** speedup follows — the ceiling is
+the receive path. At the same plateau C did use more process CPU (~15–18% vs the
+Rust ring's ~10–12%), but that is a per-packet efficiency difference, not a
+throughput one, and the two figures come from different campaigns (different
+affinity masks and harnesses), so read it as indicative rather than a
+like-for-like CPU comparison. At
 2.4 Mpps, three of four C bursts met the <=0.1% whole-burst criterion (a 1.84%
 startup-loss outlier is retained); the 256 MiB V2 ring maps ~492 MiB, because
 frame/block rounding exceeds the requested buffer.
@@ -968,11 +1011,20 @@ policy default is `fixed_nic_buffer` = 8 MiB, with the pipeline buffer sized to
 `memLimit - taskMem` (504 MiB for one task). The C worker was therefore measured
 in **its shipped default** under the same 1 CPU / 512 MiB cgroup:
 
-| C configuration | Loss-free | Overload plateau | Worker CPU |
+| C configuration | Loss-free | Overload observed | Worker CPU |
 |---|---:|---:|---:|
 | pipeline, daemon default (`timeout_ms` omitted → 0 ms, `TPACKET_V2`, 8 MiB, 504 MiB pipeline) | **0.95 Mpps** | 0.916–0.950 Mpps | ~100% of one core |
-| pipeline, `timeout_ms=1000` (`TPACKET_V3`, otherwise identical) | **2.1 Mpps** | ~2.1 Mpps | ~86% |
+| pipeline, `timeout_ms=1000` (`TPACKET_V3`, otherwise identical) | **2.1 Mpps** | 1.20–2.05 Mpps | ~86% |
 | RTC, `timeout_ms=1000` (`TPACKET_V3`, 8 MiB) | ~2.4 Mpps | 2.455–2.508 Mpps | ~18% |
+
+The `2.1 Mpps` in the middle row is the highest *loss-free* point, not a plateau:
+whole-burst capture at 2.4/2.5/5/20 Mpps offered fell to
+2.053/1.217/1.203/1.605 Mpps, and a 1.8 Mpps case lost 32.5%. The shipped-default
+row's 0.916–0.950 Mpps *is* its overload plateau; it passes 0.95–1.0 Mpps with
+zero or 0.05% loss and is CPU-saturated from about 1 Mpps up. Note the two
+"defaults" are different configurations: the worker's compiled default uses a
+256 MiB buffer (`timeout_ms=0`), while the daemon-derived default is 8 MiB + a
+504 MiB pipeline buffer.
 
 **This is a porting result, not an upstream one.** The C pipeline does not
 collapse the way this port's did before the ring-mutex fix (7.5 kpps loss-free,
@@ -983,11 +1035,31 @@ an empty queue **with no ring mutex held**; its `stats_lock` covers only a short
 snapshot copy. This port had wrapped that same SPSC ring in a `Mutex<SpscRing>`
 and kept the guard alive across dispatch and the idle sleep, which is what cost
 three orders of magnitude. So the defect was ours, and the fix (`215ca7f`)
-brings the port to 0.8 Mpps unrestricted / 1.6 Mpps pinned — at or above C's
-shipped default. Nothing here needs an upstream report.
+brings the port to **0.8 Mpps unrestricted / 1.6 Mpps pinned** — still *below*
+the C worker's shipped default (0.95–1.0 Mpps loss-free) on a like-for-like
+unrestricted basis, and below C's 2.1 Mpps V3 pipeline even when pinned. Per-packet
+efficiency does not rescue that: at its loss-free point C used ~0.65–0.69
+core·s/Mpkt against the port's ~0.72–1.00.
 
-The C pipeline's remaining gap to C RTC (0.95 vs 2.4 Mpps at the shipped
-default; 2.1 vs 2.4 with the V3 timeout) is the execution model itself, confined
+What needs no upstream report is the **collapse** — a three-order regression that
+C does not have, caused by this port holding a mutex C never takes. What is *not*
+yet established is the C pipeline's own execution-model gap (0.95 vs ~1.18 Mpps at
+the shipped default, and 2.5× slower than C RTC with the V3 timeout, at ~86–100%
+of a core versus RTC's ~18%). Calling that "the execution model itself" without a
+C-side profile would be an assertion; the candidates worth profiling first are the
+relaxed CAS on the allocator's `used` counter for every alloc/free and the
+empty-queue `usleep(10)` cadence. Until then this section supports "no
+*ring-synchronisation* defect upstream", not "nothing to report".
+
+The C reference numbers in this section have their raw counters committed under
+[`verification/dpdk/legacy-c-2026-10-02/`](legacy-c-2026-10-02/) — both
+campaigns' CSVs, the case inputs and the validation/restoration checks. Binaries,
+build logs and audit JSON remain lab-local under `/tmp/legacy-probe/`.
+
+The C pipeline's remaining gap to C RTC (0.95 vs ~1.18 Mpps at the shipped
+default, both `timeout_ms=0`/`TPACKET_V2` but 8 MiB pipeline buffer against the
+example's 256 MiB; 2.1 vs 2.4 with the V3 timeout) is the execution model itself,
+confined
 to one worker's one-core quota — the same shape this port shows after its fix
 (0.8–1.6 vs 2.4 Mpps).
 
