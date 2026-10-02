@@ -1,0 +1,27 @@
+{
+  "execution_model": "rtc",
+  "control": {
+    "type": "unix",
+    "unix": {
+      "path": "/tmp/forwarding-e2e/full-repro.sock"
+    }
+  },
+  "tasks": [
+    {
+      "capturer": {
+        "type": "pcap_file",
+        "pcap_file": {
+          "file_name": "/tmp/forwarding-e2e/full-repro.pcap"
+        }
+      },
+      "outputs": [
+        {
+          "type": "file",
+          "file": {
+            "name": "/dev/full"
+          }
+        }
+      ]
+    }
+  ]
+}

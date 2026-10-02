@@ -1,0 +1,68 @@
+# EPERM 归因测量（yinjiao，2026-10-02，物理测量全部结束后补做）
+
+只读探针，未修改任何防火墙规则。规则快照见同目录 `yinjiao-firewall.txt`（10:59 采样）。
+
+VXLAN 输出对端：`host=10.0.0.10, port=19556, bind_device=ens5f0`（见
+`cont-rv3-vxlan-0.05m-config.json`）。
+
+`vibing_host_egress` / `chain output`（priority -50、policy accept）相关部分：
+
+    ct state established,related accept
+    oifname "lo" accept
+    socket cgroupv2 level 2 "system.slice/tailscaled.service" accept
+    ip daddr { 10.2.0.0/24, 10.3.0.0/24, 10.66.0.0/24, 127.0.0.0/8, 172.17.0.0/16, 192.168.122.0/24 } accept
+    ...
+    meta nfproto ipv4 counter packets 11621365 bytes 1120499605 log prefix "vibing-host-egress4 " limit rate 6/minute drop
+
+**`10.0.0.0/24` 不在允许集合内**，所以发往该网段的新流会落到末尾的 `drop`。
+
+## 测量 1：目标在允许集合内外
+
+    普通 UDP socket（未绑定设备）:
+      sendto 10.0.0.10:4789  -> errno 1 EPERM
+      sendto 10.0.0.10:4789 (SO_BROADCAST) -> errno 1 EPERM
+      SO_BINDTODEVICE=ens5f0 -> 10.0.0.10:4789 -> errno 1 EPERM
+    允许集合内:
+      sendto 10.2.0.12:4789 -> OK
+      sendto 10.2.0.10:4789 -> OK
+      sendto 10.66.0.1:4789 -> OK
+      sendto 10.3.0.5:4789  -> OK
+
+## 测量 2：`drop` 规则计数差
+
+    100 个新 socket，各发 1 个到 10.0.0.10:4789
+      before=24842628  after=24842728  delta=100   (发送 100)
+    1 个长驻 socket，连发 100 个到 10.0.0.10:4789
+      before=24842951  after=24843051  delta=100   (发送 100)
+
+  两个方向都显示：发往该地址的包**确实全部被该规则丢弃**（计数差 == 发送数）。
+
+## 测量 3：socket 返回值的重现性（同一实验，连续四次）
+
+    1 个新 socket 连发 10 个 -> 10.0.0.10:19556 : ['E1','OK','OK','OK','OK','OK','OK','OK','OK','OK']  delta=10
+    1 个新 socket 连发 10 个 -> 10.0.0.10:4789  : ['OK','OK','OK','OK','OK','OK','OK','OK','OK','OK']  delta=10
+    1 个新 socket 连发 10 个 -> 10.0.0.10:33333 : ['OK','OK','OK','OK','OK','OK','OK','OK','OK','OK']  delta=10
+    每包新 socket，连发 5 个   -> 10.0.0.10:33334 : ['OK','OK','OK','OK','OK']                          delta=5
+
+  即：**返回 EPERM 是间歇性的**——有时是新流首包，有时一次都不出现；而计数差始终等于发送数。
+  更早一次探针（同日，未绑定设备、每包新 socket、端口 4789）则**每次都 EPERM**。
+  所以 socket 层返回值并**不是**该目的地或流状态的确定性函数。
+
+## 关键矛盾
+
+VXLAN 物理跑（11:00 之后）的每一行都是 **forwarded == delivered**，说明这些包**到达了对端**，
+当时并没有被这条规则丢掉。而本文件测量 2 显示同一目的地现在**全部被丢掉**。
+两者只能同时成立于「采样时刻的策略状态与跑测时不同」——`maintenance_v4_udp` 是一个带
+timeout 的 (addr,port) 集合，能让同一目的地在某时刻放行、之后不再放行；但本文件**没有**
+该集合在跑测期间的内容证据，这只是可能性，不是测量结果。
+
+## 结论（据此收缩，不再推断机制）
+
+1. 就 10:59 的快照而言，`10.0.0.10` 落在允许集合之外，且**现在**发往它的包会被该 `drop`
+   规则全部丢弃（计数差 == 发送数，两次独立测量），同时 `sendto` 会**间歇性**返回 EPERM。
+2. 但 VXLAN 跑测期间这些包是**送达**的（`forwarded == delivered`），因此**不能**断言
+   跑测里那 1-2 个 `error_drop_packets`(EPERM) 就是这条策略造成的。
+   **EPERM 的成因在本记录中未确定（cause not established）**；主机 egress 策略是一个
+   有实测支撑的候选混淆项，而不是已证实的成因。
+3. 不受影响的部分：VXLAN 的 **CPU 拐点**（0.125–0.15 Mpps，三套后端都在 ~100% CPU）
+   是纯 CPU 测量，与这条策略无关，仍然成立。

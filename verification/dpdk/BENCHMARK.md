@@ -1087,11 +1087,12 @@ and `recvmsg` backends plus the upstream C worker with real libpcap — is recor
 separately in
 [`verification/dpdk/forwarding-e2e-2026-10-02/`](forwarding-e2e-2026-10-02/).
 Headlines: `pcap_file` and `zmq` both delivered **2.0 Mpps loss-free** (capture
-still binds); **VXLAN's one-core knee is 0.125–0.15 Mpps** and a strict
-loss-free point could not be demonstrated because the host's egress policy
-rate-limits new unidirectional UDP to the peer and `sendto` returns EPERM (a host
-constraint, not a cloud-probe one); end-to-end accounting closed for 117/117
-selected cases.
+still binds); **VXLAN's one-core knee is 0.125–0.15 Mpps**, but no strictly
+loss-free VXLAN point was demonstrated because each case reported 1–2 `EPERM`
+packets — and the **cause of those is not established** (the host egress policy is a
+measured candidate confound, not a proven one: it drops packets to the peer address
+today, yet the sweep itself delivered them). VXLAN's CPU knee is a pure CPU
+measurement and stands. End-to-end accounting closed for 117/117 selected cases.
 
 That sweep also found three real accounting/stall defects, filed but not fixed
 here: `pcap_file` counts failed writes as forwarded and logs per packet
