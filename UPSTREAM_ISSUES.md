@@ -52,11 +52,31 @@
 | [#237](https://github.com/Netis/cloud-probe/issues/237) | ⬜ open | — | 结论=keep/document（Go 宽容解码） |
 | [#238](https://github.com/Netis/cloud-probe/issues/238) | ⬜ open | — | 结论=by design（cJSON 宽容语义） |
 | [#239](https://github.com/Netis/cloud-probe/issues/239) | ✅ closed (09-30) | PR **#279**（`req_pattern` 拒绝 `-0`） | 已移植 |
-| [#240](https://github.com/Netis/cloud-probe/issues/240) | ✅ closed (09-30) | PR **#280**（文档化 libpcap `timeout_ms=0` 行为） | 已文档化 |
+| [#240](https://github.com/Netis/cloud-probe/issues/240) | ✅ closed (09-30) | PR **#280**（文档化 libpcap `timeout_ms=0` 行为） | 已文档化；且 Rust **结构上不会**出现该 hazard（见下） |
 
 **额外已覆盖的上游 PR**：#275（cpctl jsonl）、#276（libpcap 非阻塞）、#277（file slice/rate）、#278（pcap_file EOF）、#281（`nic.<if>` 堆溢出）、#284（CPM strategy 校验 + CFS quota ≥1ms，见 `crates/cpdaemon/src/{cpm/task_builder.rs,reslimit.rs}`）、#285（释放泄漏 + netns 恢复失败终止 worker，见 `capturer/af_packet.rs`）；#285 的其余部分是 C 手动内存管理，Rust 所有权模型天然规避。
 
 **结论（2026-10-01）**：上游当前 tip `d302572` 的修复**全部已收敛**到本 Rust 移植；无待追平项。剩余 4 条 open 中，#232 待上游补文档豁免、#236/#237/#238 本地已给出 keep/document/by-design 结论。
+
+### 复核（2026-10-02，`cloud-probe-rs-6z4.1`）
+
+重新核对上游（`gh issue view`）：**#232/#236/#237/#238 仍 open**（维持上表结论，无新进展）；
+**#240 closed (09-30, COMPLETED)**，`closedByPullRequestsReferences = #280` —— 即上表「PR #280 文档化」一条**准确**。
+
+#240 报告的 hazard 是：`timeout_ms == 0` 时 libpcap 把 TPACKET_V3 的 `tp_retire_blk_tov` 设为
+`UINT_MAX`，于是块只在填满或 retire 时可见 → 低速率下数秒级批量投递。上游早于本 issue 就已有
+workaround（`fix timeout_ms=0` `8cfb6756`、`fix TPACKET_V3 multi-second capture delivery latency`
+`59b3e794`，均已在被跟踪的 `d302572` 内）：immediate mode → 退到 TPACKET_V2；immediate 不可用时用
+`pcap_set_timeout(p, 10)` 做 10 ms backstop；batching 路径则沿用用户 `timeout_ms`。
+
+**Rust 侧等价性（强于 C）**：本移植的 `PACKET_RX_RING` 是自己建环，`tp_retire_blk_tov` 恒为
+`RING_BLK_TOV_MS = 1`（`crates/cpworker/src/capturer/af_packet.rs:548`、`656`），**不随
+`timeout_ms` 变化**，因此「块永不 retire 直到填满」这一前提不成立：低速率最多等 1 ms，而不是数秒。
+另外 `timeout_ms == 0` 时两次空读后的等待被限制为 `IDLE_POLL_MS = 1`（同文件 `371`），`poll` 在帧入队
+瞬间返回，不引入延迟。故本条无需移植动作，仅保留为**已收敛**。
+
+其余上游 issue（DPDK 线）：**#286**（pdump 内存池 `ring_mp_sc`）、**#289**（C 的 DPDK capturer 从不初始化
+EAL）均 open，本仓库侧结论见本文件 S4-1/S4-2 与 `BENCHMARK.md`。
 
 > 这 9 条在上游已改为**英文标题 + 英文正文（主）+ 中文原文（折叠在 `<details>` 内）**；本文件下方的中文草稿仍作存档。
 
