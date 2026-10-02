@@ -127,6 +127,26 @@ jobs:
               cargo build --release --workspace --locked \
                 --bin cpworker --bin cpctl --bin cpdaemon \
                 --bin dockerpid --bin cripid
+              # Execute what we just built, inside the userland we built it for.
+              # The runner is the same architecture as the image, so this is a
+              # real run: it proves the dynamic loader resolves and every
+              # versioned glibc symbol the binaries import actually exists at
+              # runtime.  A cross-compiled artifact that is never executed only
+              # proves that it links.  (cloud-probe-rs-2hs.2 asked for the
+              # aarch64 leg to be confirmed; this is the part of it that does not
+              # need arm64 hardware.)
+              #
+              # The flag set differs per binary, so require only that each one
+              # runs and says something -- an empty result means it did not
+              # start, which is exactly the failure this step exists to catch.
+              for b in cpworker cpctl cpdaemon dockerpid cripid; do
+                out="$(./target/release/$b --version 2>&1 || true)"
+                if [ -z "$out" ]; then
+                  echo "::error::$b produced no output; it did not run"
+                  exit 1
+                fi
+                echo "ran $b: $out"
+              done
               # Hand the build tree back so the runner user can package it.
               chown -R "$HOST_UID:$HOST_GID" target
             '
