@@ -271,6 +271,27 @@ def trigger_ipmi(args: argparse.Namespace) -> None:
         raise SystemExit(f"ipmitool power reset failed: {r.stderr.strip()}")
 
 
+def trigger_oneboot_api(args: argparse.Namespace, src: dict[str, Any]) -> None:
+    """Ask the console to bind this MAC's next boot (docs/ONEBOOT_LAB.md §6.1).
+
+    `POST /api/v1/boot/next {mac, source, ks}` is proposed but not implemented on
+    the console yet (`cloud-probe-rs-2hs.4`), so the common outcome today is an
+    HTTP 404. That is reported as a failure with the fallback spelled out rather
+    than silently degrading to a manual boot nobody performs.
+    """
+    try:
+        OneBoot(args.oneboot).boot_next(args.mac, args.source, args.kickstart_name)
+    except OneBootError as exc:
+        raise SystemExit(
+            f"--trigger oneboot-api needs the per-MAC binding endpoint, which this "
+            f"console does not offer yet: {exc}\n"
+            f"Use --trigger manual (pick {args.kickstart_name} in the menu for "
+            f"{src['filename']}), or --trigger ipmi, or land the §6.1 endpoint first."
+        ) from exc
+    print(f"[oneboot] bound the next boot of {args.mac} to {args.source} "
+          f"(ks={args.kickstart_name})")
+
+
 # ---------------------------------------------------------------------------
 # Result collection
 # ---------------------------------------------------------------------------
@@ -406,6 +427,11 @@ def cmd_run(args: argparse.Namespace) -> int:
         print(f"[dry-run] re-run with --apply to PUT "
               f"/api/v1/kickstart/{args.source}/{args.kickstart_name}")
         print(f"[dry-run] staged payload: {base}/{name}")
+        if args.trigger == "oneboot-api":
+            print(f"[dry-run] would POST {args.oneboot}/api/v1/boot/next "
+                  f"{{mac: {args.mac}, source: {args.source}, "
+                  f"ks: {args.kickstart_name}}} (needs the §6.1 endpoint; "
+                  f"cloud-probe-rs-2hs.4)")
         print(f"[dry-run] boot URL (select this kickstart in the PXE menu): "
               f"{args.oneboot}/boot/{args.source}/go?mac={args.mac.replace(':', '-')}"
               f"&ks={urllib.parse.quote(args.kickstart_name)}")
@@ -422,6 +448,8 @@ def cmd_run(args: argparse.Namespace) -> int:
         started = _dt.datetime.now(_dt.timezone.utc)
         if args.trigger == "ipmi":
             trigger_ipmi(args)
+        elif args.trigger == "oneboot-api":
+            trigger_oneboot_api(args, src)
         elif args.trigger == "manual":
             print(f"[manual] power on {args.mac} with PXE boot and select "
                   f"{args.kickstart_name} in the OneBoot menu for "
@@ -523,7 +551,8 @@ def build_parser() -> argparse.ArgumentParser:
     common.add_argument("--frames", type=int, default=2000)
     common.add_argument("--apply", action="store_true",
                         help="actually upload the kickstart and act on the target")
-    common.add_argument("--trigger", default="manual", choices=["manual", "ipmi", "none"])
+    common.add_argument("--trigger", default="manual",
+                        choices=["manual", "ipmi", "oneboot-api", "none"])
     common.add_argument("--efi", action="store_true", help="BMC: request EFI PXE")
     common.add_argument("--stage-dir",
                         default=str(pathlib.Path(tempfile.gettempdir()) / "cprs-lab-stage"))

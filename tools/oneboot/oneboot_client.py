@@ -216,6 +216,22 @@ class OneBoot:
             content_type=f"multipart/form-data; boundary={boundary}",
         )
 
+    def boot_next(self, mac: str, source_id: str, ks: str | None = None) -> Any:
+        """Bind the *next* boot of `mac` to `source_id` (and optional kickstart).
+
+        This is a write endpoint, so it is deliberately not exposed as a CLI
+        subcommand - the CLI stays read-only. The endpoint is proposed in
+        docs/ONEBOOT_LAB.md §6.1 (`cloud-probe-rs-2hs.4`) and does not exist on the
+        console yet; against a console without it this raises `OneBootError`
+        carrying the HTTP status, which is the honest result rather than a silent
+        no-op. The MAC goes dashed (`52-54-00-...`), matching the `mac=` argument
+        the console already uses in `/boot/<source>/go`.
+        """
+        return self._post(
+            "/api/v1/boot/next",
+            json_body={"mac": _dashed_mac(mac), "source": source_id, "ks": ks},
+        )
+
     def mount_source(self, source_id: str) -> Any:
         return self._post(f"/api/v1/sources/{source_id}/mount")
 
