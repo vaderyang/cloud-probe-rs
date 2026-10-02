@@ -687,9 +687,9 @@ mod runtime {
             }
 
             // Publish totals once per burst. These counters have one capture
-            // writer; TaskManager holds its polling lock until this returns,
-            // so control snapshots still see the complete batch. Keep invalid
-            // mbufs excluded, just as in the per-packet path.
+            // writer; pipeline control snapshots can run during capture and
+            // see the preceding completed burst. Keep invalid mbufs excluded,
+            // just as in the per-packet path.
             self.stats.cap_bytes.add(captured_bytes);
             self.stats.cap_packets.add(captured_packets);
             unsafe {

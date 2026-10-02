@@ -785,3 +785,155 @@ as they did during testing. Python syntax, raw-counter/budget consistency and
 CSV regeneration were validated; `git diff --check` passed. No commit, push,
 branch switch or production source edit was performed. The observed branch
 remained `main`, with HEAD recorded in the environment artifact.
+
+
+## Pipeline hand-off fix under 1 CPU / 512 MiB — 2026-10-02
+
+The ring/manager synchronization defect is fixed on `fix/pipeline-mwf` without
+committing or pushing. The new worker passed **0.8 Mpps with unrestricted
+(default) affinity**, **1.6 Mpps pinned to CPU 48** through AF_PACKET, and
+**6 Mpps through pdump** under the same worker-only quota. The first two are
+zero-loss points; the pdump point passed twice with 0–0.0549% whole-burst loss.
+These are the highest passing *tested* points, using the existing ≤0.1%
+near-loss-free definition. Unrestricted affinity still materially affects
+pipeline capacity; this fix does not establish RTC throughput parity.
+
+The confirmed cause was temporary mutex-guard lifetime: the consumer's match
+scrutinee retained the shared ring mutex during output dispatch and the 10 µs
+idle sleep. The full-ring producer's match likewise retained its guard during
+`yield_now`. Capture ran beneath the manager mutex for up to 256 iterations;
+a single AF_PACKET iteration can drain many packets, so merely shrinking that
+batch would still leave stats blocked by output backpressure.
+
+A scoped-pop fix restored stats responsiveness but retained substantial ring
+contention. A 64-message consumer batch was also measured and remained
+insufficient with unrestricted affinity. The final implementation uses the
+existing atomic SPSC algorithm with unique, non-cloneable owned producer and
+consumer endpoints. The producer ownership mutex is acquired once per capture
+batch; the consumer takes its endpoint before polling. Neither queue operation
+shares a mutex with the opposite endpoint or stats. No new unsafe code was
+added; the unsplit public ring is now explicitly `!Sync`, as its existing
+contract requires. Full-ring/allocator retries sleep briefly, retaining the
+packet and its order, outside the manager mutex.
+
+Pipeline capture batches run outside `mgr.lock()` while a separate polling
+mutex serializes capture with RPC/SIGHUP reload. RTC keeps its existing polling
+and dispatch path. The ring still has 1,048,576 slots with one reserved; the
+configured allocator byte budget and stats size fields are unchanged. Stop
+and reload join after draining all queued packets and heartbeats. The ring is
+global: existing reload behavior recreates that shared ring/allocator after
+its drain, while unchanged fingerprinted task capturers/outputs are reused
+and replaced task outputs are destroyed. That behavior is preserved.
+
+Evidence: [all 26 final cases](pipeline-mwf-cases.json),
+[raw cumulative snapshots](pipeline-mwf-2026-10-02.jsonl.gz),
+[derived CSV](pipeline-mwf-2026-10-02.csv),
+[validation and build identity](pipeline-mwf-validation.json), and
+[verified restoration](pipeline-mwf-restoration.json). The 12 completed
+intermediate scoped-pop/batch runs are retained in
+[raw intermediate evidence](pipeline-mwf-intermediate.jsonl.gz) and its
+[CSV](pipeline-mwf-intermediate.csv). The interrupted batch candidate's
+incomplete final burst has no result row; the harness restored both hosts.
+
+All final cases use `cpu.max = 100000 100000`,
+`memory.max = 536870912`, `memory.swap.max = 0` and the same hugepage limit.
+They use the previous four-lcore paced 64-byte workload (68 bytes including
+FCS), one task, snaplen 2048 and null output. AF_PACKET uses an 8 MiB socket
+ring and a 504 MiB configured pipeline allocator. Pdump uses ring 65536 and a
+16 MiB pipeline allocator so even a full hand-off buffer fits the physical
+budget alongside the shared hugepages. The four-core pdump primary remains
+outside the worker cgroup for both execution models. The maximum observed
+worker RSS including shared hugepages was 483.4 MiB; there were no memory
+limit/OOM events. Buffer sizing in the product was not changed.
+
+Every burst runs to completion for 14 seconds and includes buffered drain.
+Offered Mpps uses the approximately five-second physical TX counter window;
+captured Mpps uses the whole 14-second burst. CPU uses its own active window.
+These windows must not be treated as simultaneous. Burst loss compares
+accepted generator TX total with drained capture, retaining the previous
+counter conventions. All completed pipeline cases drained to captured =
+forwarded. Every case additionally sampled three live `cpctl stats` requests;
+quiet pre/post snapshots were retained for complete-burst accounting.
+
+| Raw line | Backend | Mode | Affinity | Offered Mpps | Captured Mpps | Burst loss % | Worker CPU % | Maximum live stats ms |
+| ---: | --- | --- | --- | ---: | ---: | ---: | ---: | ---: |
+| 1 | af_packet | rtc | unrestricted | 2.400 | 2.400 | 0.0064 | 11.8 | 650.279 |
+| 2 | af_packet | pipeline | unrestricted | 1.000 | 0.697 | 30.2905 | 100.3 | 1.552 |
+| 3 | af_packet | pipeline | unrestricted | 2.400 | 1.363 | 43.2158 | 99.6 | 1.527 |
+| 4 | af_packet | pipeline | unrestricted | 5.001 | 1.590 | 68.1937 | 100.0 | 1.407 |
+| 5 | dpdk_pdump | rtc | 48-49 | 19.999 | 19.997 | 0.0000 | 86.9 | 1.628 |
+| 6 | dpdk_pdump | rtc | 48-49 | 29.993 | 29.931 | 0.2001 | 100.0 | 1.206 |
+| 7 | dpdk_pdump | pipeline | 48-49 | 5.001 | 5.000 | 0.0000 | 89.1 | 1.169 |
+| 8 | dpdk_pdump | pipeline | 48-49 | 10.000 | 6.592 | 34.0789 | 100.0 | 1.200 |
+| 9 | dpdk_pdump | pipeline | 48-49 | 19.996 | 6.663 | 66.6798 | 100.0 | 1.241 |
+| 10 | af_packet | pipeline | unrestricted | 0.500 | 0.500 | 0.0000 | 38.2 | 1.281 |
+| 11 | af_packet | pipeline | unrestricted | 0.750 | 0.750 | 0.0000 | 77.9 | 1.194 |
+| 12 | af_packet | pipeline | unrestricted | 0.900 | 0.878 | 2.4362 | 98.6 | 1.382 |
+| 13 | af_packet | pipeline | 48 | 1.600 | 1.600 | 0.0000 | 75.2 | 1.520 |
+| 14 | af_packet | pipeline | 48 | 2.399 | 1.842 | 23.2480 | 68.0 | 2.041 |
+| 15 | af_packet | rtc | 48 | 2.400 | 2.394 | 0.2606 | 32.2 | 753.150 |
+| 16 | dpdk_pdump | rtc | 48-49 | 27.990 | 27.934 | 0.1953 | 100.0 | 1.434 |
+| 17 | dpdk_pdump | pipeline | 48-49 | 6.000 | 5.996 | 0.0549 | 100.0 | 1.146 |
+| 18 | dpdk_pdump | pipeline | 48-49 | 7.002 | 6.384 | 8.7929 | 99.8 | 1.278 |
+| 19 | af_packet | pipeline | unrestricted | 0.750 | 0.750 | 0.0000 | 50.6 | 1.430 |
+| 20 | af_packet | pipeline | unrestricted | 0.800 | 0.800 | 0.0000 | 57.4 | 1.467 |
+| 21 | af_packet | pipeline | unrestricted | 0.850 | 0.825 | 2.9017 | 67.1 | 1.644 |
+| 22 | af_packet | pipeline | 48 | 1.800 | 1.789 | 0.6007 | 71.8 | 1.624 |
+| 23 | af_packet | pipeline | 48 | 2.000 | 1.816 | 9.1809 | 54.6 | 1.342 |
+| 24 | dpdk_pdump | pipeline | 48-49 | 6.003 | 6.000 | 0.0000 | 100.2 | 1.127 |
+| 25 | af_packet | pipeline | unrestricted | 0.800 | 0.800 | 0.0000 | 80.2 | 1.445 |
+| 26 | dpdk_pdump | rtc | 48-49 | 25.999 | 25.893 | 0.3745 | 100.1 | 1.500 |
+
+Unrestricted AF_PACKET passed 0.8 Mpps twice; 0.85 Mpps lost 2.9017% and 0.9
+lost 2.4362%. The passing tested boundary is therefore 0.8 Mpps, with placement
+and quota variability above it. Pinned AF_PACKET passed 1.6 Mpps with zero
+loss, then lost 0.6007% at 1.8 and 9.1809% at 2.0. Its old catastrophic cliff
+at 1.6 Mpps is absent. Pdump passed 6 Mpps twice; 7 lost 8.7929%, and offered
+10/20 Mpps produced 6.592/6.663 Mpps rather than a throughput collapse.
+
+Fresh RTC controls captured 2.400 Mpps through unrestricted AF_PACKET and
+19.997 Mpps through pdump at 20 Mpps offered. Pdump at 26/28/30 Mpps captured
+25.893/27.934/29.931 with 0.3745/0.1953/0.2001% whole-burst loss. Those high-rate
+controls do not pass the strict ≤0.1% criterion in this new session; the prior
+run's tables remain unchanged. Pipeline still has a meaningful capacity gap.
+
+All **60 live pipeline stats calls** succeeded; the slowest completed in
+**2.041 ms**, including the overload cases. At the highest pipeline offers,
+AF_PACKET 5 Mpps had a 1.407 ms maximum and pdump 20 Mpps a 1.241 ms maximum.
+No traffic-time RPC used the old 30-second quiet fallback. All 78 live calls
+across both execution models succeeded.
+
+Validation covers a deterministically blocked output while the producer
+continues, ring-full and allocator-full backpressure with concurrent stats,
+a reload waiting outside the manager mutex, reordered reused task resources,
+FIFO packet/heartbeat delivery and drain before destruction. Owned endpoints
+also pass a 100,000-message concurrent FIFO/full/wrap test and compile-fail
+checks for producer cloning and sharing an unsplit ring. Reintroducing the
+consumer guard lifetime or capture-under-manager behavior fails the relevant
+regression. The workspace suite passed 764 tests (10 existing ignored), and
+20 repeated pipeline regression runs passed. Formatting, workspace Clippy
+with warnings denied, hygiene (including its reverse checks), and liveness
+checks passed. DPDK feature checks are recorded in the validation artifact.
+
+The remaining capacity cost has not been profiled. Packet copying, heap
+allocation/free, atomic accounting, scheduler/NUMA placement and AF_PACKET
+receive costs remain candidates. Follow-up `cloud-probe-rs-2kx` tracks that
+work. These short null-output tests do not establish sustained throughput for
+file/ZMQ/GRE/VXLAN outputs; a permanently blocked output still backpressures
+capture and drain by design, while ordinary stats can take the manager mutex.
+
+Both hosts were verified with zero VFs, PAUSE RX/TX on, no benchmark/sampler
+processes, and empty `/var/run/dpdk/` and `/tmp/core.*` cleanup results.
+
+To reproduce after rebuilding/syncing the worker as above:
+
+```bash
+python3 verification/dpdk/capacity_capture.py \
+  verification/dpdk/pipeline-mwf-cases.json /tmp/pipeline-mwf.jsonl
+python3 verification/dpdk/capacity_report.py \
+  /tmp/pipeline-mwf.jsonl /tmp/pipeline-mwf.csv
+```
+
+The harness serializes bursts and restores in `finally`; separately verify
+restoration using the checks above. `live_stats: true` enables traffic-time
+RPC sampling even when `burst_capture: true` selects complete-burst accounting.

@@ -10,11 +10,14 @@
 //! able to obtain two producers, the concurrent API is expressed through
 //! [`SpscRing::split`], which hands out one [`RingProducer`] and one [`RingConsumer`]
 //! while borrowing the ring; the plain [`SpscRing::push`] / [`SpscRing::pop`] are for
-//! use behind an external lock (as in the pipeline).
+//! serial use. [`SpscRing::into_split`] supplies unique owned endpoints for the
+//! pipeline's long-lived threads without changing slot storage or sizing.
 
-use std::cell::UnsafeCell;
+use std::cell::{Cell, UnsafeCell};
+use std::marker::PhantomData;
 use std::mem::MaybeUninit;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -83,13 +86,15 @@ struct RingCore {
 // SAFETY: `RingCore` is private and is only ever reachable through two safe
 // wrappers:
 //
-//   * `SpscRing`, which owns it by value and is `!Sync` (it contains
-//     `UnsafeCell`). Its `push`/`pop` therefore cannot be called concurrently;
-//     the pipeline serialises them with its own mutex.
+//   * `SpscRing`, which owns it by value and is explicitly `!Sync`. Its
+//     `push`/`pop` therefore cannot be called concurrently.
 //   * The `RingProducer`/`RingConsumer` pair returned by `SpscRing::split`. The
 //     `&mut self` borrow of `split` prevents any other access to the ring while
 //     the pair is alive, `split` is the only constructor and returns exactly one
 //     of each, and neither handle is `Clone`.
+//   * The owned pair from `SpscRing::into_split`, which consumes the ring and
+//     creates exactly one non-Clone producer and consumer. Their operations
+//     require `&mut self`; the cloneable observer can only read atomic counters.
 //
 // So the only way `&RingCore` can be shared across threads is one producer and
 // one consumer, exactly the contract the atomics implement.
@@ -196,8 +201,17 @@ impl Drop for RingCore {
 ///
 /// Holds `size - 1` messages at most (one slot is reserved so full and empty are
 /// distinguishable), matching `spsc_ring_create`/`spsc_ring_push`.
+/// The unsplit ring cannot be shared between threads:
+///
+/// ```compile_fail
+/// fn require_sync<T: Sync>() {}
+/// require_sync::<cpworker::ring_buffer::SpscRing>();
+/// ```
 pub struct SpscRing {
     core: RingCore,
+    // RingCore is Sync for its private endpoint APIs; the unsplit public ring
+    // must remain !Sync so safe callers cannot create multiple writers/readers.
+    _not_sync: PhantomData<Cell<()>>,
 }
 
 impl SpscRing {
@@ -206,6 +220,7 @@ impl SpscRing {
     pub fn new(size: usize) -> Self {
         SpscRing {
             core: RingCore::new(size),
+            _not_sync: PhantomData,
         }
     }
 
@@ -246,6 +261,70 @@ impl SpscRing {
             RingProducer { core: &self.core },
             RingConsumer { core: &self.core },
         )
+    }
+
+    /// Consume the ring into uniquely owned endpoints suitable for long-lived
+    /// threads, plus a read-only stats observer. Queued messages are preserved.
+    #[must_use]
+    pub fn into_split(self) -> (OwnedRingProducer, OwnedRingConsumer, RingObserver) {
+        let core = Arc::new(self.core);
+        (
+            OwnedRingProducer { core: core.clone() },
+            OwnedRingConsumer { core: core.clone() },
+            RingObserver { core },
+        )
+    }
+}
+
+/// Unique producer of an owned SPSC ring; deliberately not Clone.
+///
+/// ```compile_fail
+/// let (producer, _, _) = cpworker::ring_buffer::SpscRing::new(8).into_split();
+/// let second_producer = producer.clone();
+/// ```
+pub struct OwnedRingProducer {
+    core: Arc<RingCore>,
+}
+
+impl OwnedRingProducer {
+    /// Push one message, returning it unchanged when the ring is full.
+    ///
+    /// # Errors
+    /// Returns the original message if the ring is full.
+    pub fn push(&mut self, msg: Box<RingMsg>) -> Result<(), Box<RingMsg>> {
+        self.core.push(msg)
+    }
+}
+
+/// Unique consumer of an owned SPSC ring; deliberately not Clone.
+pub struct OwnedRingConsumer {
+    core: Arc<RingCore>,
+}
+
+impl OwnedRingConsumer {
+    /// Pop the oldest message, or None when the ring is empty.
+    pub fn pop(&mut self) -> Option<Box<RingMsg>> {
+        self.core.pop()
+    }
+}
+
+/// Read-only atomic size/occupancy snapshots; cannot push or pop messages.
+#[derive(Clone)]
+pub struct RingObserver {
+    core: Arc<RingCore>,
+}
+
+impl RingObserver {
+    /// Configured ring capacity, including the reserved slot.
+    #[must_use]
+    pub fn size(&self) -> usize {
+        self.core.size
+    }
+
+    /// Current occupancy snapshot, matching spsc_ring_used in the C oracle.
+    #[must_use]
+    pub fn used(&self) -> usize {
+        self.core.used()
     }
 }
 
@@ -416,6 +495,61 @@ impl SimpleAllocator {
 mod tests {
     use super::*;
     use std::collections::VecDeque;
+
+    #[test]
+    fn owned_spsc_endpoints_preserve_full_ring_and_fifo_across_threads() {
+        let ring = SpscRing::new(17);
+        for ts in 0..16 {
+            ring.push(Box::new(RingMsg::Heartbeat { task_index: 3, ts }))
+                .unwrap();
+        }
+        let (mut producer, mut consumer, observer) = ring.into_split();
+        assert_eq!(observer.size(), 17);
+        assert_eq!(observer.used(), 16);
+        let returned = producer
+            .push(Box::new(RingMsg::Heartbeat {
+                task_index: 3,
+                ts: 16,
+            }))
+            .unwrap_err();
+        assert_eq!(
+            *returned,
+            RingMsg::Heartbeat {
+                task_index: 3,
+                ts: 16
+            }
+        );
+        let writer = std::thread::spawn(move || {
+            let mut msg = returned;
+            for ts in 16..100_000 {
+                loop {
+                    match producer.push(msg) {
+                        Ok(()) => break,
+                        Err(m) => {
+                            msg = m;
+                            std::thread::yield_now();
+                        }
+                    }
+                }
+                msg = Box::new(RingMsg::Heartbeat {
+                    task_index: 3,
+                    ts: ts + 1,
+                });
+            }
+        });
+        for ts in 0..100_000 {
+            let msg = loop {
+                if let Some(msg) = consumer.pop() {
+                    break msg;
+                }
+                std::thread::yield_now();
+            };
+            assert_eq!(*msg, RingMsg::Heartbeat { task_index: 3, ts });
+        }
+        writer.join().unwrap();
+        assert!(consumer.pop().is_none());
+        assert_eq!(observer.used(), 0);
+    }
 
     #[test]
     fn ring_capacity() {

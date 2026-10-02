@@ -193,7 +193,7 @@ def measure(case):
     perf.ssh("laojun", "sudo -n ip link set ens72np0 vf 0 max_tx_rate 0")
     before = [snap("laojun"), snap("yinjiao")]
     for host in ["yinjiao", "laojun"]:
-        perf.ssh(host, "sudo -n rm -f /tmp/cpcap-go /tmp/cpcap-series.json /tmp/cpcap-probe-ready; sudo -n setsid nohup python3 /tmp/cpcap-probe.py " + host + (" series_no_capture" if case.get("burst_capture") else " series") + " >/tmp/cpcap-series.log 2>&1 </dev/null &")
+        perf.ssh(host, "sudo -n rm -f /tmp/cpcap-go /tmp/cpcap-series.json /tmp/cpcap-probe-ready; sudo -n setsid nohup python3 /tmp/cpcap-probe.py " + host + (" series_no_capture" if case.get("burst_capture") and not case.get("live_stats") else " series") + " >/tmp/cpcap-series.log 2>&1 </dev/null &")
     for host in ["yinjiao", "laojun"]:
         perf.ssh(host, "for i in $(seq 1 120); do [ -f /tmp/cpcap-probe-ready ] && break; sleep 0.1; done; test -f /tmp/cpcap-probe-ready")
     if case.get("testpmd"):
@@ -237,6 +237,10 @@ def measure(case):
             time.sleep(2)
             drain = snap("yinjiao", quiet=bool(case.get("burst_capture")))
     result = calculate(case, samples, before[1], drain)
+    if case.get("live_stats"):
+        rpc = [y["capture"] for _, y in samples]
+        result["live_stats_rpc"] = {"count": len(rpc), "max_seconds": max(s["span"] for s in rpc),
+                                    "success": all(isinstance(s["value"], list) and bool(s["value"]) for s in rpc)}
     result.update(shape_mbps=shape, startup=startup, before=before, drained_l=drain_l, drained=drain,
                   tx_log=perf.ssh("laojun", "sudo -n cat /tmp/cpcap-tx.log 2>/dev/null || true"),
                   worker_log=perf.ssh("yinjiao", "sudo -n cat /tmp/cpcap-worker.log 2>/dev/null || true"),

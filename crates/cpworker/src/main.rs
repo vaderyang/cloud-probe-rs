@@ -104,10 +104,12 @@ fn main() {
     // Process packets in batches so the TaskManager / output-set locks and the
     // periodic clock check are amortised across many packets instead of once
     // per packet (matching the C loop's per-packet cost).
+    // Pipeline batches release the manager before capture/backpressure waits,
+    // so the batch size cannot starve control snapshots (AUDIT4 P2-10).
     const BATCH: usize = 256;
 
     while !quit.load(Ordering::Relaxed) {
-        let num_pkts = mgr.lock().poll_packets_batch(BATCH);
+        let num_pkts = cpworker::task::poll_packets_batch(&mgr, BATCH);
         if num_pkts == 0 {
             std::thread::sleep(std::time::Duration::from_micros(10));
         }
@@ -130,7 +132,7 @@ fn main() {
                         for problem in plan.problems {
                             cpworker::log_warn!("reload: {problem}");
                         }
-                        if let Err(e) = mgr.lock().reload(plan.config) {
+                        if let Err(e) = cpworker::task::reload(&mgr, plan.config) {
                             cpworker::log_error!("reload failed: {e}");
                         }
                     }

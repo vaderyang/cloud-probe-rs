@@ -1122,7 +1122,9 @@ impl AfPacketCapturer {
     /// ring was empty, wait for readability once and drain again.
     fn capture_once_ring(&mut self, sink: &mut dyn PacketSink) -> u64 {
         // Take the ring out of `self` so the closure can borrow the rest of it.
-        let mut ring = self.ring.take().expect("ring path requires a ring");
+        let Some(mut ring) = self.ring.take() else {
+            return 0;
+        };
         let mut n = ring.drain(|hdr, data| self.consume_ring_frame(hdr, data, sink));
         if n == 0 {
             let mut pfd = libc::pollfd {

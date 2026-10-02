@@ -27,3 +27,6 @@ mutants.out.old/
 
 # Lab-local raw capacity snapshots (multi-MiB; regenerate with capacity_capture.py)
 verification/dpdk/capacity-*.jsonl.gz
+
+# Lab-local raw pipeline snapshots (multi-MiB; regenerate with capacity_capture.py)
+verification/dpdk/pipeline-mwf-*.jsonl.gz

@@ -8,13 +8,14 @@
 //!   field of the task config changes. A task without a fingerprint (the daemon
 //!   always fills them in, but hand-written configs may omit it) is rebuilt,
 //!   because it cannot be identified across configs. The C thread/mailbox
-//!   protocol is collapsed into the single manager mutex: the shared output
+//!   protocol is collapsed into the polling and manager mutexes: the shared output
 //!   thread is stopped for the swap, so no in-flight ring message can be
 //!   delivered to a reordered task slot.
 //! * The pipeline output thread and the ring are safe abstractions. The ring
-//!   itself is the lock-free SPSC structure from `ring_buffer`; the pipeline
-//!   shares it through a mutex because a single `SpscRing` is not `Sync` and
-//!   callers hold it by reference.
+//!   itself uses the lock-free SPSC structure from `ring_buffer`, with unique
+//!   owned producer/consumer endpoints. Endpoint ownership is locked only when
+//!   borrowing a capture batch or starting/stopping the output thread; queue
+//!   operations and stats snapshots need no shared ring mutex.
 
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -28,7 +29,9 @@ use crate::capturer::{new_capturer, Capturer, PacketSink};
 use crate::config::{CapturerKind, Config, ExecutionModel, TaskConfig};
 use crate::error::Result;
 use crate::output::{new_output, Output, PacketHeader};
-use crate::ring_buffer::{RingMsg, SimpleAllocator, SpscRing};
+use crate::ring_buffer::{
+    OwnedRingConsumer, OwnedRingProducer, RingMsg, RingObserver, SimpleAllocator, SpscRing,
+};
 use crate::stats::{BytesStats, CaptureStats, OutputStats, PacketsStats};
 
 /// Outputs belonging to one task.
@@ -72,13 +75,13 @@ impl PacketSink for RtcSink<'_> {
 }
 
 /// Pipeline sink: enqueues packets / heartbeats into the shared ring.
-struct PipelineSink {
-    ring: Arc<Mutex<SpscRing>>,
-    alloc: Arc<SimpleAllocator>,
+struct PipelineSink<'a> {
+    ring: &'a mut OwnedRingProducer,
+    alloc: &'a SimpleAllocator,
     task_index: usize,
 }
 
-impl PacketSink for PipelineSink {
+impl PacketSink for PipelineSink<'_> {
     fn on_packet(&mut self, hdr: &PacketHeader, pkt: &[u8], direct: i32) {
         loop {
             if let Some(msg) =
@@ -87,16 +90,17 @@ impl PacketSink for PipelineSink {
             {
                 let mut msg = msg;
                 loop {
-                    match self.ring.lock().push(msg) {
+                    let pushed = self.ring.push(msg);
+                    match pushed {
                         Ok(()) => return,
                         Err(m) => {
                             msg = m;
-                            std::thread::yield_now();
+                            std::thread::sleep(std::time::Duration::from_micros(10));
                         }
                     }
                 }
             }
-            std::thread::yield_now();
+            std::thread::sleep(std::time::Duration::from_micros(10));
         }
     }
 
@@ -105,16 +109,17 @@ impl PacketSink for PipelineSink {
             if let Some(msg) = self.alloc.alloc_heartbeat(self.task_index) {
                 let mut msg = msg;
                 loop {
-                    match self.ring.lock().push(msg) {
+                    let pushed = self.ring.push(msg);
+                    match pushed {
                         Ok(()) => return,
                         Err(m) => {
                             msg = m;
-                            std::thread::yield_now();
+                            std::thread::sleep(std::time::Duration::from_micros(10));
                         }
                     }
                 }
             }
-            std::thread::yield_now();
+            std::thread::sleep(std::time::Duration::from_micros(10));
         }
     }
 }
@@ -131,9 +136,24 @@ pub fn now_sec() -> i64 {
 /// Ring + allocator for the pipeline execution model. Bundled into one struct
 /// so the two are always constructed and dropped together, making a partial
 /// (ring without alloc) state impossible.
+#[derive(Clone)]
 struct PipelineShared {
-    ring: Arc<Mutex<SpscRing>>,
+    ring: RingObserver,
+    producer: Arc<Mutex<OwnedRingProducer>>,
+    consumer: Arc<Mutex<Option<OwnedRingConsumer>>>,
     alloc: Arc<SimpleAllocator>,
+}
+
+impl PipelineShared {
+    fn new(ring_size: usize, mem_size: u64) -> Self {
+        let (producer, consumer, ring) = SpscRing::new(ring_size).into_split();
+        Self {
+            ring,
+            producer: Arc::new(Mutex::new(producer)),
+            consumer: Arc::new(Mutex::new(Some(consumer))),
+            alloc: Arc::new(SimpleAllocator::new(mem_size)),
+        }
+    }
 }
 
 /// A task's capturer plus its configured outputs.
@@ -223,6 +243,10 @@ pub struct TaskManager {
 
     pipeline: Option<PipelineShared>,
 
+    /// Serializes an off-manager pipeline capture batch with reload. Always
+    /// acquired before the manager mutex; stats need only the manager mutex.
+    polling: Arc<Mutex<()>>,
+
     running: Arc<AtomicBool>,
     output_thread: Option<JoinHandle<()>>,
     inited_count: usize,
@@ -242,12 +266,10 @@ impl TaskManager {
         let stats_output = Arc::new(OutputStats::default());
 
         let pipeline = if config.execution_model == ExecutionModel::Pipeline {
-            Some(PipelineShared {
-                ring: Arc::new(Mutex::new(SpscRing::new(1024 * 1024))),
-                alloc: Arc::new(SimpleAllocator::new(
-                    config.pipeline_buffer_size_mb * 1024 * 1024,
-                )),
-            })
+            Some(PipelineShared::new(
+                1024 * 1024,
+                config.pipeline_buffer_size_mb * 1024 * 1024,
+            ))
         } else {
             None
         };
@@ -262,6 +284,7 @@ impl TaskManager {
             entries: Vec::new(),
             out_sets: Arc::new(Mutex::new(Vec::new())),
             pipeline,
+            polling: Arc::new(Mutex::new(())),
             running: Arc::new(AtomicBool::new(false)),
             output_thread: None,
             inited_count: 0,
@@ -383,7 +406,7 @@ impl TaskManager {
             crate::log_error!("pipeline model missing ring/alloc; output thread not started");
             return;
         };
-        let ring = pipeline.ring.clone();
+        let consumer = pipeline.consumer.clone();
         let alloc = pipeline.alloc.clone();
         let out_sets = self.out_sets.clone();
         let running = self.running.clone();
@@ -392,20 +415,25 @@ impl TaskManager {
         let handle = std::thread::Builder::new()
             .name("taskmgr_output".into())
             .spawn(move || {
-                while running.load(Ordering::Acquire) {
-                    match ring.lock().pop() {
-                        Some(msg) => dispatch_ring_msg(&out_sets, &alloc, msg),
-                        None => std::thread::sleep(std::time::Duration::from_micros(10)),
-                    }
-                }
-                // Drain remaining messages on shutdown.
+                // Move the unique consumer out of its ownership slot. No
+                // endpoint or manager mutex is held during queue operations,
+                // output syscalls or idle waits.
+                let Some(mut ring) = consumer.lock().take() else {
+                    return;
+                };
                 loop {
-                    let popped = ring.lock().pop();
-                    match popped {
+                    match ring.pop() {
                         Some(msg) => dispatch_ring_msg(&out_sets, &alloc, msg),
-                        None => break,
+                        None => {
+                            // Drain before stop/reload, as in the C oracle.
+                            if !running.load(Ordering::Acquire) {
+                                break;
+                            }
+                            std::thread::sleep(std::time::Duration::from_micros(10));
+                        }
                     }
                 }
+                *consumer.lock() = Some(ring);
             });
         match handle {
             Ok(h) => {
@@ -459,34 +487,20 @@ impl TaskManager {
 
     /// Poll up to `max` packets, amortising the output-set lock (and the
     /// caller's TaskManager lock) across a batch instead of once per packet.
+    /// Shared pipeline callers should use the free [`crate::task::poll_packets_batch`] to
+    /// keep backpressure and capture waits outside the manager mutex.
     pub fn poll_packets_batch(&mut self, max: usize) -> u64 {
         let mut total = 0u64;
         match self.config.execution_model {
             ExecutionModel::Pipeline => {
-                let (ring, alloc) = match &self.pipeline {
-                    Some(p) => (p.ring.clone(), p.alloc.clone()),
+                let pipeline = match &self.pipeline {
+                    Some(p) => p,
                     None => {
                         crate::log_error!("pipeline model missing ring/alloc; no packets polled");
                         return total;
                     }
                 };
-                for _ in 0..max {
-                    let mut n = 0u64;
-                    for entry in self.entries.iter_mut() {
-                        if let Some(cap) = entry.capturer.as_mut() {
-                            let mut sink = PipelineSink {
-                                ring: ring.clone(),
-                                alloc: alloc.clone(),
-                                task_index: entry.index,
-                            };
-                            n += cap.capture_once(&mut sink);
-                        }
-                    }
-                    total += n;
-                    if n == 0 {
-                        break;
-                    }
-                }
+                total = poll_pipeline(&mut self.entries, pipeline, max);
             }
             ExecutionModel::Rtc => {
                 let mut sets = self.out_sets.lock();
@@ -520,8 +534,9 @@ impl TaskManager {
     /// `find_task_by_fingerprint` reuse without its three-phase mailbox dance,
     /// because the manager is already serialised by a single mutex.
     ///
-    /// Callers that hold the manager mutex should prefer the free [`reload_from_file`],
-    /// which parses and resolves host names *before* taking the lock: a BPF expression
+    /// Shared-manager callers must use the free [`crate::task::reload`] or [`reload_from_file`]
+    /// to serialize with off-manager pipeline capture. The latter parses and
+    /// resolves host names *before* taking the lock: a BPF expression
     /// containing a name blocks there for as long as the resolver takes.
     ///
     /// Lock discipline: the shared output thread is joined *before* any old
@@ -547,15 +562,14 @@ impl TaskManager {
         // released only once the replacements exist, as before).
         let old_config = std::mem::replace(&mut self.config, new_config);
 
-        // Recreate pipeline ring/alloc if the buffer size changed.
+        // Recreate the shared ring/allocator after draining. Unchanged task
+        // capturers and outputs are reused below.
         self.pipeline = None;
         if self.config.execution_model == ExecutionModel::Pipeline {
-            self.pipeline = Some(PipelineShared {
-                ring: Arc::new(Mutex::new(SpscRing::new(1024 * 1024))),
-                alloc: Arc::new(SimpleAllocator::new(
-                    self.config.pipeline_buffer_size_mb * 1024 * 1024,
-                )),
-            });
+            self.pipeline = Some(PipelineShared::new(
+                1024 * 1024,
+                self.config.pipeline_buffer_size_mb * 1024 * 1024,
+            ));
         }
 
         self.reload_epoch += 1;
@@ -691,11 +705,8 @@ impl TaskManager {
         let (sec, nsec) = monotonic_now();
         let (ring_total, ring_used, mem_total, mem_used) = match &self.pipeline {
             Some(p) => {
-                // Lock the ring twice but in separate statements: a single
-                // expression would keep the first guard's temporary alive until
-                // the end of the `let`, so the second `lock()` would deadlock.
-                let ring_total = p.ring.lock().size() as u64;
-                let ring_used = p.ring.lock().used() as u64;
+                let ring_total = u64::try_from(p.ring.size()).unwrap_or(u64::MAX);
+                let ring_used = u64::try_from(p.ring.used()).unwrap_or(u64::MAX);
                 (ring_total, ring_used, p.alloc.capacity(), p.alloc.used())
             }
             None => (0, 0, 0, 0),
@@ -719,6 +730,73 @@ impl Drop for TaskManager {
     fn drop(&mut self) {
         self.stop();
     }
+}
+
+/// Poll a shared manager, amortising locks over a batch. Pipeline capture owns
+/// the entries for the duration of the batch, with the manager mutex released:
+/// a full ring still backpressures capture without blocking control snapshots.
+/// The polling lock prevents another batch or reload from changing task order,
+/// outputs or buffers until the entries have been returned.
+pub fn poll_packets_batch(mgr: &Mutex<TaskManager>, max: usize) -> u64 {
+    let mut guard = mgr.lock();
+    if guard.execution_model() == ExecutionModel::Rtc {
+        return guard.poll_packets_batch(max);
+    }
+    let polling = guard.polling.clone();
+    drop(guard);
+    let _polling = polling.lock();
+    let mut guard = mgr.lock();
+    // A reload may have changed execution model while we waited for polling.
+    if guard.execution_model() == ExecutionModel::Rtc {
+        return guard.poll_packets_batch(max);
+    }
+    let Some(pipeline) = guard.pipeline.clone() else {
+        return 0;
+    };
+    let mut entries = std::mem::take(&mut guard.entries);
+    let total = parking_lot::MutexGuard::unlocked(&mut guard, || {
+        poll_pipeline(&mut entries, &pipeline, max)
+    });
+    guard.entries = entries;
+    total
+}
+
+fn poll_pipeline(entries: &mut [TaskEntry], pipeline: &PipelineShared, max: usize) -> u64 {
+    // Borrow the unique producer once per batch, never per packet. The output
+    // thread and stats observer do not use this ownership mutex.
+    let mut producer = pipeline.producer.lock();
+    let mut total = 0;
+    for _ in 0..max {
+        let mut n = 0;
+        for entry in entries.iter_mut() {
+            if let Some(cap) = entry.capturer.as_mut() {
+                let mut sink = PipelineSink {
+                    ring: &mut producer,
+                    alloc: &pipeline.alloc,
+                    task_index: entry.index,
+                };
+                n += cap.capture_once(&mut sink);
+            }
+        }
+        total += n;
+        if n == 0 {
+            break;
+        }
+    }
+    total
+}
+
+/// Apply a prepared reload to a shared manager. Wait for any pipeline capture
+/// batch before taking the manager mutex, so stats remain available even when
+/// a slow output is backpressuring that batch. The output thread still drains
+/// all old messages before any task slot or pipeline buffer is replaced.
+///
+/// # Errors
+/// Returns an error if the rebuilt task set cannot be constructed.
+pub fn reload(mgr: &Mutex<TaskManager>, config: Config) -> Result<()> {
+    let polling = mgr.lock().polling.clone();
+    let _polling = polling.lock();
+    mgr.lock().reload(config)
 }
 
 fn dispatch_ring_msg(
@@ -903,7 +981,7 @@ pub fn reload_from_file(mgr: &Arc<Mutex<TaskManager>>) -> Result<()> {
     }
     // Preserve control config from the original (C moves control out before
     // handing config to the task manager).
-    mgr.lock().reload(plan.config)
+    reload(mgr, plan.config)
 }
 
 /// A reload being prepared on a worker thread.
@@ -1423,6 +1501,238 @@ mod tests {
         }
     }
 
+    struct BurstCapturer {
+        base: u8,
+        packets: u8,
+        attempted: Arc<AtomicUsize>,
+        wait_for_output: Option<Arc<AtomicBool>>,
+    }
+
+    impl Capturer for BurstCapturer {
+        fn capture_once(&mut self, sink: &mut dyn PacketSink) -> u64 {
+            let hdr = PacketHeader {
+                ts_sec: 1,
+                ts_usec: 2,
+                caplen: 1,
+                len: 1,
+            };
+            for i in 0..self.packets {
+                self.attempted.fetch_add(1, Ordering::SeqCst);
+                sink.on_packet(&hdr, &[self.base + i], 7);
+                if let Some(started) = self.wait_for_output.take() {
+                    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
+                    while !started.load(Ordering::Acquire) && std::time::Instant::now() < deadline {
+                        std::thread::yield_now();
+                    }
+                    assert!(
+                        started.load(Ordering::Acquire),
+                        "first output did not start"
+                    );
+                }
+            }
+            sink.on_heartbeat();
+            u64::from(self.packets)
+        }
+    }
+
+    struct BlockingOutput {
+        base: u8,
+        entered: Option<std::sync::mpsc::Sender<()>>,
+        started: Arc<AtomicBool>,
+        release: std::sync::mpsc::Receiver<()>,
+        delivered: Arc<Mutex<Vec<u8>>>,
+        destroyed: Arc<AtomicUsize>,
+    }
+
+    impl Output for BlockingOutput {
+        fn send_packet(&mut self, _hdr: &PacketHeader, pkt: &[u8], direct: i32) -> i32 {
+            assert_eq!(direct, 7);
+            if let Some(entered) = self.entered.take() {
+                self.started.store(true, Ordering::Release);
+                entered.send(()).unwrap();
+                // A watchdog also lets failing versions join and drain instead
+                // of leaving the suite stuck in the deliberately blocked output.
+                let _ = self.release.recv_timeout(std::time::Duration::from_secs(5));
+            }
+            self.delivered.lock().push(pkt[0]);
+            0
+        }
+
+        fn heartbeat(&mut self, _now: i64) {
+            self.delivered.lock().push(self.base + 9);
+        }
+
+        fn destroy(&mut self) {
+            self.destroyed.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+
+    #[test]
+    fn blocked_pipeline_output_allows_enqueue_and_stop_drains_in_order() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut manager = pipeline_manager(dir.path());
+        let delivered = Arc::new(Mutex::new(Vec::new()));
+        let destroyed = Arc::new(AtomicUsize::new(0));
+        let started = Arc::new(AtomicBool::new(false));
+        let (entered_tx, entered_rx) = std::sync::mpsc::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        manager.entries[0].capturer = Some(Box::new(BurstCapturer {
+            base: 10,
+            packets: 6,
+            attempted: Arc::new(AtomicUsize::new(0)),
+            wait_for_output: Some(started.clone()),
+        }));
+        manager.out_sets.lock()[0].outputs = vec![Box::new(BlockingOutput {
+            base: 10,
+            entered: Some(entered_tx),
+            started,
+            release: release_rx,
+            delivered: delivered.clone(),
+            destroyed: destroyed.clone(),
+        })];
+        manager.start();
+        let mgr = Arc::new(Mutex::new(manager));
+        let m = mgr.clone();
+        let (done_tx, done_rx) = std::sync::mpsc::channel();
+        let producer = std::thread::spawn(move || {
+            done_tx.send(poll_packets_batch(&m, 1)).unwrap();
+        });
+        entered_rx
+            .recv_timeout(std::time::Duration::from_secs(1))
+            .unwrap();
+        let progress = done_rx.recv_timeout(std::time::Duration::from_secs(1));
+        release_tx.send(()).unwrap();
+        producer.join().unwrap();
+        mgr.lock().stop();
+        assert_eq!(
+            progress.unwrap(),
+            6,
+            "output dispatch must not own the ring lock"
+        );
+        assert_eq!(*delivered.lock(), vec![10, 11, 12, 13, 14, 15, 19]);
+        assert_eq!(destroyed.load(Ordering::SeqCst), 1);
+        let summary = mgr.lock().collect_stats_summary();
+        assert_eq!(summary["pipeline_buffer"]["ring_used"], 0);
+        assert_eq!(summary["pipeline_buffer"]["mem_used"], 0);
+    }
+
+    #[test]
+    fn full_pipeline_keeps_stats_responsive_and_reload_preserves_order() {
+        // Exercise ring exhaustion and byte-budget exhaustion independently.
+        for (ring_size, mem_size) in [(3, 4096), (16, (std::mem::size_of::<RingMsg>() + 1) * 3)] {
+            let dir = tempfile::tempdir().unwrap();
+            let pcap = scratch_pcap(dir.path());
+            let config = fp_tasks_cfg(&pcap, &["a", "b"]).replace(
+                "\"rtc\"",
+                "\"pipeline\",\"pipeline\":{\"buffer_size_mb\":1}",
+            );
+            let mut manager = TaskManager::new(
+                Config::parse_str(&config).unwrap(),
+                "test.json".into(),
+                dir.path().display().to_string(),
+            )
+            .unwrap();
+            manager.pipeline = Some(PipelineShared::new(
+                ring_size,
+                u64::try_from(mem_size).unwrap(),
+            ));
+            let old_ring = manager.pipeline.as_ref().unwrap().producer.clone();
+            let delivered = Arc::new(Mutex::new(Vec::new()));
+            let destroyed = Arc::new(AtomicUsize::new(0));
+            let attempted = Arc::new(AtomicUsize::new(0));
+            let started = Arc::new(AtomicBool::new(false));
+            let (entered_tx, entered_rx) = std::sync::mpsc::channel();
+            let (release_tx, release_rx) = std::sync::mpsc::channel();
+            let (_, unused_rx) = std::sync::mpsc::channel();
+            let mut entered = Some(entered_tx);
+            let mut releases = [release_rx, unused_rx].into_iter();
+            for (index, base) in [10, 20].into_iter().enumerate() {
+                manager.entries[index].capturer = Some(Box::new(BurstCapturer {
+                    base,
+                    packets: 6,
+                    attempted: attempted.clone(),
+                    wait_for_output: (index == 0).then(|| started.clone()),
+                }));
+                manager.out_sets.lock()[index].outputs = vec![Box::new(BlockingOutput {
+                    base,
+                    entered: entered.take(),
+                    started: started.clone(),
+                    release: releases.next().unwrap(),
+                    delivered: delivered.clone(),
+                    destroyed: destroyed.clone(),
+                })];
+            }
+            manager.start();
+            let mgr = Arc::new(Mutex::new(manager));
+            let m = mgr.clone();
+            let producer = std::thread::spawn(move || poll_packets_batch(&m, 1));
+            entered_rx
+                .recv_timeout(std::time::Duration::from_secs(1))
+                .unwrap();
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
+            while attempted.load(Ordering::SeqCst) < 4 && std::time::Instant::now() < deadline {
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            }
+
+            let m = mgr.clone();
+            let replacement = fp_tasks_cfg(&pcap, &["b", "a"]).replace(
+                "\"rtc\"",
+                "\"pipeline\",\"pipeline\":{\"buffer_size_mb\":1}",
+            );
+            let (reload_tx, reload_rx) = std::sync::mpsc::channel();
+            let reloader = std::thread::spawn(move || {
+                reload(&m, Config::parse_str(&replacement).unwrap()).unwrap();
+                reload_tx.send(()).unwrap();
+            });
+            let m = mgr.clone();
+            let (stats_tx, stats_rx) = std::sync::mpsc::channel();
+            let stats = std::thread::spawn(move || {
+                stats_tx.send(m.lock().collect_stats_summary()).unwrap();
+            });
+            let snapshot = stats_rx.recv_timeout(std::time::Duration::from_secs(1));
+            let still_waiting = reload_rx.try_recv().is_err();
+            release_tx.send(()).unwrap();
+            assert_eq!(producer.join().unwrap(), 12);
+            reloader.join().unwrap();
+            stats.join().unwrap();
+            let summary = snapshot
+                .expect("stats must not wait for full-ring capture or reload's polling lock");
+            assert!(still_waiting, "reload must wait for the old capture batch");
+            assert_eq!(summary["pipeline_buffer"]["ring_total"], ring_size);
+            assert_eq!(summary["pipeline_buffer"]["mem_total"], mem_size);
+            if ring_size == 3 {
+                assert_eq!(summary["pipeline_buffer"]["ring_used"], 2);
+            }
+            assert!(
+                serde_json::from_value::<u64>(summary["pipeline_buffer"]["mem_used"].clone())
+                    .unwrap()
+                    <= u64::try_from(mem_size).unwrap()
+            );
+            let mut manager = mgr.lock();
+            assert!(!Arc::ptr_eq(
+                &old_ring,
+                &manager.pipeline.as_ref().unwrap().producer
+            ));
+            assert_eq!(manager.task_build_epoch(0), Some(0));
+            assert_eq!(manager.task_build_epoch(1), Some(0));
+            assert_eq!(
+                destroyed.load(Ordering::SeqCst),
+                0,
+                "both outputs were reused"
+            );
+            manager.stop();
+            assert_eq!(destroyed.load(Ordering::SeqCst), 2);
+            assert_eq!(
+                *delivered.lock(),
+                vec![10, 11, 12, 13, 14, 15, 19, 20, 21, 22, 23, 24, 25, 29]
+            );
+            assert_eq!(
+                manager.collect_stats_summary()["pipeline_buffer"]["mem_used"],
+                0
+            );
+        }
+    }
+
     fn pipeline_cfg_json(pcap: &std::path::Path) -> String {
         format!(
             r#"{{"execution_model":"pipeline","pipeline":{{"buffer_size_mb":1}},"tasks":[{{
@@ -1551,11 +1861,11 @@ mod tests {
     /// the heartbeat path must enqueue a message carrying the task index.
     #[test]
     fn pipeline_sink_enqueues_packets_and_heartbeats() {
-        let ring = Arc::new(Mutex::new(SpscRing::new(16)));
-        let alloc = Arc::new(SimpleAllocator::new(4096));
+        let (mut producer, mut consumer, ring) = SpscRing::new(16).into_split();
+        let alloc = SimpleAllocator::new(4096);
         let mut sink = PipelineSink {
-            ring: ring.clone(),
-            alloc: alloc.clone(),
+            ring: &mut producer,
+            alloc: &alloc,
             task_index: 3,
         };
         let hdr = PacketHeader {
@@ -1565,7 +1875,7 @@ mod tests {
             len: 4,
         };
         sink.on_packet(&hdr, &[1, 2, 3, 4], 7);
-        match ring.lock().pop().expect("packet queued").as_ref() {
+        match consumer.pop().expect("packet queued").as_ref() {
             RingMsg::Packet {
                 task_index,
                 direction,
@@ -1581,10 +1891,11 @@ mod tests {
             other => panic!("expected packet, got {other:?}"),
         }
         sink.on_heartbeat();
-        match ring.lock().pop().expect("heartbeat queued").as_ref() {
+        match consumer.pop().expect("heartbeat queued").as_ref() {
             RingMsg::Heartbeat { task_index, .. } => assert_eq!(*task_index, 3),
             other => panic!("expected heartbeat, got {other:?}"),
         }
+        assert_eq!(ring.used(), 0);
         assert!(alloc.used() > 0, "both messages must hold allocator budget");
     }
 

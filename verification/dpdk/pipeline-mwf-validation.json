@@ -1,0 +1,80 @@
+{
+  "base_commit": "ce92b60b09ff4e2360f5ab10f56a71858cfc6787",
+  "branch": "fix/pipeline-mwf",
+  "uncommitted": true,
+  "final_cases": 26,
+  "pipeline_cases": 20,
+  "all_budgets_and_memberships_verified": true,
+  "all_samples_physical_512_mib": true,
+  "max_observed_mapped_rss_huge_mib": 483.38671875,
+  "no_memory_limit_or_oom_events": true,
+  "all_drained_capture_equals_forwarded": true,
+  "all_sampling_windows_valid": true,
+  "live_stats": {
+    "all_calls": 78,
+    "pipeline_calls": 60,
+    "all_succeeded": true,
+    "pipeline_max_ms": 2.0412812009453773,
+    "highest_pipeline_offers": [
+      {
+        "backend": "af_packet",
+        "target_mpps": 5,
+        "max_ms": 1.4071427285671234
+      },
+      {
+        "backend": "dpdk_pdump",
+        "target_mpps": 20,
+        "max_ms": 1.2410935014486313
+      }
+    ]
+  },
+  "gates": {
+    "workspace_test": {
+      "command": "cargo test --workspace",
+      "passed": 764,
+      "ignored": 10,
+      "failed": 0
+    },
+    "workspace_clippy": "cargo clippy --workspace --all-targets -- -D warnings: passed",
+    "fmt": "cargo fmt --all -- --check: passed",
+    "hygiene": "parity/verify_hygiene.sh: passed",
+    "hygiene_reverse": "parity/verify_hygiene_reverse.sh: passed",
+    "liveness": "parity/verify_liveness.sh: passed",
+    "dpdk_release_build": "cargo build --release -p cpworker -p cpctl --features cpworker/dpdk: passed on yinjiao",
+    "dpdk_clippy": "cargo clippy -p cpworker --all-targets --features dpdk -- -D warnings: passed on yinjiao",
+    "dpdk_task_tests": {
+      "passed": 29,
+      "failed": 0,
+      "command": "LD_LIBRARY_PATH=/home/vader/dpdk-inst/lib/x86_64-linux-gnu cargo test -p cpworker --lib --features dpdk task::tests -- --test-threads=1"
+    },
+    "repeated_pipeline_regression_runs": 20,
+    "reintroduced_manager_lock_regression": "failed with snapshot timeout as expected",
+    "reintroduced_consumer_guard_regression": "failed with blocked-producer timeout in mutex-based candidate as expected"
+  },
+  "tested_release_binaries": {
+    "cpworker_sha256": "0b43b5c6e7a21a040af5b36cd0eaf01bacb5cbeee8c1061373be2547963d289e",
+    "cpctl_sha256": "5936772947866f855089ffa1109c6af02530d665b9e50c618848cb92975fcd4e",
+    "rustc": "1.98.0 (88d9e12ae 2026-08-18)",
+    "dpdk": "25.11.0",
+    "kernel": "5.15.0-187-generic",
+    "task_source_sha256_at_measurement": "5127a76a921a0aec08306edb5ce0f79f523efdc13e084e52855bb9ace0e0d021",
+    "post_measurement_product_edits": "task.rs rustdoc links and reload comment only; no runtime changes"
+  },
+  "final_source_sha256": {
+    "crates/cpworker/src/task.rs": "e72b2776dae75e4702758eef883687cef1b1646f18dd872ce40bcb0b758d8722",
+    "crates/cpworker/src/ring_buffer.rs": "c03dc61f452764d637a3e08189eb2bac882fd3804c7a5648a6970dd2fdaf43ce",
+    "crates/cpworker/src/main.rs": "5d19230c72f63c572f93be2e99919e03675c4b69e50efcaf361097ae954f9a7c",
+    "crates/cpworker/src/capturer/af_packet.rs": "a0650a6f07e717c3e0ddd6783a5e892e127750cf4e29440546bb45d14a453301",
+    "crates/cpworker/src/capturer/dpdk_pdump.rs": "b9e98bf90c3c7e07d8ab5a3541d7226bc0d164bca4e3bb61f024e5cbe3832d45",
+    "verification/dpdk/capacity_capture.py": "ec310015c42abefdcaa1af87467565b60e7b07c958d5a7dfb03c815bad1b8a7d",
+    "verification/dpdk/capacity_report.py": "c157262b81ef79a27593bfb9ad9aaf93773c818483a37569cc5e663cf86e0bb8"
+  },
+  "evidence_sha256": {
+    "pipeline-mwf-2026-10-02.jsonl.gz": "74bfe5892f29468fe8a575463bf27330633b8e877b39234505129890374902a6",
+    "pipeline-mwf-2026-10-02.csv": "af3313e7ef571209a9b188b09c02c495625cb1c2a5756062de998bf15f4036fc",
+    "pipeline-mwf-intermediate.jsonl.gz": "324a05a9e9f91f2c400fdeaa9f4b5bd98600bf3299dd8f82283892b3156f6ddb",
+    "pipeline-mwf-restoration.json": "26698080f7056ac3ba96f6a1195abc684503b4dec11d4302418bddf8b4cb26e3"
+  },
+  "remaining_work": "cloud-probe-rs-2kx",
+  "temporary_remote_clippy_component_restored": true
+}

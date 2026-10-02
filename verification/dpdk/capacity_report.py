@@ -73,6 +73,10 @@ def derive(d):
                burst_missing_packets=missing, burst_loss_pct=100 * max(missing, 0) / max(tx_total, 1),
                burst_vf_out_of_buffer=end_y["vf"]["value"]["rx_out_of_buffer"] - before_y["vf"]["value"]["rx_out_of_buffer"],
                burst_socket_drop=packet(end_y, "drop_packets") - packet(before_y, "drop_packets"))
+    rpc = d.get("live_stats_rpc", {})
+    row["live_stats_rpc_count"] = rpc.get("count", "")
+    row["live_stats_rpc_max_ms"] = 1000 * rpc["max_seconds"] if rpc else ""
+    row["live_stats_rpc_success"] = rpc.get("success", "")
     for key, first, last, counter in [
         ("offered", l0["nic"], l1["nic"], "tx_packets_phy"),
         ("wire", y0["nic"], y1["nic"], "rx_packets_phy"),

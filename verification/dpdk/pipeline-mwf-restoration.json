@@ -1,0 +1,20 @@
+[
+  {
+    "host": "yinjiao",
+    "sriov_numvfs": 0,
+    "pause": "Pause parameters for ens8np0:\nAutonegotiate:\toff\nRX:\t\ton\nTX:\t\ton",
+    "processes": "",
+    "probes": "",
+    "dpdk_runtime_entries": "",
+    "core_files": ""
+  },
+  {
+    "host": "laojun",
+    "sriov_numvfs": 0,
+    "pause": "Pause parameters for ens72np0:\nAutonegotiate:\toff\nRX:\t\ton\nTX:\t\ton",
+    "processes": "",
+    "probes": "",
+    "dpdk_runtime_entries": "",
+    "core_files": ""
+  }
+]

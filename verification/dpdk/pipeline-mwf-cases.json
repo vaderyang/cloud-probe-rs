@@ -1,0 +1,256 @@
+[
+  {
+    "backend": "af_packet",
+    "target_mpps": 2.4,
+    "affinity": "",
+    "burst_capture": true,
+    "live_stats": true,
+    "label": "pipeline-mwf-owned-spsc",
+    "ring_mb": 8
+  },
+  {
+    "backend": "af_packet",
+    "target_mpps": 1,
+    "affinity": "",
+    "burst_capture": true,
+    "live_stats": true,
+    "label": "pipeline-mwf-owned-spsc",
+    "ring_mb": 8,
+    "pipeline": 504
+  },
+  {
+    "backend": "af_packet",
+    "target_mpps": 2.4,
+    "affinity": "",
+    "burst_capture": true,
+    "live_stats": true,
+    "label": "pipeline-mwf-owned-spsc",
+    "ring_mb": 8,
+    "pipeline": 504
+  },
+  {
+    "backend": "af_packet",
+    "target_mpps": 5,
+    "affinity": "",
+    "burst_capture": true,
+    "live_stats": true,
+    "label": "pipeline-mwf-owned-spsc",
+    "ring_mb": 8,
+    "pipeline": 504
+  },
+  {
+    "backend": "dpdk_pdump",
+    "target_mpps": 20,
+    "affinity": "48-49",
+    "burst_capture": true,
+    "live_stats": true,
+    "label": "pipeline-mwf-owned-spsc",
+    "ring": 65536
+  },
+  {
+    "backend": "dpdk_pdump",
+    "target_mpps": 30,
+    "affinity": "48-49",
+    "burst_capture": true,
+    "live_stats": true,
+    "label": "pipeline-mwf-owned-spsc",
+    "ring": 65536
+  },
+  {
+    "backend": "dpdk_pdump",
+    "target_mpps": 5,
+    "affinity": "48-49",
+    "burst_capture": true,
+    "live_stats": true,
+    "label": "pipeline-mwf-owned-spsc",
+    "ring": 65536,
+    "pipeline": 16
+  },
+  {
+    "backend": "dpdk_pdump",
+    "target_mpps": 10,
+    "affinity": "48-49",
+    "burst_capture": true,
+    "live_stats": true,
+    "label": "pipeline-mwf-owned-spsc",
+    "ring": 65536,
+    "pipeline": 16
+  },
+  {
+    "backend": "dpdk_pdump",
+    "target_mpps": 20,
+    "affinity": "48-49",
+    "burst_capture": true,
+    "live_stats": true,
+    "label": "pipeline-mwf-owned-spsc",
+    "ring": 65536,
+    "pipeline": 16
+  },
+  {
+    "backend": "af_packet",
+    "target_mpps": 0.5,
+    "affinity": "",
+    "burst_capture": true,
+    "live_stats": true,
+    "label": "pipeline-mwf-owned-spsc-knee",
+    "ring_mb": 8,
+    "pipeline": 504
+  },
+  {
+    "backend": "af_packet",
+    "target_mpps": 0.75,
+    "affinity": "",
+    "burst_capture": true,
+    "live_stats": true,
+    "label": "pipeline-mwf-owned-spsc-knee",
+    "ring_mb": 8,
+    "pipeline": 504
+  },
+  {
+    "backend": "af_packet",
+    "target_mpps": 0.9,
+    "affinity": "",
+    "burst_capture": true,
+    "live_stats": true,
+    "label": "pipeline-mwf-owned-spsc-knee",
+    "ring_mb": 8,
+    "pipeline": 504
+  },
+  {
+    "backend": "af_packet",
+    "target_mpps": 1.6,
+    "affinity": "48",
+    "burst_capture": true,
+    "live_stats": true,
+    "label": "pipeline-mwf-owned-spsc-knee",
+    "ring_mb": 8,
+    "pipeline": 504
+  },
+  {
+    "backend": "af_packet",
+    "target_mpps": 2.4,
+    "affinity": "48",
+    "burst_capture": true,
+    "live_stats": true,
+    "label": "pipeline-mwf-owned-spsc-knee",
+    "ring_mb": 8,
+    "pipeline": 504
+  },
+  {
+    "backend": "af_packet",
+    "target_mpps": 2.4,
+    "affinity": "48",
+    "burst_capture": true,
+    "live_stats": true,
+    "label": "pipeline-mwf-owned-spsc-knee",
+    "ring_mb": 8
+  },
+  {
+    "backend": "dpdk_pdump",
+    "target_mpps": 28,
+    "affinity": "48-49",
+    "burst_capture": true,
+    "live_stats": true,
+    "label": "pipeline-mwf-owned-spsc-knee",
+    "ring": 65536
+  },
+  {
+    "backend": "dpdk_pdump",
+    "target_mpps": 6,
+    "affinity": "48-49",
+    "burst_capture": true,
+    "live_stats": true,
+    "label": "pipeline-mwf-owned-spsc-knee",
+    "ring": 65536,
+    "pipeline": 16
+  },
+  {
+    "backend": "dpdk_pdump",
+    "target_mpps": 7,
+    "affinity": "48-49",
+    "burst_capture": true,
+    "live_stats": true,
+    "label": "pipeline-mwf-owned-spsc-knee",
+    "ring": 65536,
+    "pipeline": 16
+  },
+  {
+    "backend": "af_packet",
+    "target_mpps": 0.75,
+    "affinity": "",
+    "burst_capture": true,
+    "live_stats": true,
+    "label": "pipeline-mwf-owned-spsc-confirmation",
+    "ring_mb": 8,
+    "pipeline": 504
+  },
+  {
+    "backend": "af_packet",
+    "target_mpps": 0.8,
+    "affinity": "",
+    "burst_capture": true,
+    "live_stats": true,
+    "label": "pipeline-mwf-owned-spsc-confirmation",
+    "ring_mb": 8,
+    "pipeline": 504
+  },
+  {
+    "backend": "af_packet",
+    "target_mpps": 0.85,
+    "affinity": "",
+    "burst_capture": true,
+    "live_stats": true,
+    "label": "pipeline-mwf-owned-spsc-confirmation",
+    "ring_mb": 8,
+    "pipeline": 504
+  },
+  {
+    "backend": "af_packet",
+    "target_mpps": 1.8,
+    "affinity": "48",
+    "burst_capture": true,
+    "live_stats": true,
+    "label": "pipeline-mwf-owned-spsc-confirmation",
+    "ring_mb": 8,
+    "pipeline": 504
+  },
+  {
+    "backend": "af_packet",
+    "target_mpps": 2,
+    "affinity": "48",
+    "burst_capture": true,
+    "live_stats": true,
+    "label": "pipeline-mwf-owned-spsc-confirmation",
+    "ring_mb": 8,
+    "pipeline": 504
+  },
+  {
+    "backend": "dpdk_pdump",
+    "target_mpps": 6,
+    "affinity": "48-49",
+    "burst_capture": true,
+    "live_stats": true,
+    "label": "pipeline-mwf-owned-spsc-confirmation",
+    "ring": 65536,
+    "pipeline": 16
+  },
+  {
+    "backend": "af_packet",
+    "target_mpps": 0.8,
+    "affinity": "",
+    "burst_capture": true,
+    "live_stats": true,
+    "label": "pipeline-mwf-owned-spsc-repeat",
+    "ring_mb": 8,
+    "pipeline": 504
+  },
+  {
+    "backend": "dpdk_pdump",
+    "target_mpps": 26,
+    "affinity": "48-49",
+    "burst_capture": true,
+    "live_stats": true,
+    "label": "pipeline-mwf-owned-spsc-repeat",
+    "ring": 65536
+  }
+]
