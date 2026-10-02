@@ -18,7 +18,11 @@
 //!   or a multi-A/AAAA record is not pinned to the first answer;
 //! * every byte we owe the peer goes through one FIFO (`Conn::out`), and business
 //!   frames are only written once that FIFO is empty. A short write in the middle
-//!   of the greeting/READY can therefore never misalign the wire stream.
+//!   of the greeting/READY can therefore never misalign the wire stream;
+//! * a frame that is lost *after* it was accepted - half-written when the peer
+//!   disconnects, or still queued when the caller stops - is reported back
+//!   through [`ZmtpPush::take_loss_report`], because the caller has already
+//!   counted it as delivered (cloud-probe-rs-b7b).
 //!
 //! The transport, connector and resolver are traits so the state machine can be
 //! driven by a scripted mock in tests and fuzz targets (malformed peer bytes,
@@ -92,6 +96,41 @@ pub enum SendOutcome {
     Queued,
     /// Dropped because the high-water mark is reached (libzmq `EAGAIN`).
     Dropped,
+}
+
+/// What one queued message is worth in the caller's own statistics.
+///
+/// A queued message is not necessarily one packet: the ZMQ output packs a whole
+/// batch into a single frame. The transport can lose a message *after* it was
+/// accepted (a frame that is half-written when the peer disconnects cannot be
+/// resumed on the next connection), and only the caller knows what that frame
+/// carried - so the account travels with the message and comes back through
+/// [`ZmtpPush::take_loss_report`] (cloud-probe-rs-b7b).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct MessageAccount {
+    /// Packets the message carried.
+    pub packets: u64,
+    /// Bytes the message carried, counted the way the caller counts them (the
+    /// message body, not the framing this client adds).
+    pub bytes: u64,
+}
+
+/// Messages discarded by the transport after accepting them, accumulated since
+/// the last [`ZmtpPush::take_loss_report`].
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct LossReport {
+    /// Number of messages (frames) lost.
+    pub messages: u64,
+    /// Packets those messages carried.
+    pub packets: u64,
+    /// Bytes those messages carried.
+    pub bytes: u64,
+}
+
+/// One queued message plus the caller's account for what it carried.
+struct PendingMsg {
+    frame: Vec<u8>,
+    account: MessageAccount,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -231,7 +270,9 @@ pub struct ZmtpPush {
     connector: Box<dyn Connector>,
     hwm: usize,
     conn: Option<Conn>,
-    pending: VecDeque<Vec<u8>>,
+    pending: VecDeque<PendingMsg>,
+    /// Loss charged to the caller since its last [`ZmtpPush::take_loss_report`].
+    loss: LossReport,
     front_off: usize,
     next_attempt: Instant,
     backoff: Duration,
@@ -250,6 +291,7 @@ impl ZmtpPush {
             hwm: hwm.max(1),
             conn: None,
             pending: VecDeque::new(),
+            loss: LossReport::default(),
             front_off: 0,
             next_attempt: Instant::now(),
             backoff: INITIAL_BACKOFF,
@@ -327,7 +369,23 @@ impl ZmtpPush {
     }
 
     /// Enqueue a message, progressing the connection. Never blocks.
+    ///
+    /// For loss accounting the message counts as one packet of its own length;
+    /// a caller that packs several packets into one message uses
+    /// [`ZmtpPush::send_with_account`], so losing the message loses what it
+    /// carried rather than one anonymous frame.
     pub fn send(&mut self, msg: &[u8]) -> SendOutcome {
+        self.send_with_account(
+            msg,
+            MessageAccount {
+                packets: 1,
+                bytes: u64::try_from(msg.len()).unwrap_or(u64::MAX),
+            },
+        )
+    }
+
+    /// Enqueue a message together with the caller's account for it.
+    pub fn send_with_account(&mut self, msg: &[u8], account: MessageAccount) -> SendOutcome {
         self.poll();
         // Exact wire size, so the budget accounting matches what is queued below.
         let framed = msg.len() + if msg.len() > 255 { 9 } else { 2 };
@@ -336,9 +394,46 @@ impl ZmtpPush {
         }
         let frame = codec::frame(0, msg);
         self.pending_bytes += frame.len();
-        self.pending.push_back(frame);
+        self.pending.push_back(PendingMsg { frame, account });
         self.poll();
         SendOutcome::Queued
+    }
+
+    /// Messages the transport discarded *after* accepting them, and what they
+    /// carried; resets the accumulated report.
+    ///
+    /// `SendOutcome::Queued` only says the message reached our queue. If the
+    /// peer goes away while a frame is half-written, that frame is
+    /// unrecoverable and is dropped, and the backlog gauge will not show it
+    /// later - so a caller that counted the message as forwarded has to be told,
+    /// or the packets vanish from the statistics entirely (cloud-probe-rs-b7b).
+    pub fn take_loss_report(&mut self) -> LossReport {
+        std::mem::take(&mut self.loss)
+    }
+
+    /// Throw away whatever is still queued, reporting every message as lost.
+    ///
+    /// For shutdown: [`Self::drain_for`] has already had its say, the rest never
+    /// reaches the peer, and the queue dies with this client.
+    ///
+    /// Returns the number of messages discarded.
+    pub fn discard_queued(&mut self) -> usize {
+        let mut discarded = 0;
+        while let Some(msg) = self.pending.pop_front() {
+            self.pending_bytes = self.pending_bytes.saturating_sub(msg.frame.len());
+            self.report_loss(msg.account);
+            discarded += 1;
+        }
+        // Nothing left to resume, and a write cursor without its connection is
+        // exactly the misalignment `schedule_reconnect` documents.
+        self.front_off = 0;
+        discarded
+    }
+
+    fn report_loss(&mut self, account: MessageAccount) {
+        self.loss.messages = self.loss.messages.saturating_add(1);
+        self.loss.packets = self.loss.packets.saturating_add(account.packets);
+        self.loss.bytes = self.loss.bytes.saturating_add(account.bytes);
     }
 
     /// Progress connection/reconnect and flush queued messages. Never blocks.
@@ -518,16 +613,17 @@ impl ZmtpPush {
             None => return,
         };
         while let Some(msg) = self.pending.pop_front() {
-            self.pending_bytes = self.pending_bytes.saturating_sub(msg.len());
+            let frame_len = msg.frame.len();
+            self.pending_bytes = self.pending_bytes.saturating_sub(frame_len);
             let mut off = self.front_off;
             self.front_off = 0;
             let mut disconnected = false;
-            while off < msg.len() {
+            while off < frame_len {
                 debug_assert!(
                     !conn.out_pending(),
                     "single-FIFO invariant: handshake bytes must reach the wire first"
                 );
-                match conn.t.write(&msg[off..]) {
+                match conn.t.write(&msg.frame[off..]) {
                     Ok(0) => {
                         disconnected = true;
                         break;
@@ -535,7 +631,7 @@ impl ZmtpPush {
                     Ok(n) => off += n,
                     Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
                         self.front_off = off;
-                        self.pending_bytes += msg.len();
+                        self.pending_bytes += frame_len;
                         self.pending.push_front(msg);
                         self.conn = Some(conn);
                         return;
@@ -548,11 +644,16 @@ impl ZmtpPush {
                 }
             }
             if disconnected {
-                // A partially written frame is unrecoverable; drop it. The rest
-                // of the queue is resent on the next connection.
+                // The rest of the queue is resent on the next connection. A
+                // frame that is already half-written cannot be: the peer saw a
+                // truncated message, and the next stream would be misaligned by
+                // the tail too. Drop it - and report it, because the caller
+                // already counted it as delivered (cloud-probe-rs-b7b).
                 if off == 0 {
-                    self.pending_bytes += msg.len();
+                    self.pending_bytes += frame_len;
                     self.pending.push_front(msg);
+                } else {
+                    self.report_loss(msg.account);
                 }
                 conn.t.shutdown();
                 drop(conn);
@@ -567,6 +668,11 @@ impl ZmtpPush {
 
     fn schedule_reconnect(&mut self) {
         self.conn = None;
+        // A write cursor belongs to the connection it was taken on. Keeping it
+        // alive would resume a half-written frame in the middle of the *next*
+        // stream (and understate `queued_bytes` while the old peer's bytes were
+        // never delivered), so the whole frame is rewritten.
+        self.front_off = 0;
         self.next_attempt = Instant::now() + self.backoff;
         self.backoff = (self.backoff * 2).min(MAX_BACKOFF);
     }
@@ -934,6 +1040,11 @@ mod tests {
         interrupt_reads: Arc<AtomicUsize>,
         /// When set, `read` fails with a hard (non-`WouldBlock`) error.
         fail_read: Arc<AtomicBool>,
+        /// When set, writes accept at most `hard_budget` more bytes in total and
+        /// then fail hard: a socket whose peer dies *in the middle of a frame*,
+        /// which is the only way to produce a half-written frame on purpose.
+        fail_mid_frame: Arc<AtomicBool>,
+        hard_budget: Arc<AtomicUsize>,
     }
 
     struct MockTransport {
@@ -945,6 +1056,16 @@ mod tests {
             if self.h.interrupt_writes.load(Ordering::Relaxed) > 0 {
                 self.h.interrupt_writes.fetch_sub(1, Ordering::Relaxed);
                 return Err(io::Error::from(io::ErrorKind::Interrupted));
+            }
+            if self.h.fail_mid_frame.load(Ordering::Relaxed) {
+                let budget = self.h.hard_budget.load(Ordering::Relaxed);
+                if budget == 0 {
+                    return Err(io::Error::from(io::ErrorKind::BrokenPipe));
+                }
+                let n = budget.min(buf.len());
+                self.h.hard_budget.fetch_sub(n, Ordering::Relaxed);
+                self.h.written.lock().unwrap().extend_from_slice(&buf[..n]);
+                return Ok(n);
             }
             if self.h.fail_write.load(Ordering::Relaxed) {
                 return Err(io::Error::from(io::ErrorKind::BrokenPipe));
@@ -1603,6 +1724,129 @@ mod tests {
             "EINTR must not force a reconnect"
         );
         assert_eq!(z.queued(), 0, "the frame must be flushed after the retry");
+    }
+
+    /// cloud-probe-rs-b7b: a frame that is half-written when the peer dies is
+    /// dropped, and the caller has to hear about it - it already counted those
+    /// packets as forwarded, and the backlog gauge reads 0 afterwards, so
+    /// without this report the packets simply vanish from the statistics.
+    #[test]
+    fn a_half_written_frame_is_reported_as_lost() {
+        let (mut z, h) = setup(valid_peer(), 10);
+        drive_until_open(&mut z);
+        // The socket takes a few bytes of the frame, then the peer is gone.
+        h.fail_mid_frame.store(true, Ordering::Relaxed);
+        h.hard_budget.store(5, Ordering::Relaxed);
+        assert_eq!(z.send(b"1234567890"), SendOutcome::Queued);
+        assert_eq!(
+            z.take_loss_report(),
+            LossReport {
+                messages: 1,
+                packets: 1,
+                bytes: 10
+            },
+            "accepted, then lost mid-write"
+        );
+        assert_eq!(z.queued(), 0, "a half-written frame is not retried");
+        assert_eq!(z.queued_bytes(), 0);
+        assert_eq!(
+            z.take_loss_report(),
+            LossReport::default(),
+            "reading the report must not double-count"
+        );
+    }
+
+    /// The other half of the story: a frame that was never started stays in the
+    /// queue for the next connection, so it is not a loss yet.
+    #[test]
+    fn a_frame_not_yet_started_is_retried_not_reported_lost() {
+        let (mut z, h) = setup(valid_peer(), 10);
+        drive_until_open(&mut z);
+        h.fail_write.store(true, Ordering::Relaxed); // hard error on the first byte
+        assert_eq!(z.send(b"1234567890"), SendOutcome::Queued);
+        assert_eq!(
+            z.take_loss_report(),
+            LossReport::default(),
+            "nothing was written, so nothing was lost"
+        );
+        assert_eq!(z.queued(), 1, "the frame waits for the next connection");
+    }
+
+    /// A caller that packs several packets into one frame must get that count
+    /// back when the frame is lost, not a bare "one message".
+    #[test]
+    fn the_callers_account_travels_with_the_message() {
+        let (mut z, h) = setup(valid_peer(), 10);
+        drive_until_open(&mut z);
+        h.fail_mid_frame.store(true, Ordering::Relaxed);
+        h.hard_budget.store(4, Ordering::Relaxed);
+        let body = vec![0u8; 500];
+        assert_eq!(
+            z.send_with_account(
+                &body,
+                MessageAccount {
+                    packets: 37,
+                    bytes: 500
+                },
+            ),
+            SendOutcome::Queued
+        );
+        assert_eq!(
+            z.take_loss_report(),
+            LossReport {
+                messages: 1,
+                packets: 37,
+                bytes: 500
+            },
+            "the batch's own numbers, not the wire framing"
+        );
+    }
+
+    /// Whatever a linger could not send is gone with the client; `discard_queued`
+    /// is the shutdown hook that says so.
+    #[test]
+    fn discard_queued_reports_the_backlog_it_throws_away() {
+        let (mut z, h) = setup(valid_peer(), 10);
+        h.fail_write.store(true, Ordering::Relaxed); // nothing can ever drain
+        assert_eq!(z.send(b"one"), SendOutcome::Queued);
+        assert_eq!(z.send(b"two"), SendOutcome::Queued);
+        assert_eq!(z.queued(), 2);
+        assert_eq!(z.discard_queued(), 2);
+        assert_eq!(z.queued(), 0);
+        assert_eq!(z.queued_bytes(), 0, "the byte gauge must follow");
+        assert_eq!(
+            z.take_loss_report(),
+            LossReport {
+                messages: 2,
+                packets: 2,
+                bytes: 6
+            },
+            "undelivered backlog is a drop, not a silence"
+        );
+    }
+
+    /// A write cursor belongs to the connection it was taken on. Resuming a
+    /// half-written frame on a fresh stream would misalign that stream, and it
+    /// would understate `queued_bytes` for bytes the new peer never sees.
+    #[test]
+    fn a_resume_offset_does_not_survive_a_reconnect() {
+        let (mut z, h) = setup(valid_peer(), 10);
+        drive_until_open(&mut z);
+        h.write_budget.store(3, Ordering::Relaxed); // only part of the frame fits
+        assert_eq!(z.send(b"1234567890"), SendOutcome::Queued);
+        z.poll();
+        assert_eq!(z.front_off, 3, "the frame is parked mid-write");
+
+        h.fail_read.store(true, Ordering::Relaxed); // the peer dies
+        z.poll();
+        assert!(!z.is_connected());
+        assert_eq!(z.front_off, 0, "a stale cursor must not be re-used");
+        assert_eq!(z.queued_bytes(), 12, "the whole frame is owed again");
+        assert_eq!(
+            z.take_loss_report(),
+            LossReport::default(),
+            "retried, so not lost"
+        );
     }
 }
 

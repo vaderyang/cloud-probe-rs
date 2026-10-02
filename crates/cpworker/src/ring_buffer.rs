@@ -297,6 +297,17 @@ impl OwnedRingProducer {
 }
 
 /// Unique consumer of an owned SPSC ring; deliberately not Clone.
+///
+/// `RingCore` is `Sync` only so that *one* producer and *one* consumer can live
+/// on different threads. A second consumer is not a data race but a protocol
+/// break: both would `pop()` the same tail and read the same slot twice, so the
+/// second `assume_init_read()` returns a moved-out value (UB). Clone is what
+/// makes that reachable in safe code, hence the negative test:
+///
+/// ```compile_fail
+/// let (_, consumer, _) = cpworker::ring_buffer::SpscRing::new(8).into_split();
+/// let second_consumer = consumer.clone();
+/// ```
 pub struct OwnedRingConsumer {
     core: Arc<RingCore>,
 }
@@ -329,6 +340,15 @@ impl RingObserver {
 }
 
 /// Producer half of a split [`SpscRing`].
+///
+/// Same rule as [`OwnedRingProducer`], and for the same reason - the single
+/// producer is a type-system guarantee, not a convention:
+///
+/// ```compile_fail
+/// let mut ring = cpworker::ring_buffer::SpscRing::new(8);
+/// let (producer, _consumer) = ring.split();
+/// let second_producer = producer.clone();
+/// ```
 pub struct RingProducer<'a> {
     core: &'a RingCore,
 }
@@ -356,6 +376,12 @@ impl RingProducer<'_> {
 }
 
 /// Consumer half of a split [`SpscRing`].
+///
+/// ```compile_fail
+/// let mut ring = cpworker::ring_buffer::SpscRing::new(8);
+/// let (_producer, consumer) = ring.split();
+/// let second_consumer = consumer.clone();
+/// ```
 pub struct RingConsumer<'a> {
     core: &'a RingCore,
 }
