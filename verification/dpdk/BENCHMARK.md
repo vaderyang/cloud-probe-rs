@@ -960,6 +960,37 @@ ceiling is the receive path, and at equal rate C spent more process CPU. At
 startup-loss outlier is retained); the 256 MiB V2 ring maps ~492 MiB, because
 frame/block rounding exceeds the requested buffer.
 
+### The C daemon default is pipeline too, and it does *not* collapse
+
+Both daemons default `cpm.worker.execution_model` to `pipeline` (upstream
+`cpdaemon`'s `key.go`, and this port's `cpdaemon/src/config.rs`), and the memory
+policy default is `fixed_nic_buffer` = 8 MiB, with the pipeline buffer sized to
+`memLimit - taskMem` (504 MiB for one task). The C worker was therefore measured
+in **its shipped default** under the same 1 CPU / 512 MiB cgroup:
+
+| C configuration | Loss-free | Overload plateau | Worker CPU |
+|---|---:|---:|---:|
+| pipeline, daemon default (`timeout_ms` omitted → 0 ms, `TPACKET_V2`, 8 MiB, 504 MiB pipeline) | **0.95 Mpps** | 0.916–0.950 Mpps | ~100% of one core |
+| pipeline, `timeout_ms=1000` (`TPACKET_V3`, otherwise identical) | **2.1 Mpps** | ~2.1 Mpps | ~86% |
+| RTC, `timeout_ms=1000` (`TPACKET_V3`, 8 MiB) | ~2.4 Mpps | 2.455–2.508 Mpps | ~18% |
+
+**This is a porting result, not an upstream one.** The C pipeline does not
+collapse the way this port's did before the ring-mutex fix (7.5 kpps loss-free,
+5.1% loss at 10 kpps). The C consumer is a genuinely lock-free SPSC ring:
+`cpworker/src/ring_buffer.c` pushes and pops on acquire/release atomics, and
+`cpworker/src/task.c` pops, dispatches and frees each message, sleeping 10 µs on
+an empty queue **with no ring mutex held**; its `stats_lock` covers only a short
+snapshot copy. This port had wrapped that same SPSC ring in a `Mutex<SpscRing>`
+and kept the guard alive across dispatch and the idle sleep, which is what cost
+three orders of magnitude. So the defect was ours, and the fix (`215ca7f`)
+brings the port to 0.8 Mpps unrestricted / 1.6 Mpps pinned — at or above C's
+shipped default. Nothing here needs an upstream report.
+
+The C pipeline's remaining gap to C RTC (0.95 vs 2.4 Mpps at the shipped
+default; 2.1 vs 2.4 with the V3 timeout) is the execution model itself, confined
+to one worker's one-core quota — the same shape this port shows after its fix
+(0.8–1.6 vs 2.4 Mpps).
+
 **The C DPDK capturer cannot be measured at this commit.** It compiles once
 `-DCMAKE_C_FLAGS="$(pkg-config --cflags libdpdk)"` is added (upstream CMake
 discovers libdpdk but never applies its include dirs), but
