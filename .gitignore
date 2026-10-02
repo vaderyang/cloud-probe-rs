@@ -12,6 +12,7 @@ crates/cpworker/fuzz/coverage/
 
 # verification coverage artifacts
 verification/__pycache__/
+**/__pycache__/
 target/llvm-cov/
 
 # cargo-mutants output
@@ -30,3 +31,11 @@ verification/dpdk/capacity-*.jsonl.gz
 
 # Lab-local raw pipeline snapshots (multi-MiB; regenerate with capacity_capture.py)
 verification/dpdk/pipeline-mwf-*.jsonl.gz
+
+# OneBoot lab verification (machine-specific inventory + run outputs)
+tools/oneboot/inventory.json
+build/lab-junit/
+
+# OneBoot/VM build inputs and release artifacts
+dist/
+.protoc/

@@ -1,0 +1,9 @@
+# actionlint configuration.
+#
+# The lab-verification job runs on a self-hosted runner pool on the corporate
+# network (it must reach the internal OneBoot PXE console).  `oneboot` is a
+# custom label on that pool; declare it so actionlint does not reject the
+# `runs-on` list.  See .github/workflows/lab-verify.yml and docs/ONEBOOT_LAB.md.
+self-hosted-runner:
+  labels:
+    - oneboot

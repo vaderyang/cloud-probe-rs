@@ -1,0 +1,187 @@
+name: Lab verify (OneBoot)
+
+# Runs the released binaries on real machines provisioned by the internal
+# OneBoot PXE console.  OneBoot is reachable only from the corporate network
+# (it resolves to 10.1.1.182 and is NXDOMAIN publicly), so ALL of this runs
+# on a self-hosted runner labelled `oneboot`; GitHub-hosted runners cannot
+# reach it.
+#
+# SECURITY: a self-hosted runner is only safe for trusted, non-PR events.
+# This workflow therefore triggers *only* on workflow_dispatch or after a
+# successful `Release` run on a `v*` tag.  Never add pull_request here.
+#
+# See docs/ONEBOOT_LAB.md and tools/oneboot/ for the mechanics.
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to verify (e.g. v0.9.0)
+        required: true
+      targets:
+        description: Comma-separated inventory target names (empty = all)
+        required: false
+        default: ""
+      trigger:
+        description: How to boot the target
+        required: false
+        type: choice
+        default: ipmi
+        options: [ipmi, manual, none]
+      verify_ssh:
+        description: Skip PXE; test already-installed hosts over SSH
+        required: false
+        type: boolean
+        default: false
+  workflow_run:
+    workflows: ["Release"]
+    types: [completed]
+
+# Least privilege: verify-only, plus `gh release download`.
+permissions:
+  contents: read
+
+concurrency:
+  group: lab-verify-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  setup:
+    name: resolve tag + targets
+    # Only auto-run after a successful Release (which itself only runs on a
+    # tag or a manual dispatch).
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+      tag: ${{ steps.tag.outputs.tag }}
+      trigger: ${{ steps.tag.outputs.trigger }}
+      verify_ssh: ${{ steps.tag.outputs.verify_ssh }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Resolve the tag and trigger mode
+        id: tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT: ${{ github.event_name }}
+          DISPATCH_TAG: ${{ inputs.tag }}
+          DISPATCH_TRIGGER: ${{ inputs.trigger }}
+          DISPATCH_SSH: ${{ inputs.verify_ssh }}
+          RUN_TAG: ${{ github.event.workflow_run.head_branch }}
+        run: |
+          if [ "$EVENT" = "workflow_dispatch" ]; then
+            tag="$DISPATCH_TAG"
+            trigger="$DISPATCH_TRIGGER"
+            ssh="$DISPATCH_SSH"
+          else
+            # A tag push does not always populate workflow_run.head_branch, so
+            # fall back to the release that was just published.
+            tag="$RUN_TAG"
+            case "$tag" in
+              v*) ;;
+              *) tag="$(gh release list --limit 1 \
+                   --json tagName --jq '.[0].tagName')" ;;
+            esac
+            trigger="ipmi"
+            ssh="false"
+          fi
+          [ -n "$tag" ] || { echo "::error::no tag resolved"; exit 1; }
+          {
+            echo "tag=$tag"
+            echo "trigger=$trigger"
+            echo "verify_ssh=$ssh"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Build the per-target matrix
+        id: matrix
+        env:
+          DISPATCH_TARGETS: ${{ inputs.targets }}
+        run: |
+          inv=tools/oneboot/inventory.json
+          [ -f "$inv" ] || inv=tools/oneboot/inventory.example.json
+          if [ -n "$DISPATCH_TARGETS" ]; then
+            want="$(printf '%s' "$DISPATCH_TARGETS" \
+              | jq -Rc 'split(",") | map(gsub("^\\s+|\\s+$";""))')"
+            matrix="$(jq -c --argjson want "$want" '
+              .targets
+              | map(select(.name as $n | $want | index($n)))
+              | {include: map({name, artifact})}
+            ' "$inv")"
+          else
+            matrix="$(jq -c '
+              {include: [.targets[] | {name, artifact}]}
+            ' "$inv")"
+          fi
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+
+  lab:
+    name: ${{ matrix.name }}
+    needs: setup
+    # Set the repository variable LAB_RUNNER_LABELS (JSON array) to the labels
+    # of the internal runner pool, e.g.
+    #   ["self-hosted","linux","x64","oneboot"]
+    # The fallback keeps the job runnable on a generic self-hosted x64 runner.
+    runs-on: >-
+      ${{ fromJSON(vars.LAB_RUNNER_LABELS ||
+      '["self-hosted","linux","x64"]') }}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.setup.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Materialise the machine inventory
+        env:
+          LAB_INVENTORY_JSON: ${{ secrets.LAB_INVENTORY_JSON }}
+        run: |
+          if [ -n "$LAB_INVENTORY_JSON" ]; then
+            printf '%s' "$LAB_INVENTORY_JSON" \
+              > tools/oneboot/inventory.json
+          elif [ ! -f tools/oneboot/inventory.json ]; then
+            cp tools/oneboot/inventory.example.json \
+              tools/oneboot/inventory.json
+            echo "::warning::LAB_INVENTORY_JSON not set; using example"
+          fi
+
+      - name: Download ${{ matrix.artifact }} from the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.setup.outputs.tag }}
+        run: |
+          mkdir -p dist
+          gh release download "$TAG" \
+            --pattern "cloud-probe-rs-${{ matrix.artifact }}*.tar.gz*" \
+            --dir dist
+          ls -la dist
+
+      - name: Verify on ${{ matrix.name }}
+        env:
+          # Named by the inventory's `pass_env` / `key_env` fields.
+          LAB_BMC_PASS: ${{ secrets.LAB_BMC_PASS }}
+          LAB_SSH_KEY: ${{ secrets.LAB_SSH_KEY }}
+          TRIGGER: ${{ needs.setup.outputs.trigger }}
+          VERIFY_SSH: ${{ needs.setup.outputs.verify_ssh }}
+        run: |
+          extra=()
+          if [ "$VERIFY_SSH" = "true" ]; then
+            extra+=(--verify-ssh)
+          fi
+          tools/oneboot/run_inventory.py \
+            --inventory tools/oneboot/inventory.json \
+            --artifact-dir dist \
+            --junit-dir build/lab-junit \
+            --target '${{ matrix.name }}' \
+            --apply \
+            --trigger "$TRIGGER" \
+            "${extra[@]}"
+
+      - name: Upload JUnit + result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lab-junit-${{ matrix.name }}
+          path: build/lab-junit/
+          if-no-files-found: warn

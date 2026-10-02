@@ -1,0 +1,90 @@
+{
+  "_comment": [
+    "Machine inventory for the OneBoot release-verification pipeline.",
+    "Copy to inventory.json (git-ignored) and edit.",
+    "",
+    "driver=oneboot (default): physical lab machines; needs source + mac + BMC",
+    "  (or --trigger manual) + optional ssh for result pull.",
+    "driver=vm: local QEMU/KVM; needs source + boot_style, and a KVM host of the",
+    "  matching architecture (x86_64 targets on x86_64, ARM64 on arm64).",
+    "",
+    "Per-target fields:",
+    "  name        unique label (used in artifact/report names)",
+    "  source      OneBoot source id (see `oneboot_client.py sources`)",
+    "  boot_style  redhat (anaconda) | casper (Ubuntu autoinstall)",
+    "  artifact    which release target runs here, i.e. the tarball suffix:",
+    "              x86_64-unknown-linux-gnu-glibc217 / aarch64-...-glibc217",
+    "  frames      injected frames for the capture check (default 2000)",
+    "  mac/bmc/ssh physical driver only",
+    "  vm          VM driver only: {cpus, mem, disk, iso, dist_host}",
+    "  dist_host   override the OneBoot distribution host (default 10.40.1.254)"
+  ],
+  "oneboot": "https://oneboot.netisdev.com",
+  "targets": [
+    {
+      "name": "centos7-x86_64",
+      "source": "centos_7_9_x86_64_dvd_2009",
+      "boot_style": "redhat",
+      "artifact": "x86_64-unknown-linux-gnu-glibc217",
+      "vm": { "cpus": 4, "mem": 6144, "disk": "20G" },
+      "mac": "52:54:00:11:22:33",
+      "bmc": { "host": "10.40.8.173", "user": "Administrator", "pass_env": "LAB_BMC_PASS", "interface": "lanplus", "efi": false },
+      "ssh": { "host": "10.40.1.240", "user": "root", "key_env": "LAB_SSH_KEY" }
+    },
+    {
+      "name": "rhel9-x86_64",
+      "source": "rhel_9_5_x86_64_dvd",
+      "boot_style": "redhat",
+      "artifact": "x86_64-unknown-linux-gnu-glibc217",
+      "vm": { "cpus": 4, "mem": 8192, "disk": "30G" },
+      "mac": "52:54:00:11:22:34",
+      "bmc": { "host": "10.40.8.174", "user": "Administrator", "pass_env": "LAB_BMC_PASS", "interface": "lanplus", "efi": true },
+      "ssh": { "host": "10.40.1.241", "user": "root", "key_env": "LAB_SSH_KEY" }
+    },
+    {
+      "name": "uos-1050e-x86_64",
+      "source": "uos_server_20_1050e_amd64",
+      "boot_style": "redhat",
+      "artifact": "x86_64-unknown-linux-gnu-glibc217",
+      "vm": { "cpus": 4, "mem": 6144, "disk": "24G" }
+    },
+    {
+      "name": "openeuler-2203-x86_64",
+      "source": "openeuler_22_03_lts_sp3_x86_64_dvd",
+      "boot_style": "redhat",
+      "artifact": "x86_64-unknown-linux-gnu-glibc217",
+      "vm": { "cpus": 4, "mem": 6144, "disk": "24G" }
+    },
+    {
+      "name": "ubuntu2004-x86_64",
+      "source": "ubuntu_20_04_6_live_server_amd64",
+      "boot_style": "casper",
+      "artifact": "x86_64-unknown-linux-gnu-glibc217",
+      "vm": { "cpus": 4, "mem": 6144, "disk": "24G" }
+    },
+    {
+      "name": "ubuntu2404-x86_64",
+      "source": "ubuntu_24_04_3_live_server_amd64",
+      "boot_style": "casper",
+      "artifact": "x86_64-unknown-linux-gnu-glibc217",
+      "vm": { "cpus": 4, "mem": 8192, "disk": "30G" }
+    },
+    {
+      "name": "kylin-v10-arm64",
+      "source": "kylin_server_10_sp3_2403_halberd_release_20240426_arm64",
+      "boot_style": "redhat",
+      "artifact": "aarch64-unknown-linux-gnu-glibc217",
+      "vm": { "cpus": 4, "mem": 6144, "disk": "24G" },
+      "mac": "52:54:00:11:22:35",
+      "bmc": { "host": "10.40.8.175", "user": "Administrator", "pass_env": "LAB_BMC_PASS", "interface": "lanplus", "efi": true },
+      "ssh": { "host": "10.40.1.242", "user": "root", "key_env": "LAB_SSH_KEY" }
+    },
+    {
+      "name": "ubuntu2404-arm64",
+      "source": "ubuntu_24_04_4_live_server_arm64",
+      "boot_style": "casper",
+      "artifact": "aarch64-unknown-linux-gnu-glibc217",
+      "vm": { "cpus": 4, "mem": 8192, "disk": "30G" }
+    }
+  ]
+}

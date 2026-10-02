@@ -1,0 +1,8 @@
+# actionlint configuration (repo root mirror of .github/actionlint.yaml).
+#
+# Some actionlint invocations resolve the config from the working directory
+# rather than `.github/`.  Both files carry the same `oneboot` self-hosted
+# label so either lookup succeeds.  See .github/workflows/lab-verify.yml.
+self-hosted-runner:
+  labels:
+    - oneboot
