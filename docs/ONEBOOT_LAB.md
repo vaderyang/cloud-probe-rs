@@ -312,6 +312,26 @@ macOS 保持现状（OneBoot 只做 x86/ARM/LoongArch 的 Linux PXE，无法验�
 
 ---
 
+### 5.1 aarch64 / x86_64 gnu 基线：构建 + 地板 + **在目标 userland 里真实执行**（`cloud-probe-rs-2hs.2`）
+
+`release.yml` 的 Linux 条目在 manylinux2014 容器（CentOS 7，glibc 2.17）里构建，容器与 runner **同架构**
+（x86_64 用 `ubuntu-latest` + `manylinux2014_x86_64`；aarch64 用 `ubuntu-24.04-arm` +
+`manylinux2014_aarch64`）。2026-10-02 首次 `workflow_dispatch` 验证（run 37044653454，`publish release`
+因 `if: startsWith(github.ref,'refs/tags/v')` 被 skip，未发布任何东西）：
+
+| target | 构建 | objdump 地板 | 容器内执行 |
+|---|---|---|---|
+| `aarch64-unknown-linux-gnu` | ✅ success | `cpworker requires glibc 2.17` → OK | ✅ `cpctl 0.9.0` / `cpdaemon 0.9.0` / `dockerpid` / `cripid` 均执行 |
+| `x86_64-unknown-linux-gnu` | ✅ success | `cpworker requires glibc 2.16` → OK | ✅ 同上 |
+
+「构建成功」比它看起来要弱：地板检查只是**静态**读符号版本，而**从未被执行过的交叉产物只能证明它链接得过**。
+因此构建脚本现在会在容器内**运行**全部五个二进制（只要求「启动并有输出」——各二进制 flag 不同，而
+空输出正是「动态加载器解析不了」这种失败），这证明动态加载器与该二进制引用的每一个带版本的 glibc
+符号在目标 glibc 上**运行期确实存在**。`ubuntu-24.04-arm` 是**真 arm64 硬件**，不是模拟。
+
+仍未覆盖：Kylin/UOS 等**具体发行版用户态**的现场确认（其 glibc 补丁、SELinux 策略、内核差异）。
+OneBoot 机队当前 4 个客户端中没有 arm64 机器，故该半仍需 arm64 现场机器。
+
 ## 6. 已知缺口与后续
 
 1. **无人值守装机**：OneBoot 无 per-MAC «下次启动用哪个 ISO+kickstart» 的 API。
