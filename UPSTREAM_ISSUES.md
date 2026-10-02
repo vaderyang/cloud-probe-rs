@@ -29,8 +29,9 @@
 | # | 主题 | 上游链接 |
 |---|---|---|
 | S4-1 | DPDK pdump 克隆内存池用 `ring_mp_sc`（单消费者 get）：`RTE_PDUMP_ALL_QUEUES` 下多队列 primary 并发分配 → 池损坏 → 二级 `__rte_pktmbuf_read` SIGSEGV | [#286](https://github.com/Netis/cloud-probe/issues/286) |
+| S4-2 | DPDK pdump capturer 从不初始化 EAL：`dpdk_init()`（全仓唯一调用 `rte_eal_init()` 的地方）无调用点，且从不调用 `rte_pdump_init()`（≥25.11 必需）→ `rte_eth_dev_get_port_by_name()` 失败、起 0 个任务；另 CMake 未应用 `LIBDPDK_CFLAGS` | [#289](https://github.com/Netis/cloud-probe/issues/289) |
 
-本地已修复（改用 `ring_mp_mc`，与 DPDK 自带 `app/pdump` 一致；提交 `00cf775`）。复现/实测见 `verification/dpdk/BENCHMARK.md`。
+本地已修复（#286 改用 `ring_mp_mc`，与 DPDK 自带 `app/pdump` 一致，提交 `00cf775`；#289 在 Rust 端本就调用了 `rte_pdump_init()`，提交 `77492d6`）。复现/实测见 `verification/dpdk/BENCHMARK.md`。两个问题互相独立：即使补上 EAL 初始化，#286 的池仍会在多队列下损坏。
 
 ---
 
