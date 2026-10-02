@@ -1,0 +1,3 @@
+FANOUT_READY iface=ens8v0 nsocks=1 mode=none id=35574
+FANOUT_SOCK sock=0 packets=24632758 mpps=1.759
+FANOUT_DONE nsocks=1 mode=none seconds=14.004 packets=24632758 mpps=1.759

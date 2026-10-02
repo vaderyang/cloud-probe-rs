@@ -1,0 +1,6 @@
+FANOUT_READY iface=ens8v0 nsocks=4 mode=lb id=38725
+FANOUT_SOCK sock=0 packets=10852849 mpps=0.775
+FANOUT_SOCK sock=1 packets=8723792 mpps=0.623
+FANOUT_SOCK sock=2 packets=10254123 mpps=0.732
+FANOUT_SOCK sock=3 packets=9803472 mpps=0.700
+FANOUT_DONE nsocks=4 mode=lb seconds=14.004 packets=39634236 mpps=2.830

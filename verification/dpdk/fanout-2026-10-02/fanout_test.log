@@ -1,0 +1,48 @@
+=== setup VFs ===
+
+NSOCKS MODE     CAP_Mpps   RX_PKTS      NIC_OOB      NOTE
+1      none     1.759      33528231     824711133    -
+       FANOUT_SOCK sock=0 packets=24632758 mpps=1.759
+       FANOUT_DONE nsocks=1 mode=none seconds=14.004 packets=24632758 mpps=1.759
+2      none     2.710      32141586     827782627    -
+       FANOUT_SOCK sock=0 packets=18976398 mpps=1.355
+       FANOUT_SOCK sock=1 packets=18976398 mpps=1.355
+       FANOUT_DONE nsocks=2 mode=none seconds=14.006 packets=37952796 mpps=2.710
+1      lb       1.610      31538376     831140020    -
+       FANOUT_SOCK sock=0 packets=22551734 mpps=1.610
+       FANOUT_DONE nsocks=1 mode=lb seconds=14.005 packets=22551734 mpps=1.610
+2      lb       2.537      47493247     -3473354530  -
+       FANOUT_SOCK sock=0 packets=17500226 mpps=1.250
+       FANOUT_SOCK sock=1 packets=18024474 mpps=1.287
+       FANOUT_DONE nsocks=2 mode=lb seconds=14.005 packets=35524700 mpps=2.537
+4      lb       2.830      55472896     817618661    -
+       FANOUT_SOCK sock=0 packets=10852849 mpps=0.775
+       FANOUT_SOCK sock=1 packets=8723792 mpps=0.623
+       FANOUT_SOCK sock=2 packets=10254123 mpps=0.732
+       FANOUT_SOCK sock=3 packets=9803472 mpps=0.700
+       FANOUT_DONE nsocks=4 mode=lb seconds=14.004 packets=39634236 mpps=2.830
+8      lb       3.186      56168960     819245852    -
+       FANOUT_SOCK sock=0 packets=5711767 mpps=0.408
+       FANOUT_SOCK sock=1 packets=6424593 mpps=0.459
+       FANOUT_SOCK sock=2 packets=4450303 mpps=0.318
+       FANOUT_SOCK sock=3 packets=5377378 mpps=0.384
+       FANOUT_SOCK sock=4 packets=5821292 mpps=0.416
+       FANOUT_SOCK sock=5 packets=5797611 mpps=0.414
+       FANOUT_SOCK sock=6 packets=5120779 mpps=0.366
+       FANOUT_SOCK sock=7 packets=5912919 mpps=0.422
+       FANOUT_DONE nsocks=8 mode=lb seconds=14.005 packets=44616642 mpps=3.186
+4      hash     3.145      55287808     817875556    -
+       FANOUT_SOCK sock=0 packets=12048593 mpps=0.860
+       FANOUT_SOCK sock=1 packets=9700366 mpps=0.693
+       FANOUT_SOCK sock=2 packets=11396261 mpps=0.814
+       FANOUT_SOCK sock=3 packets=10901778 mpps=0.778
+       FANOUT_DONE nsocks=4 mode=hash seconds=14.005 packets=44046998 mpps=3.145
+4      cpu      2.889      56177952     820018764    -
+       FANOUT_SOCK sock=0 packets=11060638 mpps=0.790
+       FANOUT_SOCK sock=1 packets=8916808 mpps=0.637
+       FANOUT_SOCK sock=2 packets=10465769 mpps=0.747
+       FANOUT_SOCK sock=3 packets=10012375 mpps=0.715
+       FANOUT_DONE nsocks=4 mode=cpu seconds=14.005 packets=40455590 mpps=2.889
+
+raw logs: /tmp/fanout_test_out/ (on yinjiao, root-owned)
+[restore] VFs removed, PAUSE restored (autoneg off, rx on, tx on)

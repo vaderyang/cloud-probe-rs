@@ -92,9 +92,14 @@ filtered in userspace. Same 64-byte flood (~117–135 Mpps on the wire):
 - The ring is **faster than libpcap's own `TPACKET_V3`** (2.57 vs 1.93 Mpps at the
   same offered load). The residual loss is the kernel/NIC interface
   (`rx_out_of_buffer`, tcpdump's "dropped by interface"), not the capturer.
-- Going further needs `PACKET_FANOUT` with one socket per NIC RX queue: a single
-  `AF_PACKET` socket serialises on the ring block lock (adding RX queues did not
-  help — 4 queues stayed at ~2.45 Mpps).
+- Going further would need `PACKET_FANOUT` with one socket per NIC RX queue. That
+experiment was run on 2026-10-02 and it **does not work**: eight fanout sockets
+reach 3.19 Mpps where one reaches 1.6–1.8 Mpps (about 1.8×, not 8×), all four
+fanout modes land in 2.9–3.2 Mpps at four sockets, and `sysfs` `rx_packets` agrees
+with the ring counts — so the sockets are not what is starved. The ceiling is the
+kernel's mlx5 VF receive path, not the socket's ring block lock. See
+[`fanout-2026-10-02/`](fanout-2026-10-02/), and `cloud-probe-rs-f7x`, which this
+answers (do not add a fanout backend).
 
 ## DPDK pdump: the primary and the mempool, not just the capturer
 
@@ -768,10 +773,16 @@ review of the record:
   *before* the worker's socket. The kernel/NAPI substage was **not profiled**, and
   the file also carries an older, competing explanation ("a single `AF_PACKET`
   socket serialises on the ring block lock", `BENCHMARK.md` fix-history section).
-  The experiment that would separate them — `PACKET_FANOUT` across queues — was
-  never run; the "4 RX queues did not help" observation was taken **without**
-  fanout, so all queues still fed one socket and it does not discriminate. Read
-  the constraint as "loss occurs before the socket".
+  The experiment that settles it — `PACKET_FANOUT` across queues — **has now been
+  run** ([`fanout-2026-10-02/`](fanout-2026-10-02/)): eight fanout sockets reach
+  3.19 Mpps where one reaches 1.6–1.8 Mpps, every mode lands in 2.9–3.2 Mpps at
+  four sockets, and `sysfs` `rx_packets` matches the ring counts. Per-socket
+  fanout therefore buys at most ~1.8× and the ring-block-lock explanation is
+  **refuted**: the constraint is the kernel's mlx5 VF receive path, *before* the
+  socket. (The "4 RX queues did not help" observation is consistent with this —
+  without fanout all queues still fed one socket.) The kernel/NAPI substage is
+  still not profiled, so read the constraint as "the kernel receive path before
+  the socket", not as a named kernel function.
 * **The control plane is not solved everywhere.** The pipeline fix removed the
   pipeline starvation, but on the **RTC** path an empty ring makes
   `capture_once_ring` block in `poll()` for up to `timeout_ms` while the manager
