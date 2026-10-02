@@ -369,6 +369,49 @@ Rust 移植**有意偏离**该行为，改为安全默认：
 `crates/cpdaemon/tests/cpm_mtls.rs` 用**要求客户端证书的 rustls 服务端**固定：配置 PKCS#12 时
 握手成功且服务端观察到该叶子证书，未配置时同一服务端拒绝握手。
 
+## 2.8 512 MiB 策略、超额承诺与计费边界（cloud-probe-rs-rbn）
+
+cpdaemon 的两处容量公式与 Go oracle `cpdaemon/pkg/cpm/worker_mgr.go:459-508`
+一致：`auto_nic_buffer` 按 `memLimit / numItems` 分配每个 NIC；pipeline 的
+`task_mem` 是 libpcap `buffer_size_mb` 之和（缺省 256 MiB，非 libpcap 记 0），
+先保留 `pipeline.min_buffer_size_mb`（默认 128 MiB），仅当
+`memLimit > task_mem && memLimit - task_mem > buffer` 时改用差额。
+`memLimit` 取正的响应 `mem_limit`，否则取 `memory.default_limit_mb`（默认 512 MiB）。
+这里的 `memLimit` 是策略预算：当前 `worker::update_res_limit` / `reslimit` 仅实施
+CPU quota，未用 `ResLimit.mem` 设置 `memory.max`；下述实验的 512 MiB 硬限制是
+`verification/dpdk/capacity_capture.py` 由实验脚本单独设置的，不能归功于 daemon。
+
+因此一个 libpcap task、`auto_nic_buffer`、pipeline、`memLimit=512` 会承诺
+**512 MiB NIC + 128 MiB pipeline = 640 MiB**；等号使差额分支不执行。
+这是与 oracle 一致的已知超额承诺。默认 `fixed_nic_buffer=8` 同场景仍为
+**8 + 504 = 512 MiB**。这些数值是缓冲容量，未包含进程、队列槽和输出等开销，
+即使合计不超预算，也不保证物理占用或 RSS 不超 512 MiB。
+
+| 对象 | 实测计费及容量口径 |
+|---|---|
+| AF_PACKET `TPACKET_V3` NIC ring | 容量实验请求 512 MiB，ring 映射为 **492 × 1,089,536 = 536,051,712 B（511.21875 MiB）**；worker RSS **517.3–517.5 MiB**，cgroup `memory.current` 仅约 **5 MiB**，无 memory max/OOM 事件。该实验内核的 ring 不进入 worker 的 `memory.current`，不代表没有消耗物理内存，也不能推广为所有内核的保证。默认 8 MiB ring 的 RSS 为 **13.4–13.6 MiB**，计费约 **4 MiB**。 |
+| DPDK pdump 共享 ring/clone pool | 65,536 槽 / 131,072 clone 的共享 hugepage 映射为 **448 MiB**（primary 原先为 130 MiB）；worker RSS + hugetlb 为 **461.3–461.8 MiB**，worker `memory.current` 为 **9–10 MiB**、`hugetlb.2MB.current=0`。共享分配计在 **primary**，该实验 primary 在 worker cgroup 外；不能把两进程映射的同一组物理页重复相加，也不能靠 worker `memory.max` 限制合并占用。 |
+| Pipeline 与普通进程内存 | `SimpleAllocator` 只限制在途字节，按需申请堆内存，实际驻留页进入 worker cgroup 计费；配置容量不等于已驻留字节。默认 504 MiB pipeline 的容量实验 RSS 仅 **13.6–15.3 MiB**。输出文件的 page cache/tmpfs 页也会计费，并不含在 NIC + pipeline 的公式里。 |
+
+证据：[容量报告](verification/dpdk/BENCHMARK.md) 的 AF_PACKET、DPDK pdump 与
+factory-default pipeline 小节；[容量 CSV](verification/dpdk/capacity-2026-10-01.csv)
+`evidence_line=27..34` 的 512 MiB ring 诊断（如 27：RSS 517.265625 MiB、计费
+5.16796875 MiB）；[验证记录](verification/dpdk/capacity-validation.json) 明确将这些
+诊断排除于严格物理 512 MiB 预算之外；输出页计费见
+[转发实验](verification/dpdk/forwarding-e2e-2026-10-02/REPORT.md)。
+
+`collect_stats_summary.pipeline_buffer.ring_total` 是 pipeline 队列**槽数**（正常为
+1,048,576），`mem_total` 是在途分配器的**字节预算**，`mem_used` 是已预留在途字节；
+它们不是 AF_PACKET ring 大小、RSS 或 cgroup 计费量。cpdaemon 原样转发该 RPC；
+`cpctl stats` 目前展示 capture/output 计数及速率，没有展示 pipeline 或总内存。
+本次复核未发现这些字段与其实现口径不符，故不改统计协议。
+
+Rust 在生成启动/reload 配置时，若 NIC + pipeline 容量超过有效 `memLimit`，
+每次生成仅输出一条 WARN，列出策略、字段、分项、合计和上限；不在 stats 轮询中重复输出。
+**仅增加诊断，不改容量公式或拒绝配置**；默认路径的配置及日志行为不变。
+回归测试 `pipeline_overcommit_warns_once_without_changing_budgets` 固定告警内容与次数、
+响应上限/缺省上限、多个 NIC、fixed 超额/恰好等额、RTC 不告警以及诊断加法不溢出。
+
 ## 3. 关键一致性向量（已通过）
 
 * `workerTaskBuilder` 产出的 task fingerprint（含 Go 反射标签算法的怪异 `UUID()`
