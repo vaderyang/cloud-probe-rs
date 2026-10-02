@@ -84,6 +84,73 @@ def _fetch(url: str, dest: pathlib.Path) -> None:
     tmp.rename(dest)
 
 
+def _http_code(url: str) -> int | None:
+    """HTTP status for `url`, or None when the request could not be made at all.
+
+    Uses HEAD, then a one-byte range GET if the server refuses HEAD: a plain GET
+    would download the whole body, and these URLs are multi-gigabyte ISOs.
+    """
+    if not url.startswith(("http://", "https://")):
+        return None
+    if shutil.which("curl"):
+        base = ["curl", "-sS", "-o", "/dev/null", "-w", "%{http_code}",
+                "--max-time", "20"]
+        attempts = [[*base, "-I", url], [*base, "-r", "0-0", url]]
+    elif shutil.which("wget"):
+        attempts = [["wget", "-q", "--spider", "--timeout", "20", url]]
+    else:
+        return None
+    for cmd in attempts:
+        proc = _run(cmd, capture_output=True)
+        if proc.returncode != 0:
+            continue
+        out = (proc.stdout or "").strip()
+        if out.isdigit():
+            code = int(out)
+            if code not in (405, 501):  # HEAD not allowed -> try the range GET
+                return code
+    return None
+
+
+def _preflight_iso(url: str, subdir: str, dist_host: str) -> None:
+    """Fail fast when the file server will not actually hand the ISO out.
+
+    A source's `rel_path` says where OneBoot thinks the ISO is, not whether the
+    file server serves it. On 2026-10-02 every sibling directory under `/iso/`
+    answered 200 while `/iso/Ubuntu/` answered 403 - and so did a file that does
+    not exist inside it, which means nginx fails while *walking into* the
+    directory (EACCES) rather than while looking for the file (404). The install
+    then dies deep inside casper with an opaque download error. One request here
+    turns that into an actionable message (cloud-probe-rs-2hs.5).
+    """
+    code = _http_code(url)
+    if code is None:
+        print(f"[warn] could not check {url}; continuing", file=sys.stderr)
+        return
+    if code == 200:
+        return
+    if code in (401, 403):
+        name = subdir or "<subdir>"
+        raise SystemExit(
+            f"the file server refuses {url} (HTTP {code}).\n"
+            f"A 403 for a *nonexistent* file in the same directory means nginx cannot "
+            f"traverse /data/iso/{name} - not that the ISO is missing.\n"
+            f"  confirm on {dist_host}:  namei -l /data/iso/{name}\n"
+            f"                          sudo -u <nginx-user> test -rx /data/iso/{name} && echo ok\n"
+            f"                          nginx -T | grep -n -A6 'iso/{name}'\n"
+            f"  fix (most likely):      sudo chmod o+rx /data/iso/{name}   # and o+r on the ISOs\n"
+            f"  verify:                 curl -sI {url} | head -1      # expect 200\n"
+            f"Workaround without server access: --iso <local ISO>, or --skip-iso-preflight "
+            f"to continue anyway (see docs/ONEBOOT_LAB.md §4)."
+        )
+    if code == 404:
+        raise SystemExit(
+            f"{url} returned 404: the source's rel_path is stale, or the ISO was moved.\n"
+            f"Re-scan the OneBoot sources, or pass --iso <local ISO>."
+        )
+    print(f"[warn] {url} returned HTTP {code}; continuing", file=sys.stderr)
+
+
 def _mount_iso(iso: pathlib.Path, mnt: pathlib.Path) -> None:
     mnt.mkdir(parents=True, exist_ok=True)
     if _run(["mountpoint", "-q", str(mnt)]).returncode == 0:
@@ -152,6 +219,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--dist-host", default="10.40.1.254",
                    help="OneBoot HTTP distribution host (images + /iso)")
     p.add_argument("--iso", help="local ISO path (default: derive + download)")
+    p.add_argument("--skip-iso-preflight", action="store_true",
+                   help="do not probe the server's ISO URL before booting")
     p.add_argument("--target-name", default="vm")
     p.add_argument("--frames", type=int, default=2000)
     p.add_argument("--serve-port", type=int, default=8000)
@@ -210,7 +279,10 @@ def main(argv: list[str] | None = None) -> int:
                 rel = src["rel_path"]
         except Exception as exc:  # noqa: BLE001 - best effort, path may still work
             print(f"[warn] could not resolve rel_path: {exc}", file=sys.stderr)
-        _fetch(f"http://{args.dist_host}:8080/iso/{rel}", iso)
+        iso_url = f"http://{args.dist_host}:8080/iso/{rel}"
+        if not args.skip_iso_preflight:
+            _preflight_iso(iso_url, str(pathlib.PurePosixPath(rel).parent), args.dist_host)
+        _fetch(iso_url, iso)
 
     # 3. Expose the installer source and build the kernel command line.
     mnt = workdir / "mnt"

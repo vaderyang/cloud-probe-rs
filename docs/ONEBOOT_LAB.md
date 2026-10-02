@@ -240,10 +240,36 @@ python3。首次运行会把 ISO 缓存到 `--workdir`（默认 `/tmp/cprs-vm`�
 | `redhat` | CentOS/RHEL/Kylin/UOS/openEuler/Rocky | 挂载 ISO 树，`inst.repo=` + `inst.ks=` | ✅ 实测 CentOS 7.9 |
 | `casper` | Ubuntu (live-server Autoinstall) | 服务原始 ISO，`url=` + `autoinstall ds=nocloud-net;s=` | ✅ 实测 Ubuntu 20.04.6 |
 
-> **OneBoot 自身的坑**：`http://10.40.1.254:8080/iso/Ubuntu/` 下所有 Ubuntu ISO 返回
-> **403**（CentOS 等目录 200），而 OneBoot 生成的 Ubuntu 引导脚本正是
-> `url=http://…/iso/Ubuntu/<iso>` —— 也就是说**经此服务器的 Ubuntu PXE 装机很可能是坏的**。
-> VM 驱动因此允许 `--iso <本地ISO>`；用公开镜像下载即可（如 huaweicloud/tuna）。
+> **OneBoot 自身的坑（2026-10-02 精确定位，`cloud-probe-rs-2hs.5`）**：
+> `http://10.40.1.254:8080/iso/Ubuntu/` 下所有 Ubuntu ISO 返回 **403**（nginx/1.20.1），
+> 而同级 `CentOS7/ CentOS8/ Debian/ KylinV10/ KylinV11/ FnOS/ NeoKylin/` **全部 200**。
+>
+> 关键鉴别：在可读目录里请求一个**不存在**的文件应得 404
+> （实测 `/iso/CentOS7/nope.iso` → 404、`/iso/Debian/nope.iso` → 404），
+> 而 `/iso/Ubuntu/nope.iso` 与 `/iso/Ubuntu/index.html` 都是 **403**。
+> 这说明 nginx 是在**走进该目录**时失败（EACCES），而不是找不到文件 ——
+> 即 `/data/iso/Ubuntu` 对 nginx 的 worker 用户不可读/不可进入，
+> 与具体 ISO 是否存在无关。（另一个可能的成因是 location 级的 `deny`；
+> 两者在外部都表现为 403，需在主机上区分。）
+>
+> 影响：OneBoot 生成的 Ubuntu 引导脚本正是
+> `url=http://<dist-host>:8080/iso/Ubuntu/<iso>`（`/boot/ubuntu_*/go`），
+> 该 URL 403 → casper 无法下载/挂载 ISO → **经此服务器的 Ubuntu PXE 装机失败**。
+>
+> 主机侧确认（需要 10.40.1.254 的登录权限，当前**未持有**）：
+> ```sh
+> namei -l /data/iso/Ubuntu
+> sudo -u <nginx-user> test -rx /data/iso/Ubuntu && echo traversable
+> nginx -T | grep -n -A6 'iso/Ubuntu'
+> ```
+> 最可能的修法：`sudo chmod o+rx /data/iso/Ubuntu`（并确保 ISO 本身 `o+r`；
+> 若有 SELinux，另需 `restorecon -Rv /data/iso/Ubuntu`）。
+> 验证：`curl -sI http://10.40.1.254:8080/iso/Ubuntu/ubuntu-20.04.6-live-server-amd64.iso | head -1` 应为 200，
+> 然后 `tools/oneboot/vm_verify.py --source ubuntu_20_04_6_live_server_amd64 --boot-style casper`（不传 `--iso`）应能直连取 ISO。
+>
+> 无服务器权限时的绕行：`--iso <本地ISO>`（用公开镜像，如 huaweicloud/tuna，已验证）。
+> `vm_verify.py` 现在会在启动前先探测该 URL，403 时**快速失败并打印上面的定位**，
+> 不再让失败推迟到 casper 深处（`--skip-iso-preflight` 可跳过探测）。
 
 > 注：目标机无 python3 时（CentOS 7），`on_target_smoke.sh` 用 netns + ping 注入
 > ICMP 帧并用 awk 写 `result.json`，不再依赖解释器。
