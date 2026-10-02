@@ -937,3 +937,40 @@ python3 verification/dpdk/capacity_report.py \
 The harness serializes bursts and restores in `finally`; separately verify
 restoration using the checks above. `live_stats: true` enables traffic-time
 RPC sampling even when `burst_capture: true` selects complete-burst accounting.
+
+## Legacy C reference capture — 2026-10-02
+
+The unmodified upstream C worker (`netis/cloud-probe` `0.9.x`, commit
+`d302572a`) was built with the recipe from its own CI (system libpcap plus a
+minimal static libzmq) and measured on the same link, generator, cgroup
+(`1 CPU` / `512 MiB`), RTC execution, null output, snaplen 2048, and 14-second
+bursts, so the two implementations are compared under one setup.
+
+| C configuration | Saturated capture | Worker CPU | Notes |
+|---|---:|---:|---|
+| `timeout_ms=1000` → libpcap `TPACKET_V3`, 8 MiB ring | **2.455–2.508 Mpps** | ~18% of one core | socket drops 0; VF `rx_out_of_buffer` rises — the same pre-worker plateau as the Rust ring; a 256 MiB ring did not raise it |
+| default `timeout_ms=0` → immediate mode `TPACKET_V2`, 256 MiB | **1.160–1.195 Mpps** | ~99% of one core | the upstream example's default; already loses 40.5% at 2 Mpps offered |
+
+So the C probe does **not** reproduce the historical 1.93 Mpps tcpdump/libpcap
+reference. Its batched path lands on the same ~2.5 Mpps kernel/NIC ceiling as the
+Rust `TPACKET_V3` ring (2.4 Mpps near-loss-free), and its default path sits at
+~1.2 Mpps on one full core. No language or framework speedup follows — the
+ceiling is the receive path, and at equal rate C spent more process CPU. At
+2.4 Mpps, three of four C bursts met the <=0.1% whole-burst criterion (a 1.84%
+startup-loss outlier is retained); the 256 MiB V2 ring maps ~492 MiB, because
+frame/block rounding exceeds the requested buffer.
+
+**The C DPDK capturer cannot be measured at this commit.** It compiles once
+`-DCMAKE_C_FLAGS="$(pkg-config --cflags libdpdk)"` is added (upstream CMake
+discovers libdpdk but never applies its include dirs), but
+`dpdk_init()` — the only caller of `rte_eal_init()` — has **no call site**
+anywhere in the tree, and `rte_pdump_init()` (required from DPDK 25.11) is never
+called either, so `dpdk_capturer_new()` fails with `interface … not found` and
+the worker starts zero tasks. The Rust port added both, which is why its pdump
+path runs at all. The committed source still creates the clone pool with
+`ring_mp_sc` (`src/dpdk/pdump.c:208`) under `RTE_PDUMP_ALL_QUEUES` — upstream
+issue #286.
+
+Evidence (lab-local): build logs, raw cumulative snapshots, counter windows, the
+paced generator and the restoration/NFS audits live under `/tmp/legacy-probe/`.
+Both hosts were restored and verified afterwards; no repository was modified.
