@@ -1,0 +1,36 @@
+== rtc/0.8 ==
+    37.64%    33.13%  cpworker      cpworker           [.] <cpworker::capturer::af_packet::AfPacketCapturer>::deliver_matching
+    29.42%     0.00%  cpworker      [unknown]          [.] 0000000000000000
+    29.42%     0.00%  cpworker      [unknown]          [.] 0x000056192388ee68
+    27.12%    21.01%  cpworker      cpworker           [.] <cpworker::output::null::NullOutput as cpworker::output::Output>::send_packet
+    17.78%    15.57%  cpworker      cpworker           [.] <cpworker::capturer::af_packet::AfPacketCapturer as cpworker::capturer::Capturer>::capture_once
+    13.12%     0.00%  cpworker      [kernel.kallsyms]  [k] __napi_poll
+    13.12%     0.00%  cpworker      [kernel.kallsyms]  [k] __netif_receive_skb_list_core
+    13.12%     0.00%  cpworker      [kernel.kallsyms]  [k] asm_common_interrupt
+== rtc/2.4 ==
+    52.53%     0.00%  cpworker      [kernel.kallsyms]  [k] handle_softirqs
+    52.49%     0.00%  cpworker      [kernel.kallsyms]  [k] __napi_poll
+    52.49%     0.00%  cpworker      [kernel.kallsyms]  [k] mlx5e_napi_poll
+    52.49%     0.00%  cpworker      [kernel.kallsyms]  [k] net_rx_action
+    52.36%     0.00%  cpworker      [kernel.kallsyms]  [k] irq_exit_rcu
+    52.34%     0.00%  cpworker      [kernel.kallsyms]  [k] asm_common_interrupt
+    52.34%     0.00%  cpworker      [kernel.kallsyms]  [k] common_interrupt
+    50.99%     0.13%  cpworker      [kernel.kallsyms]  [k] mlx5e_poll_rx_cq
+== pipeline/0.8 ==
+    36.76%    30.28%  cpworker        libc.so.6          [.] _int_malloc
+    21.33%     0.00%  taskmgr_output  [unknown]          [k] 0x0000000000000001
+    20.14%    13.84%  taskmgr_output  libc.so.6          [.] _int_free
+    15.11%     9.27%  taskmgr_output  cpworker           [.] std::sys::backtrace::__rust_begin_short_backtrace::<<cpworker::task::TaskManager>::start::{closure#0}, ()>
+    13.34%     0.02%  taskmgr_output  [kernel.kallsyms]  [k] common_interrupt
+    13.34%     0.00%  taskmgr_output  [kernel.kallsyms]  [k] asm_common_interrupt
+    13.27%     0.00%  taskmgr_output  [kernel.kallsyms]  [k] irq_exit_rcu
+    13.25%     0.07%  taskmgr_output  [kernel.kallsyms]  [k] handle_softirqs
+== pipeline/2.4 ==
+    49.63%    22.34%  cpworker        libc.so.6          [.] _int_malloc
+    42.77%     0.00%  cpworker        [kernel.kallsyms]  [k] asm_common_interrupt
+    42.77%     0.00%  cpworker        [kernel.kallsyms]  [k] common_interrupt
+    42.67%     0.00%  cpworker        [kernel.kallsyms]  [k] handle_softirqs
+    42.67%     0.00%  cpworker        [kernel.kallsyms]  [k] irq_exit_rcu
+    42.60%     0.00%  cpworker        [kernel.kallsyms]  [k] net_rx_action
+    42.59%     0.01%  cpworker        [kernel.kallsyms]  [k] mlx5e_napi_poll
+    42.59%     0.00%  cpworker        [kernel.kallsyms]  [k] __napi_poll

@@ -1,0 +1,10 @@
+=== setup ===
+
+MODEL      OFFER  CAP_Mpps  CPU_CORES WORKER_DROP RX_PKTS    PERF_TOP
+rtc        0.8    ?         0.04      ?         11198850   cpworker,cpworker,cpworker,cpworker,
+rtc        2.4    ?         0.19      ?         33240401   cpworker,cpworker,cpworker,cpworker,
+pipeline   0.8    ?         0.58      ?         11199744   cpworker,taskmgr_output,taskmgr_output,taskmgr_output,
+pipeline   2.4    ?         0.72      ?         33595506   cpworker,cpworker,cpworker,cpworker,
+
+perf data + logs: /tmp/p2kx/ (on yinjiao)
+[restore] VFs removed, PAUSE restored
