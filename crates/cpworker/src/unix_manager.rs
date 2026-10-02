@@ -63,7 +63,9 @@ const CLIENT_READ_CHUNK: usize = CLIENT_BUFFER_SIZE;
 /// Returns the OS error if `setsockopt` fails.
 pub fn set_send_timeout(fd: RawFd, seconds: i32) -> std::io::Result<()> {
     let tv = libc::timeval {
-        tv_sec: seconds as libc::time_t,
+        // Infer the field type: musl's deprecated time_t alias need not match
+        // timeval forever, while every i32 timeout fits the actual field.
+        tv_sec: seconds.into(),
         tv_usec: 0,
     };
     // SAFETY: `tv` is a valid `timeval` and `fd` a socket owned by the caller.

@@ -10,7 +10,7 @@
 
 use std::ffi::CString;
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
-use std::sync::Arc;
+use std::sync::{Arc, Once};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use super::{Capturer, PacketHeader, PacketSink};
@@ -460,6 +460,17 @@ fn insert_vlan(buf: &mut [u8], caplen: usize, tag: VlanTag, snaplen: usize) -> O
     Some((caplen + VLAN_HDR_LEN).min(snaplen))
 }
 
+// libc uses usize for control lengths on glibc and u32 on musl. Check both
+// directions at the ABI boundary rather than truncating a buffer length.
+fn checked_control_len<T, U: TryFrom<T>>(len: T) -> std::io::Result<U> {
+    U::try_from(len).map_err(|_| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "control message length exceeds the destination type",
+        )
+    })
+}
+
 /// Walk the control messages of a filled `msghdr`, returning the
 /// `SCM_TIMESTAMPNS` timestamp and any `PACKET_AUXDATA` VLAN tag.
 ///
@@ -472,11 +483,24 @@ unsafe fn parse_control(msg: &libc::msghdr) -> (Option<(i64, i64)>, Option<VlanT
     let align = std::mem::align_of::<libc::cmsghdr>();
     let header = (std::mem::size_of::<libc::cmsghdr>() + align - 1) & !(align - 1);
     let start = msg.msg_control as *const u8;
-    let end = start.add(msg.msg_controllen);
+    let control_len: usize = match checked_control_len(msg.msg_controllen) {
+        Ok(len) => len,
+        Err(e) => {
+            crate::log_error!("AF_PACKET msg_controllen: {e}");
+            return (None, None);
+        }
+    };
+    let end = start.add(control_len);
     let mut cmsg = libc::CMSG_FIRSTHDR(msg);
     while !cmsg.is_null() && (cmsg as *const u8) < end {
         let c = &*cmsg;
-        let clen = c.cmsg_len;
+        let clen: usize = match checked_control_len(c.cmsg_len) {
+            Ok(len) => len,
+            Err(e) => {
+                crate::log_error!("AF_PACKET cmsg_len: {e}");
+                break;
+            }
+        };
         if clen < header {
             break;
         }
@@ -810,6 +834,8 @@ pub struct AfPacketCapturer {
     /// [`AfPacketCapturer::capture_once`] drains it instead of calling
     /// `recvmsg` once per frame.
     ring: Option<Ring>,
+    /// An invariant failure must be visible without flooding every capture tick.
+    missing_ring_logged: Once,
 
     drops: DropCounter,
     backoff: ErrorBackoff,
@@ -977,6 +1003,7 @@ impl AfPacketCapturer {
             userspace_filter,
             drop_outgoing,
             ring,
+            missing_ring_logged: Once::new(),
             drops: DropCounter::default(),
             backoff: ErrorBackoff::default(),
             next_error: None,
@@ -1001,7 +1028,7 @@ impl AfPacketCapturer {
         msg.msg_iov = &mut iov;
         msg.msg_iovlen = 1;
         msg.msg_control = cmsg.0.as_mut_ptr().cast::<libc::c_void>();
-        msg.msg_controllen = cmsg.0.len();
+        msg.msg_controllen = checked_control_len(cmsg.0.len())?;
         // SAFETY: `msg` points at `iov`/`cmsg`, both alive for the call.
         let n = unsafe { libc::recvmsg(self.fd.as_raw_fd(), &mut msg, libc::MSG_TRUNC) };
         if n < 0 {
@@ -1123,6 +1150,14 @@ impl AfPacketCapturer {
     fn capture_once_ring(&mut self, sink: &mut dyn PacketSink) -> u64 {
         // Take the ring out of `self` so the closure can borrow the rest of it.
         let Some(mut ring) = self.ring.take() else {
+            self.missing_ring_logged.call_once(|| {
+                crate::log_error!(
+                    "AF_PACKET ring invariant violated: capture_once_ring requires a ring; \
+                     interface={}, netns={}",
+                    self.interface,
+                    self.netns_path
+                );
+            });
             return 0;
         };
         let mut n = ring.drain(|hdr, data| self.consume_ring_frame(hdr, data, sink));
@@ -1258,6 +1293,78 @@ impl Capturer for AfPacketCapturer {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn checked_control_lengths_preserve_values_and_reject_overflow() {
+        assert_eq!(checked_control_len::<_, usize>(256u32).unwrap(), 256);
+        assert_eq!(checked_control_len::<_, usize>(256usize).unwrap(), 256);
+        assert_eq!(checked_control_len::<_, u32>(256usize).unwrap(), 256);
+        assert_eq!(
+            checked_control_len::<_, u32>(u64::from(u32::MAX) + 1)
+                .unwrap_err()
+                .kind(),
+            std::io::ErrorKind::InvalidData
+        );
+    }
+
+    #[test]
+    fn capture_once_ring_without_ring_logs_once_and_returns_zero() {
+        const CHILD: &str = "CPWORKER_TEST_MISSING_RING_CHILD";
+        const MESSAGE: &str = "AF_PACKET ring invariant violated";
+        if std::env::var_os(CHILD).is_none() {
+            // Isolate stderr so the assertion covers the actual log emission
+            // without changing global logging state in parallel unit tests.
+            let output = std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "capturer::af_packet::tests::capture_once_ring_without_ring_logs_once_and_returns_zero",
+                    "--nocapture",
+                ])
+                .env(CHILD, "1")
+                .output()
+                .unwrap();
+            assert!(output.status.success(), "{output:?}");
+            let stderr = String::from_utf8(output.stderr).unwrap();
+            assert_eq!(stderr.matches(MESSAGE).count(), 1, "{stderr}");
+            assert!(stderr.contains("ERROR"), "{stderr}");
+            assert!(stderr.contains("interface=test-no-ring"), "{stderr}");
+            return;
+        }
+
+        struct NoDelivery;
+        impl PacketSink for NoDelivery {
+            fn on_packet(&mut self, _: &PacketHeader, _: &[u8], _: i32) {
+                panic!("missing ring must not deliver a packet");
+            }
+            fn on_heartbeat(&mut self) {
+                panic!("missing ring must not appear to be a healthy idle tick");
+            }
+        }
+        // A regular fd avoids CAP_NET_RAW; this path must never touch it.
+        let mut cap = AfPacketCapturer {
+            stats: Arc::new(CaptureStats::default()),
+            fd: std::fs::File::open("/dev/null").unwrap().into(),
+            interface: "test-no-ring".into(),
+            netns_path: String::new(),
+            req_pattern: None,
+            snaplen: 64,
+            timeout_ms: 0,
+            buf: vec![0; 64 + VLAN_HDR_LEN],
+            userspace_filter: None,
+            drop_outgoing: false,
+            ring: None,
+            missing_ring_logged: Once::new(),
+            drops: DropCounter::default(),
+            backoff: ErrorBackoff::default(),
+            next_error: None,
+            last_error_log: 0,
+        };
+        let mut sink = NoDelivery;
+        assert_eq!(cap.capture_once_ring(&mut sink), 0);
+        assert!(cap.missing_ring_logged.is_completed());
+        assert_eq!(cap.capture_once_ring(&mut sink), 0);
+        assert!(cap.ring.is_none());
+    }
 
     // ---- TPACKET_V3 ring helpers -----------------------------------------
 
@@ -1622,7 +1729,7 @@ mod tests {
         let msg = unsafe {
             let mut m: libc::msghdr = std::mem::zeroed();
             m.msg_control = cbuf.as_mut_ptr().cast::<libc::c_void>();
-            m.msg_controllen = declared; // what actually fits
+            m.msg_controllen = checked_control_len(declared).unwrap(); // what actually fits
             m
         };
         // SAFETY: msg points at cbuf, which is valid for `declared` bytes.
@@ -1663,7 +1770,7 @@ mod tests {
         let msg = unsafe {
             let mut m: libc::msghdr = std::mem::zeroed();
             m.msg_control = cbuf.as_mut_ptr().cast::<libc::c_void>();
-            m.msg_controllen = total;
+            m.msg_controllen = checked_control_len(total).unwrap();
             m
         };
         // SAFETY: msg points at cbuf for `total` bytes.
