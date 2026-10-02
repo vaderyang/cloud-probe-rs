@@ -270,12 +270,14 @@ Absolute values are not comparable to other machines or kernels — the same C
 binary here scores 3.30 M pps where an earlier Linux 6.14 run scored 2.83 M pps.
 The C/Rust ratio on one machine is the meaningful output.
 
-### Live capture is not benchmarked here
+### Live capture on a local interface
 
 `bench/bench.py` replays a file: no root, no interface, no driver. The live
-`AF_PACKET` path has functional coverage (the privileged CI job: loopback with a
-filter, VLAN re-insertion on a veth, userspace-filter fallback) but **no
-reproducible throughput number**. `bench/live_bench.py` is a manual A/B against
+`AF_PACKET` path has functional coverage in the privileged CI job (loopback with
+a filter, VLAN re-insertion on a veth, userspace-filter fallback) and its
+throughput is measured on real 100 GbE hardware in
+[Capture performance](#capture-performance-100-gbe) below — not here.
+`bench/live_bench.py` is a manual A/B against
 the C/libpcap capturer on a real interface and reports frames captured, drop
 counters and CPU seconds per million captured frames — run it as root
 (`bench/live_bench.py 20 wlp1s0`). On loopback it measured near-identical CPU per
@@ -336,3 +338,61 @@ configs, runs each binary, and emits the table above. Caveats:
 * `vxlan-split` sends to a loopback UDP drainer to avoid ICMP back-pressure.
 * Results are relative to this (slow, 4-core) machine; the C/Rust **ratios**
   are the meaningful output.
+
+## Capture performance (100 GbE)
+
+[`verification/dpdk/BENCHMARK.md`](verification/dpdk/BENCHMARK.md) holds the full
+evidence and the raw counter data; this is the summary. Testbed: a 100 GbE
+Mellanox ConnectX-6 Dx link between two hosts (`yinjiao` capturing, `laojun`
+generating), DPDK 25.11, kernel 5.15, **64-byte frames** (68 physical bytes with
+the FCS, so 100 GbE is ≈142.05 Mpps for this shape), `null` outputs, no BPF and
+no rate limit, serialized short bursts. "Captured" is `cpctl stats`
+`cap_packets`; the physical port counters are the ground truth for what actually
+reached the wire.
+
+| Capture backend | Captured | Notes |
+|---|---:|---|
+| AF_PACKET `recvmsg` (one syscall per packet) | 0.47 Mpps | ~100% of one core, ~94% of it inside the kernel receive path |
+| **AF_PACKET `TPACKET_V3` mmap ring** (default) | **2.5 Mpps** | ~7% of one core; beats libpcap's own `TPACKET_V3` (1.93 Mpps) at the same offered load |
+| DPDK `pdump`, shared ring, 2048 entries | 4.3–5.9 Mpps | before tuning |
+| DPDK `pdump`, NUMA-local pool/consumer, 65536-entry ring, burst counters | **~29 Mpps** | one consumer; the primary's `ringfull` counter takes the rest |
+| DPDK `pdump`, four per-queue rings and consumers (prototype) | 54.1 Mpps | not a product configuration |
+| NIC `SAMPLE` mirror to a second VF | 66.5 Mpps | switchdev representors, per copy |
+| in-primary DPDK RX with no capture (reference) | 95–139 Mpps | what the NIC and one lcore can do |
+
+The pdump figures exclude the **primary**, which has to own the port: it costs
+four lcores and its own hugepages. pdump copies every mirrored frame
+(`rte_pktmbuf_copy`) and hands the clone over a ring, so despite DPDK's
+zero-copy RX it is **not** a zero-copy capture path — that copy is what caps it.
+
+### What one worker captures under the product's own budget: 1 CPU / 512 MiB
+
+`cpdaemon` puts each `cpworker` in a cgroup with a CPU quota (`1.0` = one core)
+and a memory limit (`cpm.worker.memory.defaultLimitMb` = 512 by default), which
+also sizes the libpcap buffer (`fixed_nic_buffer` → 8 MiB). With that budget
+applied to `cpworker` alone, in RTC execution:
+
+| Path | Near-loss-free | Binding constraint |
+|---|---:|---|
+| AF_PACKET, 8 MiB ring | **2.4 Mpps** | the kernel receive path — the worker uses ~11% of its core while ~11 host softirq cores work outside the cgroup |
+| DPDK pdump, 2048-entry ring | 20 Mpps | the worker's one-core quota |
+| DPDK pdump, 65536-entry ring | **28–30 Mpps** | the worker's one-core quota; ≤462 MiB, plus the 4-core primary |
+
+512 MiB does not bind any of these (a ring sized to the whole limit exceeds the
+physical budget, and the kernel does not charge the mmap'd ring to the cgroup).
+Enlarging the AF_PACKET ring does not raise its ceiling. For reference, one
+lcore receives 33.8 Mpps (39.6 Mpps with mlx5 MPRQ) and writes pcap to
+`/dev/null` at 20.4 Mpps.
+
+**Pipeline execution** — the daemon's default — used to lose three to four
+orders of magnitude to RTC under this budget (7.5 kpps loss-free, 5% loss at
+10 kpps), because the output thread held the ring mutex across
+`dispatch_ring_msg` and its idle sleep while the capture loop blocked on the same
+mutex with the manager lock held, starving `cpctl stats` as well. The ring is now
+split into owned SPSC endpoints and a capture batch releases the manager lock;
+the same measurement now reaches 1.6 Mpps (AF_PACKET, pinned) and ~6 Mpps
+(pdump), with control requests answered in ≤2 ms. Pipeline still trails RTC; the
+remaining gap is tracked as `cloud-probe-rs-2kx`.
+
+These are **short-burst laboratory bounds** on this host and binary. They are not
+a sustained-endurance or real-output guarantee.
