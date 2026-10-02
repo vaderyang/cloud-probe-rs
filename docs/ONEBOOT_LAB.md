@@ -39,9 +39,9 @@
 | 管理 API **无鉴权** | `GET/PUT/POST /api/v1/*` 均无 Authorization 头 | 客户端默认**只读**；写操作（上传 kickstart、触发）必须先 `--apply` |
 | 无 per-MAC 自动装机绑定 | 前端与 API 只有 clients/sessions/kickstart；无 MAC→source 映射 | 无人值守装机需要选菜单，或 BMC/串口驱动，或给 OneBoot 加绑定能力（见 §6） |
 
-### 1.3 已发现的实际问题：当前发布件跑不上大多数目标系统
+### 1.3 已发现的实际问题：基线前的发布件跑不上大多数目标系统
 
-现在 `release.yml` 在 `ubuntu-latest`（Ubuntu 24.04，glibc 2.39）上原生构建
+收编前 `release.yml` 在 `ubuntu-latest`（Ubuntu 24.04，glibc 2.39）上原生构建
 `x86_64-unknown-linux-gnu`。实测本机（Ubuntu 22.04，glibc 2.35）构建产物：
 
 ```bash
@@ -66,9 +66,10 @@ dockerpid: GLIBC_2.16
 cripid:   GLIBC_2.16
 ```
 
-于是覆盖全部 glibc ≥ 2.17 的系统。流水线据此新增
-`.github/workflows/release-linux-baseline.yml`，产物命名带 `-glibc217` 后缀，
-清单里用 `"artifact": "x86_64-unknown-linux-gnu-glibc217"` 选取。
+于是覆盖全部 glibc ≥ 2.17 的系统。该容器配方现在**就是** `release.yml` 里
+`*-unknown-linux-gnu` 的构建方式（不再有第二套 gnu 产物，产物名也不再带
+`-glibc217` 后缀），清单里直接用 `"artifact": "x86_64-unknown-linux-gnu"` 选取。
+见 §5。
 
 > **musl 静态构建暂不可用**：`x86_64-unknown-linux-musl` 编译失败，12 处错误集中在
 > `crates/cpworker/src/capturer/af_packet.rs`（TPACKET_V3 环）与 `unix_manager.rs`，
@@ -210,7 +211,7 @@ kernel/initrd + 同一 kickstart**，只是把 stage2/repo 换成从本机挂载
 
 ```bash
 tools/oneboot/vm_verify.py \
-  --artifact dist/cloud-probe-rs-x86_64-unknown-linux-gnu-glibc217.tar.gz \
+  --artifact dist/cloud-probe-rs-x86_64-unknown-linux-gnu.tar.gz \
   --source centos_7_9_x86_64_dvd_2009 \
   --junit-out build/vm-junit/centos7.xml
 # 或整份清单：tools/oneboot/run_inventory.py --driver vm --artifact-dir dist
@@ -253,25 +254,33 @@ python3。首次运行会把 ISO 缓存到 `--workdir`（默认 `/tmp/cprs-vm`�
 ## 5. 构建侧（跨平台产物）
 
 `release.yml` 目前产出：`x86_64/aarch64-unknown-linux-gnu`、`aarch64/x86_64-apple-darwin`。
-其中 Linux gnu 产物在 `ubuntu-latest`（glibc 2.39）构建，**只能在很新的发行版运行**
-（见 §1.3）。
+Linux gnu 产物在 manylinux2014 容器里构建（glibc 2.17 基线，见 §1.3），一个 target
+triple 只有一套产物：
 
-新增 `.github/workflows/release-linux-baseline.yml`：
-
-| target（产物后缀 `-glibc217`） | 构建环境 | 状态 |
+| target（产物名 `cloud-probe-rs-<target>.tar.gz`） | 构建环境 | 状态 |
 | --- | --- | --- |
-| `x86_64-unknown-linux-gnu` | manylinux2014_x86_64（CentOS 7, glibc 2.17） | ✅ 实测 GLIBC_2.16 |
-| `aarch64-unknown-linux-gnu` | manylinux2014_aarch64 + `ubuntu-24.04-arm` | 同配方，待 CI 首跑确认 |
+| `x86_64-unknown-linux-gnu` | `ubuntu-latest` + `manylinux2014_x86_64`（CentOS 7, glibc 2.17） | ✅ 实测 GLIBC_2.16 |
+| `aarch64-unknown-linux-gnu` | `ubuntu-24.04-arm` + `manylinux2014_aarch64` | 同配方，待 CI 首跑确认 |
+| `aarch64/x86_64-apple-darwin` | macOS runner 原生 | 不变 |
 
-该 workflow 在容器里构建、在 runner 上打包/上传，并带一个**glibc 地板门禁**：
-若最高符号需求高于 2.17 就直接失败，防止基线回退。
+镜像只能跑在自己的架构上，所以两个 Linux 条目分别落在 x86_64 / arm64 runner，
+构建走 `docker run`（不是 container job）：runner 负责 checkout、打包、上传，也负责
+下面的地板门禁（CentOS 7 镜像里的 binutils 不便依赖）。容器内构建是 native 的，
+产物落在 `target/release` 而不是 `target/<triple>/release`。
+
+**glibc 地板门禁**（`Verify the glibc floor`，仅 Linux 步骤）用 `objdump -T` 取
+`cpworker` 依赖的最高 `GLIBC_2.<minor>`，高于 2.17 直接失败，防止基线回退。
+
+历史：这条配方最初位于 `.github/workflows/release-linux-baseline.yml`，产物带
+`-glibc217` 后缀，与 `ubuntu-latest` 原生构建（实测需要 GLIBC_2.34）同时发布，两套
+gnu 产物并存造成选择混淆；收编进 `release.yml` 后原生 Linux 构建与后缀一起删除。
 
 后续（见 bead）：
 
-1. 把 glibc 基线**收编进 `release.yml`**，让 `*-unknown-linux-gnu` 默认就是基线版本，
-   避免同时存在两套 gnu 产物造成选择混淆；
-2. 修 musl 移植 bug，增 `*-unknown-linux-musl` 静态产物作为兜底；
-3. aarch64 基线的 `manylinux2014_aarch64` 首次 CI 通过后去掉“待确认”标记。
+1. 修 musl 移植 bug，增 `*-unknown-linux-musl` 静态产物作为兜底；
+2. aarch64 基线的 `manylinux2014_aarch64` 首次 CI 通过后去掉“待确认”标记
+   （可直接对 `release.yml` 触发 `workflow_dispatch`，门禁日志会打印实测的 glibc 版本，
+   不需要打 tag）。
 
 macOS 保持现状（OneBoot 只做 x86/ARM/LoongArch 的 Linux PXE，无法验证 macOS）。
 

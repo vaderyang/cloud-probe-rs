@@ -28,12 +28,12 @@ needed for casper), and either nginx or python3 for the source server.  The ISO
 is cached under --workdir so repeat runs skip the download.
 
     tools/oneboot/vm_verify.py \
-        --artifact dist/cloud-probe-rs-x86_64-unknown-linux-gnu-glibc217.tar.gz \
+        --artifact dist/cloud-probe-rs-x86_64-unknown-linux-gnu.tar.gz \
         --source centos_7_9_x86_64_dvd_2009 --boot-style redhat \
         --junit-out build/vm-junit/centos7.xml
 
     tools/oneboot/vm_verify.py \
-        --artifact dist/cloud-probe-rs-x86_64-unknown-linux-gnu-glibc217.tar.gz \
+        --artifact dist/cloud-probe-rs-x86_64-unknown-linux-gnu.tar.gz \
         --source ubuntu_24_04_3_live_server_amd64 --boot-style casper \
         --vm-disk-size 30G --junit-out build/vm-junit/ubuntu2404.xml
 """
