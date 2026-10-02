@@ -6,9 +6,9 @@ on:
   workflow_dispatch:
 
 permissions:
-  # Least privilege for the whole workflow (AUDIT4 P5-27): building and uploading
-  # artifacts needs a read token only. The one job that creates a GitHub Release
-  # raises this to contents: write on itself.
+  # Least privilege for the whole workflow (AUDIT4 P5-27): building and
+  # uploading artifacts needs a read token only. The one job that creates a
+  # GitHub Release raises this to contents: write on itself.
   contents: read
 
 env:
@@ -41,15 +41,20 @@ jobs:
 
       - name: System dependencies (Linux)
         if: runner.os == 'Linux'
-        # protoc is a *build-time* tool for cripid's `build.rs` (prost/tonic code
-        # generation from the vendored proto/api.proto). Nothing links a C library:
-        # AUDIT4 P5-25 removed the macOS `brew install libpcap zeromq`, which was a
-        # leftover from before the pure-Rust pcap/ZMTP ports and only made the
-        # release job depend on packages the build never reads.
+        # protoc is a *build-time* tool for cripid's `build.rs` (prost/tonic
+        # code generation from the vendored proto/api.proto). Nothing links a C
+        # library: AUDIT4 P5-25 removed the macOS `brew install libpcap zeromq`,
+        # which was a leftover from before the pure-Rust pcap/ZMTP ports
+        # and only made the release job depend on packages the build
+        # never reads.
         run: |
           sudo apt-get update
+          # libc6-dev-arm64-cross is only a *recommendation* of
+          # gcc-aarch64-linux-gnu; --no-install-recommends skipped it, and
+          # ring's C build then failed on missing bits/libc-header-start.h when
+          # cross-compiling to aarch64.
           sudo apt-get install -y --no-install-recommends \
-            protobuf-compiler gcc-aarch64-linux-gnu
+            protobuf-compiler gcc-aarch64-linux-gnu libc6-dev-arm64-cross
 
       - name: System dependencies (macOS)
         if: runner.os == 'macOS'
@@ -66,7 +71,8 @@ jobs:
         # Cargo.lock, not from whatever crates.io resolves to today.
         run: |
           cargo build --release --workspace --locked \
-            --bin cpworker --bin cpctl --bin cpdaemon --bin dockerpid --bin cripid \
+            --bin cpworker --bin cpctl --bin cpdaemon \
+            --bin dockerpid --bin cripid \
             --target ${{ matrix.target }}
 
       - name: Package
