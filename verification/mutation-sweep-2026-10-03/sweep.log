@@ -1,0 +1,132 @@
+ WARN --jobs=12 is probably too high and may overload your machine: each job runs a separate `cargo` process, and cargo may internally start many threads and subprocesses; values <= 8 are usually safe
+Found 1593 mutants to test
+ok       Unmutated baseline in 9s build + 7s test
+ INFO Auto-set test timeout to 120s
+MISSED   crates/cpgolib/src/slogx/mod.rs:11:5: replace init_default with () in 1s build + 0s test
+MISSED   crates/cpworker/src/bpf/mod.rs:125:5: replace attach_filter -> io::Result<()> with Ok(()) in 1s build + 7s test
+MISSED   crates/cpworker/src/config.rs:897:10: replace > with >= in positive_clamped in 1s build + 7s test
+MISSED   crates/cpworker/src/config.rs:974:27: replace > with >= in RawOutput::build in 1s build + 8s test
+MISSED   crates/cpworker/src/config.rs:1019:32: replace > with == in RawOutput::build in 1s build + 7s test
+MISSED   crates/cpworker/src/config.rs:1019:32: replace > with >= in RawOutput::build in 1s build + 8s test
+MISSED   crates/cpworker/src/config.rs:1019:32: replace > with < in RawOutput::build in 1s build + 8s test
+MISSED   crates/cpworker/src/config.rs:1048:32: replace > with == in RawOutput::build in 1s build + 8s test
+MISSED   crates/cpworker/src/config.rs:1048:32: replace > with >= in RawOutput::build in 1s build + 7s test
+MISSED   crates/cpworker/src/config.rs:1048:32: replace > with < in RawOutput::build in 1s build + 7s test
+MISSED   crates/cpworker/src/packet.rs:168:15: replace < with <= in parse_packet in 1s build + 8s test
+MISSED   crates/cpworker/src/packet.rs:180:19: replace < with <= in parse_packet in 1s build + 7s test
+MISSED   crates/cpworker/src/packet.rs:195:19: replace < with <= in parse_packet in 1s build + 8s test
+MISSED   crates/cpworker/src/packet.rs:201:19: replace < with == in parse_packet in 1s build + 7s test
+MISSED   crates/cpworker/src/packet.rs:201:19: replace < with <= in parse_packet in 1s build + 8s test
+MISSED   crates/cpworker/src/packet.rs:225:32: replace + with - in parse_packet in 1s build + 7s test
+TIMEOUT  crates/cpgolib/src/cpworker/client.rs:127:9: replace UnixClient::dial_with_timeout -> Result<()> with Ok(()) in 1s build + 120s test
+TIMEOUT  crates/cpgolib/src/cpworker/client.rs:223:9: replace <impl Client for UnixClient>::dial -> Result<()> with Ok(()) in 1s build + 120s test
+MISSED   crates/cpworker/src/packet.rs:243:19: replace < with <= in parse_packet in 1s build + 8s test
+MISSED   crates/cpworker/src/packet.rs:253:23: replace < with <= in parse_packet in 1s build + 7s test
+MISSED   crates/cpworker/src/packet.rs:259:23: replace < with == in parse_packet in 1s build + 7s test
+MISSED   crates/cpworker/src/packet.rs:259:23: replace < with <= in parse_packet in 1s build + 7s test
+MISSED   crates/cpworker/src/packet.rs:284:32: replace + with - in parse_packet in 1s build + 8s test
+TIMEOUT  crates/cpworker/src/config.rs:833:5: replace int_in -> Result<i64> with Ok(0) in 2s build + 120s test
+TIMEOUT  crates/cpworker/src/config.rs:853:5: replace u64_in -> Result<u64> with Ok(0) in 2s build + 120s test
+MISSED   crates/cpworker/src/packet.rs:336:23: replace < with <= in extract_ipport in 1s build + 8s test
+MISSED   crates/cpworker/src/packet.rs:354:27: replace < with <= in extract_ipport in 1s build + 7s test
+TIMEOUT  crates/cpworker/src/config.rs:1204:58: replace == with != in RawConfig::build in 1s build + 120s test
+MISSED   crates/cpworker/src/packet.rs:435:54: replace + with - in fill_ports in 1s build + 8s test
+MISSED   crates/cpworker/src/packet.rs:435:40: replace + with - in fill_ports in 1s build + 8s test
+MISSED   crates/cpworker/src/packet_split.rs:169:81: replace + with * in build_fragment in 1s build + 7s test
+MISSED   crates/cpworker/src/bpf/codes.rs:31:42: replace | with ^ in 1s build + 7s test
+MISSED   crates/cpworker/src/bpf/codes.rs:31:34: replace | with ^ in 1s build + 7s test
+MISSED   crates/cpworker/src/bpf/codes.rs:33:42: replace | with ^ in 1s build + 7s test
+MISSED   crates/cpworker/src/bpf/codes.rs:33:34: replace | with & in 1s build + 8s test
+MISSED   crates/cpworker/src/bpf/codes.rs:33:34: replace | with ^ in 1s build + 8s test
+MISSED   crates/cpworker/src/bpf/codes.rs:35:42: replace | with ^ in 1s build + 7s test
+MISSED   crates/cpworker/src/bpf/codes.rs:35:34: replace | with ^ in 1s build + 8s test
+MISSED   crates/cpworker/src/bpf/codes.rs:37:42: replace | with ^ in 1s build + 7s test
+MISSED   crates/cpworker/src/bpf/codes.rs:37:34: replace | with ^ in 1s build + 7s test
+MISSED   crates/cpworker/src/bpf/codes.rs:39:42: replace | with ^ in 1s build + 7s test
+MISSED   crates/cpworker/src/bpf/codes.rs:39:34: replace | with ^ in 1s build + 8s test
+MISSED   crates/cpworker/src/bpf/codes.rs:41:46: replace | with ^ in 1s build + 7s test
+MISSED   crates/cpworker/src/bpf/codes.rs:41:36: replace | with ^ in 1s build + 8s test
+MISSED   crates/cpworker/src/bpf/codes.rs:43:46: replace | with ^ in 1s build + 8s test
+MISSED   crates/cpworker/src/bpf/codes.rs:45:46: replace | with ^ in 1s build + 7s test
+MISSED   crates/cpworker/src/bpf/codes.rs:43:36: replace | with ^ in 1s build + 8s test
+MISSED   crates/cpworker/src/bpf/codes.rs:45:36: replace | with ^ in 1s build + 7s test
+MISSED   crates/cpworker/src/bpf/codes.rs:47:46: replace | with ^ in 1s build + 7s test
+MISSED   crates/cpworker/src/bpf/codes.rs:47:36: replace | with ^ in 1s build + 7s test
+MISSED   crates/cpworker/src/bpf/codes.rs:49:48: replace | with ^ in 1s build + 8s test
+MISSED   crates/cpworker/src/bpf/codes.rs:49:37: replace | with ^ in 1s build + 7s test
+MISSED   crates/cpworker/src/bpf/codes.rs:51:33: replace | with ^ in 1s build + 8s test
+MISSED   crates/cpworker/src/bpf/codes.rs:53:32: replace | with ^ in 1s build + 7s test
+MISSED   crates/cpworker/src/bpf/compiler.rs:455:26: replace - with + in Builder::emit in 1s build + 7s test
+MISSED   crates/cpworker/src/bpf/compiler.rs:455:26: replace - with / in Builder::emit in 1s build + 8s test
+MISSED   crates/cpworker/src/bpf/compiler.rs:580:24: replace && with || in Builder::emit_test in 1s build + 8s test
+MISSED   crates/cpworker/src/bpf/compiler.rs:656:24: delete - in Builder::finish in 1s build + 7s test
+MISSED   crates/cpworker/src/bpf/compiler.rs:673:28: replace || with && in Builder::finish in 1s build + 7s test
+MISSED   crates/cpworker/src/bpf/compiler.rs:731:31: replace - with / in Builder::finish in 1s build + 7s test
+MISSED   crates/cpworker/src/bpf/interp.rs:15:22: replace | with ^ in load_be in 1s build + 8s test
+TIMEOUT  crates/cpworker/src/bpf/compiler.rs:448:9: replace Builder::emit -> usize with 0 in 1s build + 120s test
+TIMEOUT  crates/cpworker/src/bpf/compiler.rs:448:9: replace Builder::emit -> usize with 1 in 1s build + 120s test
+TIMEOUT  crates/cpworker/src/bpf/compiler.rs:683:37: replace || with && in Builder::finish in 1s build + 120s test
+TIMEOUT  crates/cpworker/src/bpf/compiler.rs:684:37: replace || with && in Builder::finish in 1s build + 120s test
+TIMEOUT  crates/cpworker/src/bpf/compiler.rs:688:20: delete ! in Builder::finish in 1s build + 120s test
+TIMEOUT  crates/cpworker/src/bpf/compiler.rs:691:20: delete ! in Builder::finish in 1s build + 120s test
+TIMEOUT  crates/cpworker/src/bpf/interp.rs:61:20: replace += with -= in run in 1s build + 120s test
+TIMEOUT  crates/cpworker/src/bpf/interp.rs:61:20: replace += with *= in run in 1s build + 120s test
+TIMEOUT  crates/cpworker/src/bpf/interp.rs:61:25: replace + with - in run in 1s build + 120s test
+TIMEOUT  crates/cpworker/src/bpf/interp.rs:61:25: replace + with * in run in 1s build + 120s test
+TIMEOUT  crates/cpworker/src/bpf/interp.rs:65:20: replace += with -= in run in 1s build + 120s test
+TIMEOUT  crates/cpworker/src/bpf/interp.rs:65:20: replace += with *= in run in 1s build + 120s test
+TIMEOUT  crates/cpworker/src/bpf/interp.rs:65:25: replace + with - in run in 1s build + 120s test
+TIMEOUT  crates/cpworker/src/bpf/interp.rs:65:25: replace + with * in run in 1s build + 120s test
+TIMEOUT  crates/cpworker/src/bpf/interp.rs:69:20: replace += with -= in run in 1s build + 120s test
+TIMEOUT  crates/cpworker/src/bpf/interp.rs:69:20: replace += with *= in run in 1s build + 120s test
+TIMEOUT  crates/cpworker/src/bpf/interp.rs:69:25: replace + with * in run in 1s build + 120s test
+TIMEOUT  crates/cpworker/src/bpf/interp.rs:73:20: replace += with -= in run in 1s build + 120s test
+TIMEOUT  crates/cpworker/src/bpf/interp.rs:73:20: replace += with *= in run in 1s build + 120s test
+TIMEOUT  crates/cpworker/src/bpf/interp.rs:73:25: replace + with - in run in 1s build + 120s test
+TIMEOUT  crates/cpworker/src/bpf/interp.rs:73:25: replace + with * in run in 1s build + 120s test
+TIMEOUT  crates/cpworker/src/bpf/interp.rs:79:12: replace += with *= in run in 1s build + 120s test
+MISSED   crates/cpworker/src/bpf/resolvers.rs:142:44: replace < with <= in <impl Resolver for CachedResolver<R>>::lookup in 1s build + 7s test
+MISSED   crates/cpworker/src/output/gre.rs:114:56: replace > with >= in GreOutput::flush_error_info in 1s build + 7s test
+MISSED   crates/cpworker/src/output/gre.rs:114:30: replace > with >= in GreOutput::flush_error_info in 1s build + 8s test
+MISSED   crates/cpworker/src/output/gre.rs:114:91: replace > with >= in GreOutput::flush_error_info in 1s build + 7s test
+MISSED   crates/cpworker/src/output/gre.rs:135:50: replace < with <= in <impl Output for GreOutput>::send_packet in 1s build + 8s test
+MISSED   crates/cpworker/src/output/gre.rs:186:45: replace + with * in <impl Output for GreOutput>::send_packet in 1s build + 7s test
+MISSED   crates/cpworker/src/output/gre.rs:186:53: replace * with + in <impl Output for GreOutput>::send_packet in 1s build + 8s test
+MISSED   crates/cpworker/src/output/gre.rs:186:53: replace * with / in <impl Output for GreOutput>::send_packet in 1s build + 8s test
+MISSED   crates/cpworker/src/output/vxlan.rs:173:30: replace > with >= in VxlanOutput::flush_error_info in 1s build + 8s test
+MISSED   crates/cpworker/src/output/vxlan.rs:173:56: replace > with >= in VxlanOutput::flush_error_info in 1s build + 7s test
+MISSED   crates/cpworker/src/output/vxlan.rs:173:91: replace > with >= in VxlanOutput::flush_error_info in 1s build + 7s test
+MISSED   crates/cpworker/src/output/vxlan.rs:222:45: replace + with * in VxlanOutput::do_send_packet in 1s build + 7s test
+MISSED   crates/cpworker/src/output/vxlan.rs:222:53: replace * with + in VxlanOutput::do_send_packet in 1s build + 8s test
+MISSED   crates/cpworker/src/output/vxlan.rs:222:53: replace * with / in VxlanOutput::do_send_packet in 1s build + 8s test
+MISSED   crates/cpworker/src/output/vxlan.rs:247:50: replace < with <= in <impl Output for VxlanOutput>::send_packet in 1s build + 7s test
+MISSED   crates/cpworker/src/output/vxlan.rs:276:39: replace || with && in <impl Output for VxlanOutput>::send_packet in 1s build + 7s test
+MISSED   crates/cpworker/src/zmtp/client.rs:76:9: replace Transport::check_connected -> io::Result<bool> with Ok(false) in 1s build + 7s test
+MISSED   crates/cpworker/src/zmtp/client.rs:168:25: replace > with == in Conn::queue_out in 1s build + 7s test
+MISSED   crates/cpworker/src/zmtp/client.rs:168:25: replace > with < in Conn::queue_out in 1s build + 7s test
+MISSED   crates/cpworker/src/zmtp/client.rs:168:25: replace > with >= in Conn::queue_out in 1s build + 8s test
+MISSED   crates/cpworker/src/zmtp/client.rs:474:12: delete ! in ZmtpPush::abandon_handshake in 1s build + 7s test
+MISSED   crates/cpworker/src/zmtp/client.rs:487:58: replace < with <= in ZmtpPush::drain_for in 1s build + 8s test
+MISSED   crates/cpworker/src/zmtp/client.rs:489:16: delete ! in ZmtpPush::drain_for in 1s build + 7s test
+TIMEOUT  crates/cpworker/src/output/gre.rs:186:45: replace + with - in <impl Output for GreOutput>::send_packet in 1s build + 120s test
+TIMEOUT  crates/cpworker/src/output/gre.rs:188:31: replace += with -= in <impl Output for GreOutput>::send_packet in 1s build + 120s test
+MISSED   crates/cpworker/src/zmtp/client.rs:496:50: replace < with <= in ZmtpPush::maybe_connect in 1s build + 8s test
+TIMEOUT  crates/cpworker/src/output/vxlan.rs:222:45: replace + with - in VxlanOutput::do_send_packet in 1s build + 120s test
+TIMEOUT  crates/cpworker/src/output/vxlan.rs:224:31: replace += with -= in VxlanOutput::do_send_packet in 1s build + 120s test
+TIMEOUT  crates/cpworker/src/zmtp/client.rs:340:9: replace ZmtpPush::is_connected -> bool with true in 1s build + 120s test
+TIMEOUT  crates/cpworker/src/zmtp/client.rs:340:52: replace == with != in ZmtpPush::is_connected in 1s build + 120s test
+TIMEOUT  crates/cpworker/src/zmtp/client.rs:487:40: replace && with || in ZmtpPush::drain_for in 1s build + 120s test
+TIMEOUT  crates/cpworker/src/zmtp/client.rs:487:58: replace < with > in ZmtpPush::drain_for in 1s build + 120s test
+MISSED   crates/cpworker/src/zmtp/client.rs:706:58: replace | with & in <impl Transport for TcpTransport>::check_connected in 1s build + 7s test
+MISSED   crates/cpworker/src/zmtp/client.rs:706:58: replace | with ^ in <impl Transport for TcpTransport>::check_connected in 1s build + 7s test
+MISSED   crates/cpworker/src/zmtp/client.rs:727:9: replace <impl Transport for TcpTransport>::shutdown with () in 1s build + 8s test
+MISSED   crates/cpworker/src/zmtp/client.rs:878:12: delete ! in connect_stream in 1s build + 7s test
+TIMEOUT  crates/cpworker/src/zmtp/client.rs:573:31: replace match guard e.kind() == io::ErrorKind::Interrupted with true in ZmtpPush::drive_conn in 1s build + 120s test
+TIMEOUT  crates/cpworker/src/zmtp/client.rs:573:40: replace == with != in ZmtpPush::drive_conn in 1s build + 120s test
+TIMEOUT  crates/cpworker/src/zmtp/client.rs:588:31: replace match guard e.kind() == io::ErrorKind::Interrupted with true in ZmtpPush::drive_conn in 1s build + 120s test
+TIMEOUT  crates/cpworker/src/zmtp/client.rs:588:40: replace == with != in ZmtpPush::drive_conn in 1s build + 120s test
+TIMEOUT  crates/cpworker/src/zmtp/client.rs:639:35: replace match guard e.kind() == io::ErrorKind::Interrupted with true in ZmtpPush::flush_pending in 1s build + 120s test
+TIMEOUT  crates/cpworker/src/zmtp/client.rs:631:34: replace += with *= in ZmtpPush::flush_pending in 1s build + 120s test
+TIMEOUT  crates/cpworker/src/zmtp/client.rs:639:44: replace == with != in ZmtpPush::flush_pending in 1s build + 120s test
+TIMEOUT  crates/cpworker/src/zmtp/client.rs:691:9: replace <impl Transport for TcpTransport>::read -> io::Result<usize> with Ok(1) in 1s build + 120s test
+1593 mutants tested in 16m: 84 missed, 1384 caught, 82 unviable, 43 timeouts

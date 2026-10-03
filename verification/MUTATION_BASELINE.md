@@ -64,7 +64,7 @@ cargo mutants --config /tmp/mut-noexcl.toml -j 8 --output /tmp/mutout/sweep
 （`zmtp/client.rs` 的 `write/queue_out/drive_conn` 共 5 例：20 s 下 timeout、60 s 下 caught）。
 **重新基线化时必须用同一份预算。**
 
-## 当前基线（2026-10-02，no-exclude 全量 sweep）
+## 当前基线（2026-10-03，no-exclude 全量 sweep；post-`cloud-probe-rs-ix9`）
 
 范围 = `verify_mutation.sh` 的 examine_globs。**no-exclude** 结果即"测试套件真实能杀多少"。
 权威产物：`verification/mutation-sweep-2026-10-02/`（`outcomes.json` + 四个分类清单 +
@@ -90,7 +90,7 @@ cargo mutants --config /tmp/mut-noexcl.toml -j 8 --output /tmp/mutout/sweep
 | `cpgolib/cpworker/stats.rs` | 56 | 56 | 0 | 0 | — |
 | `cpgolib/{fingerprint,worker_config,worker_fingerprint}` | 32 | 32 | 0 | 0 | — |
 | `cpgolib/slogx/mod.rs` | 3 | 2 | 1 | 0 | 进程级 logger 初始化的副作用 |
-| **合计** | **1593** | **1367 (85.8%)** | **144 (85m+59t)** | **82** | 144 个存活由 119 条 `exclude_re` 逐条钉住并附理由 |
+| **合计** | **1593** | **1384 (86.9%)** | **127 (84m+43t)** | **82** | 127 个存活由 104 条 `exclude_re` 逐条钉住并附理由 |
 
 - **0 个未登记存活**：`cargo-mutants --config verification/mutants.toml` 实测 1448 个
   （1593 − 145 个被豁免命中：144 个存活 + 1 个本来就 unviable 的同位 mutant），
@@ -100,7 +100,23 @@ cargo mutants --config /tmp/mut-noexcl.toml -j 8 --output /tmp/mutout/sweep
 - Tier 阈值（`policy.toml`：Tier0 ≥85% / Tier1 ≥75%）作为**最低目标**；当前范围 85.8% caught，
   其余为上述分类的非等价项，而不是"未测量"。
 
-### 本轮（2026-10-02）收口：4 条缺口用测试关闭
+### 本轮（2026-10-03）收口：`ix9` 之后重 pin，豁免 119 → 104
+
+`cloud-probe-rs-ix9` 修掉了 `ReloadWorker` 的一个挂起：线程体把完成标志的置位放在 `work()` 之后，
+`work()` panic 时那行永不执行，等待方永久自旋 —— 于是套件其实已经杀掉的变异被 cargo-mutants
+报成 Timeout。影响是**可测的**（两次都是 1593 候选、都不含上轮那 4 个缺口测试，故为干净对照）：
+
+| | 2026-10-02 | 2026-10-03 | 变化 |
+|---|---:|---:|---:|
+| caught | 1363 | 1384 | **+20** |
+| **timeout** | 59 | **43** | **−16** |
+| timeout 中「测试其实已失败」 | 45 | 29 | **−16** |
+
+因此重 pin：**15 条豁免被删除**（它们覆盖的变异已由 Caught 接管），`exclude_re` **119 → 104**；
+存活集 144 → 127。权威产物见 `verification/mutation-sweep-2026-10-03/`。
+**剩下的 29 个 timeout 仍被另一个挂起源掩盖**，见 `cloud-probe-rs-l81` —— 修掉它预期还能再缩一截。
+
+### 上一轮（2026-10-02）收口：4 条缺口用测试关闭
 
 上一版把 129 条豁免重钉到本轮 sweep 的行号时，故意**不**豁免 4 个存活 —— 它们的等价性
 无法从代码推出，探针显示是真缺口，用测试关闭而不是登记：

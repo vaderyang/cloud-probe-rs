@@ -116,20 +116,20 @@ exclude_re = [
   # Both are non-terminating for *some* filter in the suite, and the reload-worker
   # test additionally swallows the worker-thread panic behind an unbounded
   # `while !worker.is_done()` spin (task.rs), so no budget turns them into Caught.
-  "cpworker/src/bpf/compiler\\.rs:439:9:",  # runner timeout: new_label() stops pushing labels, so finish() can never resolve the branches
-  "cpworker/src/bpf/compiler\\.rs:440:27:",  # runner timeout: same - every label index is now out of range for the label table
+  # REMOVED (2026-10-03, tests now kill it): runner timeout: new_label() stops pushing labels, so finish() can never resolve the branches
+  # REMOVED (2026-10-03, tests now kill it): runner timeout: same - every label index is now out of range for the label table
   "cpworker/src/bpf/compiler\\.rs:448:9:",  # runner timeout: replacing emit()'s body also drops the push, so finish_branch()'s `while insns.len() <= ..` fill loop never ends
   "cpworker/src/bpf/compiler\\.rs:455:26:",  # emit()'s returned index is not read by any call site (all are statements)
   "cpworker/src/bpf/compiler\\.rs:580:24:",  # equivalent: `frag` is set from `v6` at every Test::L4Proto construction, so && == ||
   "cpworker/src/bpf/compiler\\.rs:656:24:",  # the rev_index[n] == -1 sentinel is only read for a label bound past the last insn; compile_ast emits both RETs after its final bind
-  "cpworker/src/bpf/compiler\\.rs:672:30: replace - with / in Builder::finish",  # runner timeout: jf_dist becomes p0/rev_index[jf_old], which traps on the (common) rev index 0 and unwinds the reload worker thread
+  # REMOVED (2026-10-03, tests now kill it): runner timeout: jf_dist becomes p0/rev_index[jf_old], which traps on the (common) rev index 0 and unwinds the reload worker thread
   "cpworker/src/bpf/compiler\\.rs:673:28:",  # defensive re-check: jt_old/jf_old > i (line 666) means their rev indices are already < rev.len(), so neither distance can go negative
   "cpworker/src/bpf/compiler\\.rs:683:37:",  # runner timeout: with && the fixpoint never raises need_jt, so the loop re-tests the same over-long distance
   "cpworker/src/bpf/compiler\\.rs:684:37:",  # runner timeout: with && the fixpoint never raises need_jf, so the loop re-tests the same over-long distance
   "cpworker/src/bpf/compiler\\.rs:688:20:",  # runner timeout: deleting the ! means nothing raises need_jt when both distances are too long, so the fixpoint repeats forever
   "cpworker/src/bpf/compiler\\.rs:691:20:",  # runner timeout: deleting the ! means nothing raises need_jf when both distances are too long, so the fixpoint repeats forever
   "cpworker/src/bpf/compiler\\.rs:731:31: replace - with / in Builder::finish",  # a jf trampoline is only pushed when jf_dist > 255, so tp >= 256 and p == tp+1: p-tp-1 == 0 == p/tp-1
-  "cpworker/src/bpf/compiler\\.rs:732:27: replace - with / in Builder::finish",  # runner timeout: p/rev_index[jf_old] traps on rev index 0 (or reads -1), unwinding the reload worker thread
+  # REMOVED (2026-10-03, tests now kill it): runner timeout: p/rev_index[jf_old] traps on rev index 0 (or reads -1), unwinding the reload worker thread
 
   # ------------------------------------------------ cpworker/src/bpf/interp.rs
   # `run()` only terminates through a RET, an unsupported opcode, or falling off the
@@ -158,11 +158,11 @@ exclude_re = [
   # re-read the same token forever, or drops the depth/node bound so the deliberately
   # over-deep and over-complex corpus entries the suite feeds `parse_with()` recurse
   # without ever being rejected. Measured Timeout at the pinned budget.
-  "cpworker/src/bpf/parser\\.rs:217:14:",  # runner timeout: every accepted filter then fails the trailing-token check, so the worker thread's expect() panics and task::tests::reload_worker_* spins on is_done() forever
-  "cpworker/src/bpf/parser\\.rs:283:9:",  # runner timeout: the MAX_DEPTH guard is gone, so the deep-nesting corpus recurses until the run stalls
-  "cpworker/src/bpf/parser\\.rs:283:20:",  # runner timeout: depth never grows (or walks back), so the MAX_DEPTH guard cannot fire on the deep-nesting corpus
-  "cpworker/src/bpf/parser\\.rs:294:20: replace \\+= with -= in Parser<'a>::bump",  # runner timeout: nodes never grows, so the MAX_NODES guard cannot fire on the over-complex corpus
-  "cpworker/src/bpf/parser\\.rs:317:22: replace \\+= with -= in Parser<'a>::eat",  # runner timeout: eat() rewinds pos, so each keyword loop re-reads the same token forever
+  # REMOVED (2026-10-03, tests now kill it): runner timeout: every accepted filter then fails the trailing-token check, so the worker thread's expect() panics and task::tests::reload_worker_* spins on is_done() forever
+  # REMOVED (2026-10-03, tests now kill it): runner timeout: the MAX_DEPTH guard is gone, so the deep-nesting corpus recurses until the run stalls
+  # REMOVED (2026-10-03, tests now kill it): runner timeout: depth never grows (or walks back), so the MAX_DEPTH guard cannot fire on the deep-nesting corpus
+  # REMOVED (2026-10-03, tests now kill it): runner timeout: nodes never grows, so the MAX_NODES guard cannot fire on the over-complex corpus
+  # REMOVED (2026-10-03, tests now kill it): runner timeout: eat() rewinds pos, so each keyword loop re-reads the same token forever
 
   # ----------------------------------------------------------- cpworker/src/bpf/resolvers.rs
   # `now` is a fresh Instant::now() and `at` was stamped by an earlier one; the TTL is
@@ -176,13 +176,13 @@ exclude_re = [
   # harness and the test's unbounded `while !worker.is_done()` spin never ends, so the
   # run is reported Timeout rather than Caught at any budget (AUDIT4 note: this wait
   # is the reason so many config mutants are timeouts rather than kills).
-  "cpworker/src/config\\.rs:623:5:",  # runner timeout: every optional section reads as absent -> the worker panics on .expect() -> task::tests::reload_worker_* spins on is_done()
-  "cpworker/src/config\\.rs:624:9:",  # runner timeout: same as the whole-body mutation of object_or_none above
+  # REMOVED (2026-10-03, tests now kill it): runner timeout: every optional section reads as absent -> the worker panics on .expect() -> task::tests::reload_worker_* spins on is_done()
+  # REMOVED (2026-10-03, tests now kill it): runner timeout: same as the whole-body mutation of object_or_none above
   "cpworker/src/config\\.rs:833:5: replace int_in -> Result<i64> with Ok\\(0\\)",  # runner timeout: range checks vanish -> batch/timeout 0 -> task::tests::poll_packets_batch_drains_rtc_and_pipeline spins without progress
   "cpworker/src/config\\.rs:853:5: replace u64_in -> Result<u64> with Ok\\(0\\)",  # runner timeout: same, via the u64 wrapper (buffer size 0)
-  "cpworker/src/config\\.rs:894:10:",  # runner timeout: the <=0 rejection inverts, so the worker panics and task::tests::reload_worker_* spins on is_done()
-  "cpworker/src/config\\.rs:908:10: replace < with <= in nonneg_clamped",  # runner timeout: 0 is now rejected -> worker panic -> task::tests::reload_worker_* spins on is_done()
-  "cpworker/src/config\\.rs:908:10: replace < with == in nonneg_clamped",  # runner timeout: negatives are accepted -> i32::MAX clamp -> the capture/pipeline loops never settle
+  # REMOVED (2026-10-03, tests now kill it): runner timeout: the <=0 rejection inverts, so the worker panics and task::tests::reload_worker_* spins on is_done()
+  # REMOVED (2026-10-03, tests now kill it): runner timeout: 0 is now rejected -> worker panic -> task::tests::reload_worker_* spins on is_done()
+  # REMOVED (2026-10-03, tests now kill it): runner timeout: negatives are accepted -> i32::MAX clamp -> the capture/pipeline loops never settle
   # clamp and mask at equality are no-ops: v == max returns max either way, and
   # 0x00ffffff & 0x00ffffff == 0x00ffffff.
   "cpworker/src/config\\.rs:897:10: replace > with >= in positive_clamped",  # clamp at equality assigns the same value
@@ -224,6 +224,13 @@ exclude_re = [
   # way, which is the only thing a test can observe.
   # (`< with <=` cases are equality: the frame has exactly one layer's minimum, and
   # the next layer needs strictly more bytes.)
+  # `>` -> `>=` here is an equality case of a different kind: when
+  # payload_len == max_payload the mutated branch assigns the very value it would
+  # have kept, so nothing a test can observe changes. The no-exclude sweep at -j 12
+  # reported it Caught once, which was a parallel-execution false positive; a serial
+  # (-j 4) re-measure of packet.rs shows it surviving
+  # (verification/mutation-sweep-2026-10-03/recheck-packet-rs-outcomes.json).
+  "cpworker/src/packet\\.rs:309:22: replace > with >= in parse_packet",  # payload_len == max_payload: the clamped value is the one already there
   "cpworker/src/packet\\.rs:168:15: replace < with <= in parse_packet",  # a 14-byte frame still fails the IPv4/IPv6 minimum below: None either way
   "cpworker/src/packet\\.rs:180:19: replace < with <= in parse_packet",  # at caplen == offset+4 the VLAN loop needs another tag or the IP minimum: None either way
   "cpworker/src/packet\\.rs:195:19: replace < with <= in parse_packet",  # at caplen == offset+20 no TCP/UDP header can be read: None either way
@@ -235,7 +242,7 @@ exclude_re = [
   "cpworker/src/packet\\.rs:259:23: replace < with <= in parse_packet",  # equality already leaves offset == caplen, so the L4 guards reject: None either way
   "cpworker/src/packet\\.rs:259:23: replace < with == in parse_packet",  # a short ext frame still trips the L4 guards (offset > caplen): None either way
   "cpworker/src/packet\\.rs:284:32: replace \\+ with - in parse_packet",  # offset >= 54 so no underflow; an accepted truncated UDP header trips the payload_offset > caplen guard
-  "cpworker/src/packet\\.rs:309:22: replace > with >= in parse_packet",  # clamp at equality assigns the same value
+  # REMOVED (2026-10-03, tests now kill it): clamp at equality assigns the same value
   "cpworker/src/packet\\.rs:336:23: replace < with <= in extract_ipport",  # at len == off+14 the ipv4/ipv6 layers below need 20/40 more: None either way
   "cpworker/src/packet\\.rs:354:27: replace < with <= in extract_ipport",  # at len == next+4 the loop needs another tag or the IP minimum: None either way
   # fill_ports()'s VXLAN heuristic only reads what extract_ipport() re-validates: it

@@ -1,0 +1,84 @@
+crates/cpgolib/src/slogx/mod.rs:11:5: replace init_default with ()
+crates/cpworker/src/bpf/mod.rs:125:5: replace attach_filter -> io::Result<()> with Ok(())
+crates/cpworker/src/config.rs:897:10: replace > with >= in positive_clamped
+crates/cpworker/src/config.rs:974:27: replace > with >= in RawOutput::build
+crates/cpworker/src/config.rs:1019:32: replace > with == in RawOutput::build
+crates/cpworker/src/config.rs:1019:32: replace > with >= in RawOutput::build
+crates/cpworker/src/config.rs:1019:32: replace > with < in RawOutput::build
+crates/cpworker/src/config.rs:1048:32: replace > with == in RawOutput::build
+crates/cpworker/src/config.rs:1048:32: replace > with >= in RawOutput::build
+crates/cpworker/src/config.rs:1048:32: replace > with < in RawOutput::build
+crates/cpworker/src/packet.rs:168:15: replace < with <= in parse_packet
+crates/cpworker/src/packet.rs:180:19: replace < with <= in parse_packet
+crates/cpworker/src/packet.rs:195:19: replace < with <= in parse_packet
+crates/cpworker/src/packet.rs:201:19: replace < with == in parse_packet
+crates/cpworker/src/packet.rs:201:19: replace < with <= in parse_packet
+crates/cpworker/src/packet.rs:225:32: replace + with - in parse_packet
+crates/cpworker/src/packet.rs:243:19: replace < with <= in parse_packet
+crates/cpworker/src/packet.rs:253:23: replace < with <= in parse_packet
+crates/cpworker/src/packet.rs:259:23: replace < with == in parse_packet
+crates/cpworker/src/packet.rs:259:23: replace < with <= in parse_packet
+crates/cpworker/src/packet.rs:284:32: replace + with - in parse_packet
+crates/cpworker/src/packet.rs:336:23: replace < with <= in extract_ipport
+crates/cpworker/src/packet.rs:354:27: replace < with <= in extract_ipport
+crates/cpworker/src/packet.rs:435:54: replace + with - in fill_ports
+crates/cpworker/src/packet.rs:435:40: replace + with - in fill_ports
+crates/cpworker/src/packet_split.rs:169:81: replace + with * in build_fragment
+crates/cpworker/src/bpf/codes.rs:31:42: replace | with ^
+crates/cpworker/src/bpf/codes.rs:31:34: replace | with ^
+crates/cpworker/src/bpf/codes.rs:33:42: replace | with ^
+crates/cpworker/src/bpf/codes.rs:33:34: replace | with &
+crates/cpworker/src/bpf/codes.rs:33:34: replace | with ^
+crates/cpworker/src/bpf/codes.rs:35:42: replace | with ^
+crates/cpworker/src/bpf/codes.rs:35:34: replace | with ^
+crates/cpworker/src/bpf/codes.rs:37:42: replace | with ^
+crates/cpworker/src/bpf/codes.rs:37:34: replace | with ^
+crates/cpworker/src/bpf/codes.rs:39:42: replace | with ^
+crates/cpworker/src/bpf/codes.rs:39:34: replace | with ^
+crates/cpworker/src/bpf/codes.rs:41:46: replace | with ^
+crates/cpworker/src/bpf/codes.rs:41:36: replace | with ^
+crates/cpworker/src/bpf/codes.rs:43:46: replace | with ^
+crates/cpworker/src/bpf/codes.rs:45:46: replace | with ^
+crates/cpworker/src/bpf/codes.rs:43:36: replace | with ^
+crates/cpworker/src/bpf/codes.rs:45:36: replace | with ^
+crates/cpworker/src/bpf/codes.rs:47:46: replace | with ^
+crates/cpworker/src/bpf/codes.rs:47:36: replace | with ^
+crates/cpworker/src/bpf/codes.rs:49:48: replace | with ^
+crates/cpworker/src/bpf/codes.rs:49:37: replace | with ^
+crates/cpworker/src/bpf/codes.rs:51:33: replace | with ^
+crates/cpworker/src/bpf/codes.rs:53:32: replace | with ^
+crates/cpworker/src/bpf/compiler.rs:455:26: replace - with + in Builder::emit
+crates/cpworker/src/bpf/compiler.rs:455:26: replace - with / in Builder::emit
+crates/cpworker/src/bpf/compiler.rs:580:24: replace && with || in Builder::emit_test
+crates/cpworker/src/bpf/compiler.rs:656:24: delete - in Builder::finish
+crates/cpworker/src/bpf/compiler.rs:673:28: replace || with && in Builder::finish
+crates/cpworker/src/bpf/compiler.rs:731:31: replace - with / in Builder::finish
+crates/cpworker/src/bpf/interp.rs:15:22: replace | with ^ in load_be
+crates/cpworker/src/bpf/resolvers.rs:142:44: replace < with <= in <impl Resolver for CachedResolver<R>>::lookup
+crates/cpworker/src/output/gre.rs:114:56: replace > with >= in GreOutput::flush_error_info
+crates/cpworker/src/output/gre.rs:114:30: replace > with >= in GreOutput::flush_error_info
+crates/cpworker/src/output/gre.rs:114:91: replace > with >= in GreOutput::flush_error_info
+crates/cpworker/src/output/gre.rs:135:50: replace < with <= in <impl Output for GreOutput>::send_packet
+crates/cpworker/src/output/gre.rs:186:45: replace + with * in <impl Output for GreOutput>::send_packet
+crates/cpworker/src/output/gre.rs:186:53: replace * with + in <impl Output for GreOutput>::send_packet
+crates/cpworker/src/output/gre.rs:186:53: replace * with / in <impl Output for GreOutput>::send_packet
+crates/cpworker/src/output/vxlan.rs:173:30: replace > with >= in VxlanOutput::flush_error_info
+crates/cpworker/src/output/vxlan.rs:173:56: replace > with >= in VxlanOutput::flush_error_info
+crates/cpworker/src/output/vxlan.rs:173:91: replace > with >= in VxlanOutput::flush_error_info
+crates/cpworker/src/output/vxlan.rs:222:45: replace + with * in VxlanOutput::do_send_packet
+crates/cpworker/src/output/vxlan.rs:222:53: replace * with + in VxlanOutput::do_send_packet
+crates/cpworker/src/output/vxlan.rs:222:53: replace * with / in VxlanOutput::do_send_packet
+crates/cpworker/src/output/vxlan.rs:247:50: replace < with <= in <impl Output for VxlanOutput>::send_packet
+crates/cpworker/src/output/vxlan.rs:276:39: replace || with && in <impl Output for VxlanOutput>::send_packet
+crates/cpworker/src/zmtp/client.rs:76:9: replace Transport::check_connected -> io::Result<bool> with Ok(false)
+crates/cpworker/src/zmtp/client.rs:168:25: replace > with == in Conn::queue_out
+crates/cpworker/src/zmtp/client.rs:168:25: replace > with < in Conn::queue_out
+crates/cpworker/src/zmtp/client.rs:168:25: replace > with >= in Conn::queue_out
+crates/cpworker/src/zmtp/client.rs:474:12: delete ! in ZmtpPush::abandon_handshake
+crates/cpworker/src/zmtp/client.rs:487:58: replace < with <= in ZmtpPush::drain_for
+crates/cpworker/src/zmtp/client.rs:489:16: delete ! in ZmtpPush::drain_for
+crates/cpworker/src/zmtp/client.rs:496:50: replace < with <= in ZmtpPush::maybe_connect
+crates/cpworker/src/zmtp/client.rs:706:58: replace | with & in <impl Transport for TcpTransport>::check_connected
+crates/cpworker/src/zmtp/client.rs:706:58: replace | with ^ in <impl Transport for TcpTransport>::check_connected
+crates/cpworker/src/zmtp/client.rs:727:9: replace <impl Transport for TcpTransport>::shutdown with ()
+crates/cpworker/src/zmtp/client.rs:878:12: delete ! in connect_stream

@@ -1,0 +1,43 @@
+crates/cpgolib/src/cpworker/client.rs:127:9: replace UnixClient::dial_with_timeout -> Result<()> with Ok(())
+crates/cpgolib/src/cpworker/client.rs:223:9: replace <impl Client for UnixClient>::dial -> Result<()> with Ok(())
+crates/cpworker/src/config.rs:833:5: replace int_in -> Result<i64> with Ok(0)
+crates/cpworker/src/config.rs:853:5: replace u64_in -> Result<u64> with Ok(0)
+crates/cpworker/src/config.rs:1204:58: replace == with != in RawConfig::build
+crates/cpworker/src/bpf/compiler.rs:448:9: replace Builder::emit -> usize with 0
+crates/cpworker/src/bpf/compiler.rs:448:9: replace Builder::emit -> usize with 1
+crates/cpworker/src/bpf/compiler.rs:683:37: replace || with && in Builder::finish
+crates/cpworker/src/bpf/compiler.rs:684:37: replace || with && in Builder::finish
+crates/cpworker/src/bpf/compiler.rs:688:20: delete ! in Builder::finish
+crates/cpworker/src/bpf/compiler.rs:691:20: delete ! in Builder::finish
+crates/cpworker/src/bpf/interp.rs:61:20: replace += with -= in run
+crates/cpworker/src/bpf/interp.rs:61:20: replace += with *= in run
+crates/cpworker/src/bpf/interp.rs:61:25: replace + with - in run
+crates/cpworker/src/bpf/interp.rs:61:25: replace + with * in run
+crates/cpworker/src/bpf/interp.rs:65:20: replace += with -= in run
+crates/cpworker/src/bpf/interp.rs:65:20: replace += with *= in run
+crates/cpworker/src/bpf/interp.rs:65:25: replace + with - in run
+crates/cpworker/src/bpf/interp.rs:65:25: replace + with * in run
+crates/cpworker/src/bpf/interp.rs:69:20: replace += with -= in run
+crates/cpworker/src/bpf/interp.rs:69:20: replace += with *= in run
+crates/cpworker/src/bpf/interp.rs:69:25: replace + with * in run
+crates/cpworker/src/bpf/interp.rs:73:20: replace += with -= in run
+crates/cpworker/src/bpf/interp.rs:73:20: replace += with *= in run
+crates/cpworker/src/bpf/interp.rs:73:25: replace + with - in run
+crates/cpworker/src/bpf/interp.rs:73:25: replace + with * in run
+crates/cpworker/src/bpf/interp.rs:79:12: replace += with *= in run
+crates/cpworker/src/output/gre.rs:186:45: replace + with - in <impl Output for GreOutput>::send_packet
+crates/cpworker/src/output/gre.rs:188:31: replace += with -= in <impl Output for GreOutput>::send_packet
+crates/cpworker/src/output/vxlan.rs:222:45: replace + with - in VxlanOutput::do_send_packet
+crates/cpworker/src/output/vxlan.rs:224:31: replace += with -= in VxlanOutput::do_send_packet
+crates/cpworker/src/zmtp/client.rs:340:9: replace ZmtpPush::is_connected -> bool with true
+crates/cpworker/src/zmtp/client.rs:340:52: replace == with != in ZmtpPush::is_connected
+crates/cpworker/src/zmtp/client.rs:487:40: replace && with || in ZmtpPush::drain_for
+crates/cpworker/src/zmtp/client.rs:487:58: replace < with > in ZmtpPush::drain_for
+crates/cpworker/src/zmtp/client.rs:573:31: replace match guard e.kind() == io::ErrorKind::Interrupted with true in ZmtpPush::drive_conn
+crates/cpworker/src/zmtp/client.rs:573:40: replace == with != in ZmtpPush::drive_conn
+crates/cpworker/src/zmtp/client.rs:588:31: replace match guard e.kind() == io::ErrorKind::Interrupted with true in ZmtpPush::drive_conn
+crates/cpworker/src/zmtp/client.rs:588:40: replace == with != in ZmtpPush::drive_conn
+crates/cpworker/src/zmtp/client.rs:639:35: replace match guard e.kind() == io::ErrorKind::Interrupted with true in ZmtpPush::flush_pending
+crates/cpworker/src/zmtp/client.rs:631:34: replace += with *= in ZmtpPush::flush_pending
+crates/cpworker/src/zmtp/client.rs:639:44: replace == with != in ZmtpPush::flush_pending
+crates/cpworker/src/zmtp/client.rs:691:9: replace <impl Transport for TcpTransport>::read -> io::Result<usize> with Ok(1)
