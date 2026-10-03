@@ -1,0 +1,900 @@
+diff --git a/crates/cpworker/Cargo.toml b/crates/cpworker/Cargo.toml
+index e8215e1..b43774c 100644
+--- a/crates/cpworker/Cargo.toml
++++ b/crates/cpworker/Cargo.toml
+@@ -22,6 +22,9 @@ path = "src/lib.rs"
+ # and is checked by `build.rs`.
+ dpdk = []
+ 
++# Opt-in allocation/wait diagnostics; absent from the production hot path.
++pipeline-profile = []
++
+ [dependencies]
+ anyhow.workspace = true
+ clap.workspace = true
+diff --git a/crates/cpworker/src/ring_buffer.rs b/crates/cpworker/src/ring_buffer.rs
+index d44a92a..27a4e93 100644
+--- a/crates/cpworker/src/ring_buffer.rs
++++ b/crates/cpworker/src/ring_buffer.rs
+@@ -13,10 +13,11 @@
+ //! serial use. [`SpscRing::into_split`] supplies unique owned endpoints for the
+ //! pipeline's long-lived threads without changing slot storage or sizing.
+ 
++use parking_lot::Mutex;
+ use std::cell::{Cell, UnsafeCell};
+ use std::marker::PhantomData;
+ use std::mem::MaybeUninit;
+-use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
++use std::sync::atomic::{fence, AtomicBool, AtomicU64, AtomicUsize, Ordering};
+ use std::sync::Arc;
+ use std::time::{SystemTime, UNIX_EPOCH};
+ 
+@@ -81,6 +82,8 @@ struct RingCore {
+     size: usize,
+     head: AtomicUsize,
+     tail: AtomicUsize,
++    waiting: AtomicBool,
++    sleeper: Mutex<Option<std::thread::Thread>>,
+ }
+ 
+ // SAFETY: `RingCore` is private and is only ever reachable through two safe
+@@ -111,6 +114,8 @@ impl RingCore {
+             size,
+             head: AtomicUsize::new(0),
+             tail: AtomicUsize::new(0),
++            waiting: AtomicBool::new(false),
++            sleeper: Mutex::new(None),
+         }
+     }
+ 
+@@ -145,6 +150,12 @@ impl RingCore {
+             (*self.slots[head].get()).write(msg);
+         }
+         self.head.store(next, Ordering::Release);
++        // Pair with the consumer's arm/recheck fence: either it sees this
++        // publication, or we see its waiting flag and give it a park token.
++        fence(Ordering::SeqCst);
++        if self.waiting.load(Ordering::Relaxed) && self.waiting.swap(false, Ordering::Relaxed) {
++            self.wake();
++        }
+         Ok(())
+     }
+ 
+@@ -167,6 +178,34 @@ impl RingCore {
+         Some(msg)
+     }
+ 
++    fn wake(&self) {
++        if let Some(thread) = self.sleeper.lock().as_ref() {
++            thread.unpark();
++        }
++    }
++
++    fn wait(&self, running: &AtomicBool) -> bool {
++        // A short, finite spin bridges gaps inside a capture burst. Parking at
++        // every gap turns a fast producer into a per-packet futex wake storm;
++        // a genuinely idle ring still parks once, with no timed wakeups.
++        for _ in 0..64 {
++            if self.used() != 0 || !running.load(Ordering::Acquire) {
++                return false;
++            }
++            std::hint::spin_loop();
++        }
++        // Register on each wait because reload reuses the ring on a new thread.
++        *self.sleeper.lock() = Some(std::thread::current());
++        self.waiting.store(true, Ordering::Relaxed);
++        fence(Ordering::SeqCst);
++        let parked = self.used() == 0 && running.load(Ordering::Acquire);
++        if parked {
++            std::thread::park();
++        }
++        self.waiting.store(false, Ordering::Relaxed);
++        parked
++    }
++
+     /// Number of messages currently queued. Mirrors `spsc_ring_used`: head and
+     /// tail are read at different instants, so the value is a snapshot.
+     fn used(&self) -> usize {
+@@ -313,6 +352,14 @@ pub struct OwnedRingConsumer {
+ }
+ 
+ impl OwnedRingConsumer {
++    /// Park while the ring is empty and the output loop is running. A push or
++    /// [`RingObserver::wake`] supplies a sticky token, so stop and publication
++    /// races cannot strand the consumer. Callers recheck their predicate.
++    /// Returns whether the consumer actually called `park`.
++    pub fn wait(&mut self, running: &AtomicBool) -> bool {
++        self.core.wait(running)
++    }
++
+     /// Pop the oldest message, or None when the ring is empty.
+     pub fn pop(&mut self) -> Option<Box<RingMsg>> {
+         self.core.pop()
+@@ -326,6 +373,11 @@ pub struct RingObserver {
+ }
+ 
+ impl RingObserver {
++    /// Wake a waiting consumer, including during shutdown with an empty ring.
++    pub fn wake(&self) {
++        self.core.wake();
++    }
++
+     /// Configured ring capacity, including the reserved slot.
+     #[must_use]
+     pub fn size(&self) -> usize {
+@@ -405,43 +457,170 @@ impl RingConsumer<'_> {
+     }
+ }
+ 
+-/// Tracks an upper bound on bytes in flight across the pipeline.
+-#[derive(Debug)]
++/// Tracks in-flight bytes and a bounded cache of packet messages.
+ pub struct SimpleAllocator {
+     capacity: AtomicU64,
+     used: AtomicU64,
++    cached: AtomicU64,
++    pool_producer: Mutex<OwnedRingProducer>,
++    pool_consumer: Mutex<OwnedRingConsumer>,
++    #[cfg(any(test, feature = "pipeline-profile"))]
++    profile: AllocationProfile,
++    #[cfg(any(test, feature = "pipeline-profile"))]
++    recycle_enabled: bool,
++}
++
++impl std::fmt::Debug for SimpleAllocator {
++    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
++        f.debug_struct("SimpleAllocator")
++            .field("capacity", &self.capacity())
++            .field("used", &self.used())
++            .field("cached", &self.cached_bytes())
++            .finish()
++    }
++}
++
++/// Physical Box/payload allocations and frees, including budget retries.
++/// Populated only for tests or the opt-in diagnostic build; the type itself
++/// has no runtime cost in a production allocator.
++#[derive(Debug, Default)]
++pub struct AllocationProfile {
++    /// Number of physical Box and nonempty Vec allocations.
++    pub allocations: AtomicU64,
++    /// Sum of physical allocation sizes, excluding libc metadata.
++    pub allocated_bytes: AtomicU64,
++    /// Number of Box and Vec destructions.
++    pub frees: AtomicU64,
++    /// Sum of destroyed allocation sizes.
++    pub freed_bytes: AtomicU64,
++    /// Requests rejected before allocating, because the byte budget is full.
++    pub rejected: AtomicU64,
++    /// Packets constructed using an existing Box and payload buffer.
++    pub reused: AtomicU64,
+ }
+ 
+ impl SimpleAllocator {
+     /// Create an allocator with a `capacity`-byte budget.
+     #[must_use]
+     pub fn new(capacity: u64) -> Self {
++        // Reverse SPSC traffic avoids a shared recycler mutex: capture owns
++        // the consumer and output owns the producer. Endpoint locks preserve
++        // the public allocator's safe multi-caller API without contending in
++        // the pipeline. Queue metadata, like the forward ring, is fixed.
++        let (producer, consumer, _) = SpscRing::new(1025).into_split();
+         SimpleAllocator {
+             capacity: AtomicU64::new(capacity),
+             used: AtomicU64::new(0),
++            cached: AtomicU64::new(0),
++            pool_producer: Mutex::new(producer),
++            pool_consumer: Mutex::new(consumer),
++            #[cfg(any(test, feature = "pipeline-profile"))]
++            profile: AllocationProfile::default(),
++            #[cfg(any(test, feature = "pipeline-profile"))]
++            recycle_enabled: std::env::var_os("PROBE_RECYCLE").is_none_or(|v| v != "off"),
+         }
+     }
+ 
++    /// Read opt-in allocation counters; snapshots are not transactional.
++    #[cfg(any(test, feature = "pipeline-profile"))]
++    pub fn profile(&self) -> &AllocationProfile {
++        &self.profile
++    }
++
++    #[cfg(any(test, feature = "pipeline-profile"))]
++    fn record_allocation(&self, msg: &RingMsg) {
++        let count = if matches!(msg, RingMsg::Packet { data, .. } if !data.is_empty()) {
++            2
++        } else {
++            1
++        };
++        self.profile.allocations.fetch_add(count, Ordering::Relaxed);
++        self.profile
++            .allocated_bytes
++            .fetch_add(msg.msg_len(), Ordering::Relaxed);
++    }
++
++    #[cfg(any(test, feature = "pipeline-profile"))]
++    fn record_free(&self, msg: &RingMsg) {
++        let count = if matches!(msg, RingMsg::Packet { data, .. } if !data.is_empty()) {
++            2
++        } else {
++            1
++        };
++        self.profile.frees.fetch_add(count, Ordering::Relaxed);
++        self.profile
++            .freed_bytes
++            .fetch_add(msg.msg_len(), Ordering::Relaxed);
++    }
++
++    fn discard(&self, msg: Box<RingMsg>) {
++        #[cfg(any(test, feature = "pipeline-profile"))]
++        self.record_free(&msg);
++        drop(msg);
++    }
++
+     /// Current byte budget.
+     pub fn capacity(&self) -> u64 {
+         self.capacity.load(Ordering::Relaxed)
+     }
+ 
+-    /// Bytes currently reserved.
++    /// Bytes currently in flight (cached messages are reported separately).
+     pub fn used(&self) -> u64 {
+         self.used.load(Ordering::Relaxed)
+     }
+ 
+-    /// Change the byte budget.
++    /// Bytes retained in the recycler, sharing the in-flight byte budget.
++    pub fn cached_bytes(&self) -> u64 {
++        self.cached.load(Ordering::Acquire)
++    }
++
++    /// Change the budget. Cached buffers are evicted before a smaller budget
++    /// takes effect; existing in-flight reservations drain as before.
+     pub fn resize(&self, new_capacity: u64) {
++        let mut consumer = self.pool_consumer.lock();
++        let _producer = self.pool_producer.lock();
++        self.clear_pool_locked(&mut consumer);
+         self.capacity.store(new_capacity, Ordering::Release);
+     }
+ 
+-    /// Reserve `len` bytes; returns false if it would exceed capacity.
+-    fn reserve(&self, len: u64) -> bool {
++    fn discard_cached(&self, msg: Box<RingMsg>) {
++        let len = msg.msg_len();
++        self.discard(msg);
++        self.cached.fetch_sub(len, Ordering::Release);
++    }
++
++    fn clear_pool_locked(&self, consumer: &mut OwnedRingConsumer) {
++        while let Some(msg) = consumer.pop() {
++            self.discard_cached(msg);
++        }
++    }
++
++    /// Release retained buffers after the consumer has drained on stop/reload.
++    pub fn clear_pool(&self) {
++        let mut consumer = self.pool_consumer.lock();
++        let _producer = self.pool_producer.lock();
++        self.clear_pool_locked(&mut consumer);
++    }
++
++    // Read in-flight before cached: output publishes cached bytes BEFORE
++    // releasing in-flight bytes. The acquire on `used` makes that transfer
++    // visible and prevents undercounting. A conservative double count can
++    // only cause an eviction/retry, never exceed the total byte budget.
++    fn reserve(&self, len: u64, consumer: &mut OwnedRingConsumer) -> bool {
+         loop {
+-            let old = self.used.load(Ordering::Relaxed);
+-            if old + len > self.capacity.load(Ordering::Relaxed) {
++            let old = self.used.load(Ordering::Acquire);
++            if len > self.capacity().saturating_sub(old) {
++                #[cfg(any(test, feature = "pipeline-profile"))]
++                self.profile.rejected.fetch_add(1, Ordering::Relaxed);
++                return false;
++            }
++            if self.cached_bytes() > self.capacity().saturating_sub(old + len) {
++                if let Some(msg) = consumer.pop() {
++                    self.discard_cached(msg);
++                    continue;
++                }
++                #[cfg(any(test, feature = "pipeline-profile"))]
++                self.profile.rejected.fetch_add(1, Ordering::Relaxed);
+                 return false;
+             }
+             if self
+@@ -455,12 +634,6 @@ impl SimpleAllocator {
+     }
+ 
+     fn release(&self, len: u64) {
+-        // A CAS loop rather than `AtomicU64::fetch_update`: nightly renamed that
+-        // method (`try_update`), and the new name is not in our MSRV (1.88) yet,
+-        // so depending on either spelling means a fuzz/nightly build warning.
+-        // Saturating is the behaviour we want and the same loop `reserve` uses:
+-        // releasing more than was reserved is a bookkeeping bug, and it must not
+-        // wrap `used` into a huge number that then blocks every allocation.
+         let mut cur = self.used.load(Ordering::Relaxed);
+         loop {
+             match self.used.compare_exchange_weak(
+@@ -475,7 +648,8 @@ impl SimpleAllocator {
+         }
+     }
+ 
+-    /// Allocate a packet message, or `None` if the byte budget is exceeded.
++    /// Allocate a packet, reusing a same-sized Box and Vec when available.
++    /// No heap allocation occurs on a rejected budget request.
+     pub fn alloc_packet(
+         &self,
+         task_index: usize,
+@@ -484,37 +658,123 @@ impl SimpleAllocator {
+         ts_usec: i64,
+         pkt_data: &[u8],
+     ) -> Option<Box<RingMsg>> {
++        let caplen = u32::try_from(pkt_data.len()).ok()?;
++        let len = u64::try_from(std::mem::size_of::<RingMsg>()).ok()? + u64::from(caplen);
++        let mut consumer = self.pool_consumer.lock();
++        let mut reuse = None;
++        if let Some(msg) = consumer.pop() {
++            if matches!(msg.as_ref(), RingMsg::Packet { data, .. } if data.len() == pkt_data.len())
++            {
++                // Count the buffer in-flight before removing its cached charge;
++                // even concurrent recycling cannot make the total look smaller.
++                self.used.fetch_add(len, Ordering::AcqRel);
++                self.cached.fetch_sub(len, Ordering::Release);
++                if self.used() > self.capacity() {
++                    self.discard(msg);
++                    self.release(len);
++                    return None;
++                }
++                reuse = Some(msg);
++            } else {
++                self.discard_cached(msg);
++            }
++        }
++        if reuse.is_none() && !self.reserve(len, &mut consumer) {
++            return None;
++        }
++        drop(consumer);
++        if let Some(mut msg) = reuse {
++            if let RingMsg::Packet {
++                task_index: index,
++                direction: dir,
++                ts_sec: sec,
++                ts_usec: usec,
++                data,
++                ..
++            } = msg.as_mut()
++            {
++                *index = task_index;
++                *dir = direction;
++                *sec = ts_sec;
++                *usec = ts_usec;
++                data.copy_from_slice(pkt_data);
++            }
++            #[cfg(any(test, feature = "pipeline-profile"))]
++            self.profile.reused.fetch_add(1, Ordering::Relaxed);
++            return Some(msg);
++        }
+         let msg = Box::new(RingMsg::Packet {
+             task_index,
+             direction,
+             ts_sec,
+             ts_usec,
+-            caplen: pkt_data.len() as u32,
++            caplen,
+             data: pkt_data.to_vec(),
+         });
+-        if !self.reserve(msg.msg_len()) {
+-            return None;
+-        }
++        #[cfg(any(test, feature = "pipeline-profile"))]
++        self.record_allocation(&msg);
+         Some(msg)
+     }
+ 
+-    /// Allocate a heartbeat message, or `None` if the byte budget is exceeded.
++    /// Allocate a heartbeat, or `None` when the byte budget is exceeded.
+     pub fn alloc_heartbeat(&self, task_index: usize) -> Option<Box<RingMsg>> {
++        let len = u64::try_from(std::mem::size_of::<RingMsg>()).ok()?;
++        if !self.reserve(len, &mut self.pool_consumer.lock()) {
++            return None;
++        }
+         let ts = SystemTime::now()
+             .duration_since(UNIX_EPOCH)
+-            .map(|d| d.as_secs() as i64)
++            .ok()
++            .and_then(|d| i64::try_from(d.as_secs()).ok())
+             .unwrap_or(0);
+         let msg = Box::new(RingMsg::Heartbeat { task_index, ts });
+-        if !self.reserve(msg.msg_len()) {
+-            return None;
+-        }
++        #[cfg(any(test, feature = "pipeline-profile"))]
++        self.record_allocation(&msg);
+         Some(msg)
+     }
+ 
+-    /// Release the bytes accounted for by `msg`.
++    /// Release bytes before a caller destroys a message without recycling.
+     pub fn free(&self, msg: &RingMsg) {
++        #[cfg(any(test, feature = "pipeline-profile"))]
++        self.record_free(msg);
+         self.release(msg.msg_len());
+     }
++
++    /// Return a packet buffer to the cache. The cache shares the configured
++    /// byte budget and retains at most 1024 messages; heartbeats are destroyed.
++    pub fn recycle(&self, msg: Box<RingMsg>) {
++        #[cfg(any(test, feature = "pipeline-profile"))]
++        if !self.recycle_enabled {
++            self.free(&msg);
++            return;
++        }
++        let len = msg.msg_len();
++        // Only exact-size allocator buffers can share the logical byte budget;
++        // a caller-provided Vec with spare capacity must be destroyed instead.
++        if matches!(msg.as_ref(), RingMsg::Packet { caplen, data, .. }
++            if usize::try_from(*caplen).ok() == Some(data.len()) && data.capacity() == data.len())
++        {
++            let mut producer = self.pool_producer.lock();
++            if len
++                <= self
++                    .capacity()
++                    .saturating_sub(self.used().saturating_sub(len))
++                    .saturating_sub(self.cached_bytes())
++            {
++                self.cached.fetch_add(len, Ordering::Release);
++                self.release(len);
++                match producer.push(msg) {
++                    Ok(()) => return,
++                    Err(msg) => {
++                        self.discard_cached(msg);
++                        return;
++                    }
++                }
++            }
++        }
++        self.discard(msg);
++        self.release(len);
++    }
+ }
+ 
+ #[cfg(test)]
+@@ -596,6 +856,16 @@ mod tests {
+         assert!(r.pop().is_none());
+     }
+ 
++    #[test]
++    fn exhausted_budget_does_not_allocate() {
++        let a = SimpleAllocator::new(0);
++        for _ in 0..100 {
++            assert!(a.alloc_packet(0, 1, 0, 0, &[0; 64]).is_none());
++            assert!(a.alloc_heartbeat(0).is_none());
++        }
++        assert_eq!(a.profile().allocations.load(Ordering::Relaxed), 0);
++    }
++
+     #[test]
+     fn allocator_bounds() {
+         let a = SimpleAllocator::new(100);
+@@ -758,4 +1028,99 @@ mod tests {
+         );
+         assert_eq!(ring.size(), CAP);
+     }
++    #[test]
++    fn recycler_shares_budget_and_evicts_on_resize_and_size_change() {
++        let size = u64::try_from(std::mem::size_of::<RingMsg>()).unwrap();
++        let a = SimpleAllocator::new((size + 64) * 4);
++        let messages: Vec<_> = (0..4)
++            .map(|i| a.alloc_packet(i, 1, 2, 3, &[4; 64]).unwrap())
++            .collect();
++        assert!(a.alloc_packet(0, 1, 2, 3, &[4; 64]).is_none());
++        for msg in messages {
++            a.recycle(msg);
++        }
++        assert_eq!(a.used(), 0);
++        assert_eq!(a.cached_bytes(), (size + 64) * 4);
++        let mut messages = Vec::new();
++        for i in 0..4 {
++            let msg = a.alloc_packet(i + 10, 7, 8, 9, &[10; 64]).unwrap();
++            assert_eq!(msg.task_index(), i + 10);
++            assert!(a.used() + a.cached_bytes() <= a.capacity());
++            messages.push(msg);
++        }
++        assert_eq!(a.profile().allocations.load(Ordering::Relaxed), 8);
++        for msg in messages {
++            a.recycle(msg);
++        }
++        let bigger = a.alloc_packet(0, 1, 2, 3, &[5; 256]).unwrap();
++        assert!(a.used() + a.cached_bytes() <= a.capacity());
++        a.recycle(bigger);
++        a.resize(size + 64);
++        assert_eq!(a.cached_bytes(), 0);
++        let msg = a.alloc_packet(0, 1, 2, 3, &[6; 64]).unwrap();
++        a.recycle(msg);
++        a.clear_pool();
++        assert_eq!(a.cached_bytes(), 0);
++        assert_eq!(
++            a.profile().allocations.load(Ordering::Relaxed),
++            a.profile().frees.load(Ordering::Relaxed)
++        );
++        assert_eq!(
++            a.profile().allocated_bytes.load(Ordering::Relaxed),
++            a.profile().freed_bytes.load(Ordering::Relaxed)
++        );
++    }
++
++    #[test]
++    fn notification_preserves_fifo_through_publication_and_stop_races() {
++        let (mut producer, mut consumer, observer) = SpscRing::new(5).into_split();
++        let running = Arc::new(AtomicBool::new(true));
++        let r = running.clone();
++        let (tx, rx) = std::sync::mpsc::channel();
++        let reader = std::thread::spawn(move || {
++            let mut expected = 0;
++            loop {
++                match consumer.pop() {
++                    Some(msg) => {
++                        assert_eq!(
++                            *msg,
++                            RingMsg::Heartbeat {
++                                task_index: 0,
++                                ts: expected
++                            }
++                        );
++                        expected += 1;
++                    }
++                    None if !r.load(Ordering::Acquire) => break,
++                    None => {
++                        consumer.wait(&r);
++                    }
++                }
++            }
++            tx.send(expected).unwrap();
++        });
++        for ts in 0..10000 {
++            let mut msg = Box::new(RingMsg::Heartbeat { task_index: 0, ts });
++            loop {
++                match producer.push(msg) {
++                    Ok(()) => break,
++                    Err(m) => {
++                        msg = m;
++                        std::thread::yield_now();
++                    }
++                }
++            }
++            if ts % 13 == 0 {
++                std::thread::yield_now();
++            }
++        }
++        running.store(false, Ordering::Release);
++        observer.wake();
++        assert_eq!(
++            rx.recv_timeout(std::time::Duration::from_secs(5)).unwrap(),
++            10000
++        );
++        reader.join().unwrap();
++        assert_eq!(observer.used(), 0);
++    }
+ }
+diff --git a/crates/cpworker/src/task.rs b/crates/cpworker/src/task.rs
+index 0320046..3fc7312 100644
+--- a/crates/cpworker/src/task.rs
++++ b/crates/cpworker/src/task.rs
+@@ -142,6 +142,8 @@ struct PipelineShared {
+     producer: Arc<Mutex<OwnedRingProducer>>,
+     consumer: Arc<Mutex<Option<OwnedRingConsumer>>>,
+     alloc: Arc<SimpleAllocator>,
++    #[cfg(any(test, feature = "pipeline-profile"))]
++    idle_waits: Arc<std::sync::atomic::AtomicU64>,
+ }
+ 
+ impl PipelineShared {
+@@ -152,6 +154,8 @@ impl PipelineShared {
+             producer: Arc::new(Mutex::new(producer)),
+             consumer: Arc::new(Mutex::new(Some(consumer))),
+             alloc: Arc::new(SimpleAllocator::new(mem_size)),
++            #[cfg(any(test, feature = "pipeline-profile"))]
++            idle_waits: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+         }
+     }
+ }
+@@ -445,8 +449,12 @@ impl TaskManager {
+             return;
+         }
+         let alloc = pipeline.alloc.clone();
++        #[cfg(any(test, feature = "pipeline-profile"))]
++        let idle_waits = pipeline.idle_waits.clone();
+         let out_sets = self.out_sets.clone();
+         let running = self.running.clone();
++        #[cfg(any(test, feature = "pipeline-profile"))]
++        let polling = std::env::var_os("PROBE_WAIT").is_some_and(|v| v == "poll");
+ 
+         self.running.store(true, Ordering::Release);
+         let handle = std::thread::Builder::new()
+@@ -467,7 +475,19 @@ impl TaskManager {
+                             if !running.load(Ordering::Acquire) {
+                                 break;
+                             }
+-                            std::thread::sleep(std::time::Duration::from_micros(10));
++                            #[cfg(any(test, feature = "pipeline-profile"))]
++                            if polling {
++                                idle_waits.fetch_add(1, Ordering::Relaxed);
++                                std::thread::sleep(std::time::Duration::from_micros(10));
++                                continue;
++                            }
++                            let parked = ring.wait(&running);
++                            #[cfg(any(test, feature = "pipeline-profile"))]
++                            if parked {
++                                idle_waits.fetch_add(1, Ordering::Relaxed);
++                            }
++                            #[cfg(not(any(test, feature = "pipeline-profile")))]
++                            let _ = parked;
+                         }
+                     }
+                 }
+@@ -492,7 +512,13 @@ impl TaskManager {
+     fn stop_output_thread(&mut self) {
+         if let Some(handle) = self.output_thread.take() {
+             self.running.store(false, Ordering::Release);
++            if let Some(pipeline) = &self.pipeline {
++                pipeline.ring.wake();
++            }
+             let _ = handle.join();
++            if let Some(pipeline) = &self.pipeline {
++                pipeline.alloc.clear_pool();
++            }
+         }
+     }
+ 
+@@ -747,7 +773,7 @@ impl TaskManager {
+             None => (0, 0, 0, 0),
+         };
+ 
+-        serde_json::json!({
++        let summary = serde_json::json!({
+             "time": { "sec": sec, "nsec": nsec },
+             "capture": capture_stats_json(&self.stats_capture),
+             "output": output_stats_json(&self.stats_output),
+@@ -757,7 +783,27 @@ impl TaskManager {
+                 "ring_total": ring_total,
+                 "ring_used": ring_used,
+             }
+-        })
++        });
++        #[cfg(feature = "pipeline-profile")]
++        {
++            let mut summary = summary;
++            if let Some(p) = &self.pipeline {
++                let a = p.alloc.profile();
++                summary["pipeline_profile"] = serde_json::json!({
++                    "allocations": a.allocations.load(Ordering::Relaxed),
++                    "allocated_bytes": a.allocated_bytes.load(Ordering::Relaxed),
++                    "frees": a.frees.load(Ordering::Relaxed),
++                    "freed_bytes": a.freed_bytes.load(Ordering::Relaxed),
++                    "rejected": a.rejected.load(Ordering::Relaxed),
++                    "reused": a.reused.load(Ordering::Relaxed),
++                    "cached_bytes": p.alloc.cached_bytes(),
++                    "idle_waits": p.idle_waits.load(Ordering::Relaxed),
++                });
++            }
++            summary
++        }
++        #[cfg(not(feature = "pipeline-profile"))]
++        summary
+     }
+ }
+ 
+@@ -931,7 +977,7 @@ fn dispatch_ring_msg(
+             }
+         }
+     }
+-    alloc.free(&msg);
++    alloc.recycle(msg);
+ }
+ 
+ fn monotonic_now() -> (i64, i64) {
+@@ -2587,4 +2633,205 @@ mod tests {
+         }
+         mgr.lock().stop();
+     }
++    #[test]
++    fn idle_output_waits_for_notification() {
++        let dir = tempfile::tempdir().unwrap();
++        let mut mgr = pipeline_manager(dir.path());
++        mgr.start();
++        let waits = mgr.pipeline.as_ref().unwrap().idle_waits.clone();
++        std::thread::sleep(std::time::Duration::from_millis(100));
++        mgr.stop();
++        assert!(
++            waits.load(Ordering::Relaxed) <= 2,
++            "empty ring must not poll: {}",
++            waits.load(Ordering::Relaxed)
++        );
++    }
++
++    /// Local worker-only benchmark: run this test alone in a 1 CPU / 512 MiB
++    /// cgroup. Fixture generation precedes the measurement; replay is paced in
++    /// 1 ms batches and includes output drain in the CPU/time window.
++    #[test]
++    #[ignore]
++    fn pipeline_cost_probe() {
++        use std::io::Write;
++        use std::time::{Duration, Instant};
++        let rate: usize = std::env::var("PROBE_PPS")
++            .unwrap_or("100000".into())
++            .parse()
++            .unwrap();
++        let seconds: usize = std::env::var("PROBE_SECONDS")
++            .unwrap_or("5".into())
++            .parse()
++            .unwrap();
++        let mode = std::env::var("PROBE_MODEL").unwrap_or("pipeline".into());
++        let idle = std::env::var("PROBE_IDLE").unwrap_or_default();
++        let dir = tempfile::tempdir().unwrap();
++        let path = dir.path().join("replay.pcap");
++        let mut w = std::io::BufWriter::new(std::fs::File::create(&path).unwrap());
++        w.write_all(&[
++            0xd4, 0xc3, 0xb2, 0xa1, 2, 0, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff, 0, 0, 1, 0, 0,
++            0,
++        ])
++        .unwrap();
++        let mut record = [0u8; 80];
++        record[0..4].copy_from_slice(&1u32.to_le_bytes());
++        record[8..12].copy_from_slice(&64u32.to_le_bytes());
++        record[12..16].copy_from_slice(&64u32.to_le_bytes());
++        for _ in 0..rate * seconds {
++            w.write_all(&record).unwrap();
++        }
++        w.flush().unwrap();
++        drop(w);
++        let cfg = format!(
++            r#"{{"execution_model":"{mode}","pipeline":{{"buffer_size_mb":16}},"tasks":[{{"capturer":{{"type":"pcap_file","pcap_file":{{"file_name":"{}"}}}},"outputs":[{{"type":"null"}}]}}]}}"#,
++            path.display()
++        );
++        let mgr = Arc::new(Mutex::new(
++            TaskManager::new(
++                Config::parse_str(&cfg).unwrap(),
++                "probe".into(),
++                dir.path().display().to_string(),
++            )
++            .unwrap(),
++        ));
++        if idle == "eof" {
++            while poll_packets_batch(&mgr, 256) != 0 {}
++        }
++        let usage = || {
++            let mut r = std::mem::MaybeUninit::<libc::rusage>::uninit();
++            assert_eq!(
++                unsafe { libc::getrusage(libc::RUSAGE_SELF, r.as_mut_ptr()) },
++                0
++            );
++            let r = unsafe { r.assume_init() };
++            (
++                r.ru_utime.tv_sec as f64
++                    + r.ru_utime.tv_usec as f64 / 1e6
++                    + r.ru_stime.tv_sec as f64
++                    + r.ru_stime.tv_usec as f64 / 1e6,
++                r.ru_nvcsw,
++                r.ru_nivcsw,
++            )
++        };
++        let cgroup = std::fs::read_to_string("/proc/self/cgroup").unwrap();
++        let cgroup_path = format!(
++            "/sys/fs/cgroup{}",
++            cgroup.trim().strip_prefix("0::").unwrap()
++        );
++        let cpu_max = std::fs::read_to_string(format!("{cgroup_path}/cpu.max")).unwrap();
++        let memory_max = std::fs::read_to_string(format!("{cgroup_path}/memory.max")).unwrap();
++        assert_eq!(
++            cpu_max.split_whitespace().collect::<Vec<_>>(),
++            ["100000", "100000"]
++        );
++        assert_eq!(memory_max.trim(), "536870912");
++        // Let the fixture generation's cgroup quota period expire.
++        std::thread::sleep(Duration::from_millis(200));
++        let cpu_stat_before = std::fs::read_to_string(format!("{cgroup_path}/cpu.stat")).unwrap();
++        let before = usage();
++        let start = Instant::now();
++        mgr.lock().start();
++        let mut delivered = 0;
++        if idle == "ring" {
++            std::thread::sleep(Duration::from_secs(seconds as u64));
++        } else {
++            for tick in 0..seconds * 1000 {
++                delivered +=
++                    poll_packets_batch(&mgr, if idle == "eof" { 256 } else { rate / 1000 });
++                if let Some(wait) =
++                    Duration::from_millis((tick + 1) as u64).checked_sub(start.elapsed())
++                {
++                    std::thread::sleep(wait);
++                }
++            }
++        }
++        mgr.lock().stop();
++        let wall = start.elapsed().as_secs_f64();
++        let after = usage();
++        let m = mgr.lock();
++        let mut row = serde_json::json!({"model": mode, "pps": rate, "idle": idle, "delivered": delivered, "wall_s": wall, "cpu_s": after.0-before.0, "cores": (after.0-before.0)/wall, "voluntary_switches": after.1-before.1, "involuntary_switches": after.2-before.2, "stats":m.collect_stats_summary()});
++        if let Some(p) = &m.pipeline {
++            let a = p.alloc.profile();
++            row["allocations"] = a.allocations.load(Ordering::Relaxed).into();
++            row["allocated_bytes"] = a.allocated_bytes.load(Ordering::Relaxed).into();
++            row["frees"] = a.frees.load(Ordering::Relaxed).into();
++            row["freed_bytes"] = a.freed_bytes.load(Ordering::Relaxed).into();
++            row["rejected"] = a.rejected.load(Ordering::Relaxed).into();
++            row["reused"] = a.reused.load(Ordering::Relaxed).into();
++            row["idle_waits"] = p.idle_waits.load(Ordering::Relaxed).into();
++        }
++        row["cpu_max"] = cpu_max.trim().into();
++        row["memory_max"] = memory_max.trim().into();
++        row["cpu_stat_before"] = cpu_stat_before.into();
++        row["cpu_stat_after"] = std::fs::read_to_string(format!("{cgroup_path}/cpu.stat"))
++            .unwrap()
++            .into();
++        println!("PROBE {row}");
++        if idle.is_empty() {
++            assert_eq!(delivered, (rate * seconds) as u64);
++            assert_eq!(row["stats"]["capture"]["cap_packets"]["packets"], delivered);
++            assert_eq!(row["stats"]["output"]["fwd_packets"]["packets"], delivered);
++            assert_eq!(row["stats"]["pipeline_buffer"]["mem_used"], 0);
++            assert_eq!(row["stats"]["pipeline_buffer"]["ring_used"], 0);
++        }
++    }
++    #[test]
++    #[ignore]
++    fn pipeline_latency_probe() {
++        use std::time::{Duration, Instant};
++        struct TimedOutput(std::sync::mpsc::Sender<Instant>);
++        impl Output for TimedOutput {
++            fn send_packet(&mut self, _: &PacketHeader, _: &[u8], _: i32) -> i32 {
++                self.0.send(Instant::now()).unwrap();
++                0
++            }
++        }
++        let dir = tempfile::tempdir().unwrap();
++        let mut mgr = pipeline_manager(dir.path());
++        let (tx, rx) = std::sync::mpsc::channel();
++        mgr.out_sets.lock()[0].outputs = vec![Box::new(TimedOutput(tx))];
++        mgr.start();
++        let pipeline = mgr.pipeline.as_ref().unwrap().clone();
++        let mut latencies = Vec::new();
++        for _ in 0..1000 {
++            std::thread::sleep(Duration::from_millis(2));
++            let hdr = PacketHeader {
++                ts_sec: 0,
++                ts_usec: 0,
++                caplen: 64,
++                len: 64,
++            };
++            let sent = Instant::now();
++            PipelineSink {
++                ring: &mut pipeline.producer.lock(),
++                alloc: &pipeline.alloc,
++                task_index: 0,
++            }
++            .on_packet(&hdr, &[0; 64], 1);
++            latencies.push(
++                rx.recv_timeout(Duration::from_secs(1))
++                    .unwrap()
++                    .duration_since(sent)
++                    .as_nanos(),
++            );
++        }
++        mgr.stop();
++        latencies.sort_unstable();
++        println!(
++            "LATENCY p50_ns={} p95_ns={} p99_ns={} max_ns={}",
++            latencies[500], latencies[950], latencies[990], latencies[999]
++        );
++    }
++    #[test]
++    fn dispatch_reuses_packet_allocations_after_warmup() {
++        let alloc = Arc::new(SimpleAllocator::new(4096));
++        let sets = Arc::new(Mutex::new(Vec::new()));
++        for index in 0..1000 {
++            let msg = alloc.alloc_packet(index, 1, 2, 3, &[4; 64]).unwrap();
++            dispatch_ring_msg(&sets, &alloc, msg);
++        }
++        assert_eq!(alloc.profile().allocations.load(Ordering::Relaxed), 2);
++        assert_eq!(alloc.used(), 0);
++    }
+ }

@@ -1,0 +1,394 @@
+diff --git a/crates/cpworker/Cargo.toml b/crates/cpworker/Cargo.toml
+index e8215e1..b43774c 100644
+--- a/crates/cpworker/Cargo.toml
++++ b/crates/cpworker/Cargo.toml
+@@ -22,6 +22,9 @@ path = "src/lib.rs"
+ # and is checked by `build.rs`.
+ dpdk = []
+ 
++# Opt-in allocation/wait diagnostics; absent from the production hot path.
++pipeline-profile = []
++
+ [dependencies]
+ anyhow.workspace = true
+ clap.workspace = true
+diff --git a/crates/cpworker/src/ring_buffer.rs b/crates/cpworker/src/ring_buffer.rs
+index d44a92a..dd35f6a 100644
+--- a/crates/cpworker/src/ring_buffer.rs
++++ b/crates/cpworker/src/ring_buffer.rs
+@@ -410,6 +410,20 @@ impl RingConsumer<'_> {
+ pub struct SimpleAllocator {
+     capacity: AtomicU64,
+     used: AtomicU64,
++    #[cfg(any(test, feature = "pipeline-profile"))]
++    profile: AllocationProfile,
++}
++
++/// Physical message/payload allocations, including unsuccessful budget retries.
++/// Frees count the pipeline's `free` call immediately preceding destruction.
++#[cfg(any(test, feature = "pipeline-profile"))]
++#[derive(Debug, Default)]
++pub struct AllocationProfile {
++    pub allocations: AtomicU64,
++    pub allocated_bytes: AtomicU64,
++    pub frees: AtomicU64,
++    pub freed_bytes: AtomicU64,
++    pub rejected: AtomicU64,
+ }
+ 
+ impl SimpleAllocator {
+@@ -419,9 +433,42 @@ impl SimpleAllocator {
+         SimpleAllocator {
+             capacity: AtomicU64::new(capacity),
+             used: AtomicU64::new(0),
++            #[cfg(any(test, feature = "pipeline-profile"))]
++            profile: AllocationProfile::default(),
+         }
+     }
+ 
++    #[cfg(any(test, feature = "pipeline-profile"))]
++    pub fn profile(&self) -> &AllocationProfile {
++        &self.profile
++    }
++
++    #[cfg(any(test, feature = "pipeline-profile"))]
++    fn record_allocation(&self, msg: &RingMsg) {
++        let count = if matches!(msg, RingMsg::Packet { data, .. } if !data.is_empty()) {
++            2
++        } else {
++            1
++        };
++        self.profile.allocations.fetch_add(count, Ordering::Relaxed);
++        self.profile
++            .allocated_bytes
++            .fetch_add(msg.msg_len(), Ordering::Relaxed);
++    }
++
++    #[cfg(any(test, feature = "pipeline-profile"))]
++    fn record_free(&self, msg: &RingMsg) {
++        let count = if matches!(msg, RingMsg::Packet { data, .. } if !data.is_empty()) {
++            2
++        } else {
++            1
++        };
++        self.profile.frees.fetch_add(count, Ordering::Relaxed);
++        self.profile
++            .freed_bytes
++            .fetch_add(msg.msg_len(), Ordering::Relaxed);
++    }
++
+     /// Current byte budget.
+     pub fn capacity(&self) -> u64 {
+         self.capacity.load(Ordering::Relaxed)
+@@ -492,7 +539,14 @@ impl SimpleAllocator {
+             caplen: pkt_data.len() as u32,
+             data: pkt_data.to_vec(),
+         });
++        #[cfg(any(test, feature = "pipeline-profile"))]
++        self.record_allocation(&msg);
+         if !self.reserve(msg.msg_len()) {
++            #[cfg(any(test, feature = "pipeline-profile"))]
++            {
++                self.profile.rejected.fetch_add(1, Ordering::Relaxed);
++                self.record_free(&msg);
++            }
+             return None;
+         }
+         Some(msg)
+@@ -505,7 +559,14 @@ impl SimpleAllocator {
+             .map(|d| d.as_secs() as i64)
+             .unwrap_or(0);
+         let msg = Box::new(RingMsg::Heartbeat { task_index, ts });
++        #[cfg(any(test, feature = "pipeline-profile"))]
++        self.record_allocation(&msg);
+         if !self.reserve(msg.msg_len()) {
++            #[cfg(any(test, feature = "pipeline-profile"))]
++            {
++                self.profile.rejected.fetch_add(1, Ordering::Relaxed);
++                self.record_free(&msg);
++            }
+             return None;
+         }
+         Some(msg)
+@@ -513,6 +574,8 @@ impl SimpleAllocator {
+ 
+     /// Release the bytes accounted for by `msg`.
+     pub fn free(&self, msg: &RingMsg) {
++        #[cfg(any(test, feature = "pipeline-profile"))]
++        self.record_free(msg);
+         self.release(msg.msg_len());
+     }
+ }
+@@ -596,6 +659,16 @@ mod tests {
+         assert!(r.pop().is_none());
+     }
+ 
++    #[test]
++    fn exhausted_budget_does_not_allocate() {
++        let a = SimpleAllocator::new(0);
++        for _ in 0..100 {
++            assert!(a.alloc_packet(0, 1, 0, 0, &[0; 64]).is_none());
++            assert!(a.alloc_heartbeat(0).is_none());
++        }
++        assert_eq!(a.profile().allocations.load(Ordering::Relaxed), 0);
++    }
++
+     #[test]
+     fn allocator_bounds() {
+         let a = SimpleAllocator::new(100);
+diff --git a/crates/cpworker/src/task.rs b/crates/cpworker/src/task.rs
+index 0320046..b516146 100644
+--- a/crates/cpworker/src/task.rs
++++ b/crates/cpworker/src/task.rs
+@@ -18,6 +18,8 @@
+ //!   operations and stats snapshots need no shared ring mutex.
+ 
+ use std::path::Path;
++#[cfg(any(test, feature = "pipeline-profile"))]
++use std::sync::atomic::AtomicU64;
+ use std::sync::atomic::{AtomicBool, Ordering};
+ use std::sync::Arc;
+ use std::thread::JoinHandle;
+@@ -142,6 +144,8 @@ struct PipelineShared {
+     producer: Arc<Mutex<OwnedRingProducer>>,
+     consumer: Arc<Mutex<Option<OwnedRingConsumer>>>,
+     alloc: Arc<SimpleAllocator>,
++    #[cfg(any(test, feature = "pipeline-profile"))]
++    idle_waits: Arc<AtomicU64>,
+ }
+ 
+ impl PipelineShared {
+@@ -152,6 +156,8 @@ impl PipelineShared {
+             producer: Arc::new(Mutex::new(producer)),
+             consumer: Arc::new(Mutex::new(Some(consumer))),
+             alloc: Arc::new(SimpleAllocator::new(mem_size)),
++            #[cfg(any(test, feature = "pipeline-profile"))]
++            idle_waits: Arc::new(AtomicU64::new(0)),
+         }
+     }
+ }
+@@ -445,6 +451,8 @@ impl TaskManager {
+             return;
+         }
+         let alloc = pipeline.alloc.clone();
++        #[cfg(any(test, feature = "pipeline-profile"))]
++        let idle_waits = pipeline.idle_waits.clone();
+         let out_sets = self.out_sets.clone();
+         let running = self.running.clone();
+ 
+@@ -467,6 +475,8 @@ impl TaskManager {
+                             if !running.load(Ordering::Acquire) {
+                                 break;
+                             }
++                            #[cfg(any(test, feature = "pipeline-profile"))]
++                            idle_waits.fetch_add(1, Ordering::Relaxed);
+                             std::thread::sleep(std::time::Duration::from_micros(10));
+                         }
+                     }
+@@ -2587,4 +2597,206 @@ mod tests {
+         }
+         mgr.lock().stop();
+     }
++    #[test]
++    fn idle_output_waits_for_notification() {
++        let dir = tempfile::tempdir().unwrap();
++        let mut mgr = pipeline_manager(dir.path());
++        mgr.start();
++        let waits = mgr.pipeline.as_ref().unwrap().idle_waits.clone();
++        std::thread::sleep(std::time::Duration::from_millis(100));
++        mgr.stop();
++        assert!(
++            waits.load(Ordering::Relaxed) <= 2,
++            "empty ring must not poll: {}",
++            waits.load(Ordering::Relaxed)
++        );
++    }
++
++    /// Local worker-only benchmark: run this test alone in a 1 CPU / 512 MiB
++    /// cgroup. Fixture generation precedes the measurement; replay is paced in
++    /// 1 ms batches and includes output drain in the CPU/time window.
++    #[test]
++    #[ignore]
++    fn pipeline_cost_probe() {
++        use std::io::Write;
++        use std::time::{Duration, Instant};
++        let rate: usize = std::env::var("PROBE_PPS")
++            .unwrap_or("100000".into())
++            .parse()
++            .unwrap();
++        let seconds: usize = std::env::var("PROBE_SECONDS")
++            .unwrap_or("5".into())
++            .parse()
++            .unwrap();
++        let mode = std::env::var("PROBE_MODEL").unwrap_or("pipeline".into());
++        let idle = std::env::var("PROBE_IDLE").unwrap_or_default();
++        let dir = tempfile::tempdir().unwrap();
++        let path = dir.path().join("replay.pcap");
++        let mut w = std::io::BufWriter::new(std::fs::File::create(&path).unwrap());
++        w.write_all(&[
++            0xd4, 0xc3, 0xb2, 0xa1, 2, 0, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff, 0, 0, 1, 0, 0,
++            0,
++        ])
++        .unwrap();
++        let mut record = [0u8; 80];
++        record[0..4].copy_from_slice(&1u32.to_le_bytes());
++        record[8..12].copy_from_slice(&64u32.to_le_bytes());
++        record[12..16].copy_from_slice(&64u32.to_le_bytes());
++        for _ in 0..rate * seconds {
++            w.write_all(&record).unwrap();
++        }
++        w.flush().unwrap();
++        drop(w);
++        let cfg = format!(
++            r#"{{"execution_model":"{mode}","pipeline":{{"buffer_size_mb":16}},"tasks":[{{"capturer":{{"type":"pcap_file","pcap_file":{{"file_name":"{}"}}}},"outputs":[{{"type":"null"}}]}}]}}"#,
++            path.display()
++        );
++        let mgr = Arc::new(Mutex::new(
++            TaskManager::new(
++                Config::parse_str(&cfg).unwrap(),
++                "probe".into(),
++                dir.path().display().to_string(),
++            )
++            .unwrap(),
++        ));
++        if idle == "eof" {
++            while poll_packets_batch(&mgr, 256) != 0 {}
++        }
++        let usage = || {
++            let mut r = std::mem::MaybeUninit::<libc::rusage>::uninit();
++            assert_eq!(
++                unsafe { libc::getrusage(libc::RUSAGE_SELF, r.as_mut_ptr()) },
++                0
++            );
++            let r = unsafe { r.assume_init() };
++            (
++                r.ru_utime.tv_sec as f64
++                    + r.ru_utime.tv_usec as f64 / 1e6
++                    + r.ru_stime.tv_sec as f64
++                    + r.ru_stime.tv_usec as f64 / 1e6,
++                r.ru_nvcsw,
++                r.ru_nivcsw,
++            )
++        };
++        let cgroup = std::fs::read_to_string("/proc/self/cgroup").unwrap();
++        let cgroup_path = format!(
++            "/sys/fs/cgroup{}",
++            cgroup.trim().strip_prefix("0::").unwrap()
++        );
++        let cpu_max = std::fs::read_to_string(format!("{cgroup_path}/cpu.max")).unwrap();
++        let memory_max = std::fs::read_to_string(format!("{cgroup_path}/memory.max")).unwrap();
++        assert_eq!(
++            cpu_max.split_whitespace().collect::<Vec<_>>(),
++            ["100000", "100000"]
++        );
++        assert_eq!(memory_max.trim(), "536870912");
++        let cpu_stat_before = std::fs::read_to_string(format!("{cgroup_path}/cpu.stat")).unwrap();
++        // Let the fixture generation's cgroup quota period expire.
++        std::thread::sleep(Duration::from_millis(200));
++        let cpu_stat_before = std::fs::read_to_string(format!("{cgroup_path}/cpu.stat")).unwrap();
++        let before = usage();
++        let start = Instant::now();
++        mgr.lock().start();
++        let mut delivered = 0;
++        if idle == "ring" {
++            std::thread::sleep(Duration::from_secs(seconds as u64));
++        } else {
++            for tick in 0..seconds * 1000 {
++                delivered +=
++                    poll_packets_batch(&mgr, if idle == "eof" { 256 } else { rate / 1000 });
++                if let Some(wait) =
++                    Duration::from_millis((tick + 1) as u64).checked_sub(start.elapsed())
++                {
++                    std::thread::sleep(wait);
++                }
++            }
++        }
++        mgr.lock().stop();
++        let wall = start.elapsed().as_secs_f64();
++        let after = usage();
++        let m = mgr.lock();
++        let mut row = serde_json::json!({"model": mode, "pps": rate, "idle": idle, "delivered": delivered, "wall_s": wall, "cpu_s": after.0-before.0, "cores": (after.0-before.0)/wall, "voluntary_switches": after.1-before.1, "involuntary_switches": after.2-before.2, "stats":m.collect_stats_summary()});
++        if let Some(p) = &m.pipeline {
++            let a = p.alloc.profile();
++            row["allocations"] = a.allocations.load(Ordering::Relaxed).into();
++            row["allocated_bytes"] = a.allocated_bytes.load(Ordering::Relaxed).into();
++            row["frees"] = a.frees.load(Ordering::Relaxed).into();
++            row["freed_bytes"] = a.freed_bytes.load(Ordering::Relaxed).into();
++            row["rejected"] = a.rejected.load(Ordering::Relaxed).into();
++            row["idle_waits"] = p.idle_waits.load(Ordering::Relaxed).into();
++        }
++        row["cpu_max"] = cpu_max.trim().into();
++        row["memory_max"] = memory_max.trim().into();
++        row["cpu_stat_before"] = cpu_stat_before.into();
++        row["cpu_stat_after"] = std::fs::read_to_string(format!("{cgroup_path}/cpu.stat"))
++            .unwrap()
++            .into();
++        println!("PROBE {row}");
++        if idle.is_empty() {
++            assert_eq!(delivered, (rate * seconds) as u64);
++            assert_eq!(row["stats"]["capture"]["cap_packets"]["packets"], delivered);
++            assert_eq!(row["stats"]["output"]["fwd_packets"]["packets"], delivered);
++            assert_eq!(row["stats"]["pipeline_buffer"]["mem_used"], 0);
++            assert_eq!(row["stats"]["pipeline_buffer"]["ring_used"], 0);
++        }
++    }
++    #[test]
++    #[ignore]
++    fn pipeline_latency_probe() {
++        use std::time::{Duration, Instant};
++        struct TimedOutput(std::sync::mpsc::Sender<Instant>);
++        impl Output for TimedOutput {
++            fn send_packet(&mut self, _: &PacketHeader, _: &[u8], _: i32) -> i32 {
++                self.0.send(Instant::now()).unwrap();
++                0
++            }
++        }
++        let dir = tempfile::tempdir().unwrap();
++        let mut mgr = pipeline_manager(dir.path());
++        let (tx, rx) = std::sync::mpsc::channel();
++        mgr.out_sets.lock()[0].outputs = vec![Box::new(TimedOutput(tx))];
++        mgr.start();
++        let pipeline = mgr.pipeline.as_ref().unwrap().clone();
++        let mut latencies = Vec::new();
++        for _ in 0..1000 {
++            std::thread::sleep(Duration::from_millis(2));
++            let hdr = PacketHeader {
++                ts_sec: 0,
++                ts_usec: 0,
++                caplen: 64,
++                len: 64,
++            };
++            let sent = Instant::now();
++            PipelineSink {
++                ring: &mut pipeline.producer.lock(),
++                alloc: &pipeline.alloc,
++                task_index: 0,
++            }
++            .on_packet(&hdr, &[0; 64], 1);
++            latencies.push(
++                rx.recv_timeout(Duration::from_secs(1))
++                    .unwrap()
++                    .duration_since(sent)
++                    .as_nanos(),
++            );
++        }
++        mgr.stop();
++        latencies.sort_unstable();
++        println!(
++            "LATENCY p50_ns={} p95_ns={} p99_ns={} max_ns={}",
++            latencies[500], latencies[950], latencies[990], latencies[999]
++        );
++    }
++
++    #[test]
++    fn dispatch_reuses_packet_allocations_after_warmup() {
++        let alloc = Arc::new(SimpleAllocator::new(4096));
++        let sets = Arc::new(Mutex::new(Vec::new()));
++        for index in 0..1000 {
++            let msg = alloc.alloc_packet(index, 1, 2, 3, &[4; 64]).unwrap();
++            dispatch_ring_msg(&sets, &alloc, msg);
++        }
++        assert_eq!(alloc.profile().allocations.load(Ordering::Relaxed), 2);
++        assert_eq!(alloc.used(), 0);
++    }
+ }
