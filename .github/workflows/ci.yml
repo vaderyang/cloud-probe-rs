@@ -118,7 +118,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             protobuf-compiler
-      - uses: dtolnay/rust-toolchain@1.88.0
+      - uses: dtolnay/rust-toolchain@1.120.0
       - uses: Swatinem/rust-cache@v2
         with:
           # Do not share a cache with the stable jobs: artifacts built by 1.88
@@ -261,7 +261,7 @@ jobs:
       - name: Risk coverage gate (P0 risks verified)
         run: python3 verification/risk_gate.py
       - name: Upload lcov artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: coverage-lcov
           path: target/llvm-cov/lcov.info
@@ -291,7 +291,7 @@ jobs:
         run: ./verify_mutation.sh --in-diff "${{ github.event.pull_request.base.sha }}"
       - name: Upload mutation report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: mutants-diff
           path: mutants.out
@@ -450,7 +450,7 @@ jobs:
         run: ./parity/difffuzz.sh 5 all
       - name: Upload mismatch artifacts
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: difffuzz-artifacts
           path: |
