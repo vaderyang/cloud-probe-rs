@@ -40,6 +40,6 @@ tempfile = "3"
 # Local self-signed TLS server for the `cpm.client.tls.insecure_skip_verify`
 # behaviour tests (upstream #232). `ring` is the provider reqwest already uses
 # (via hyper-rustls), so no second crypto backend is pulled in.
-rcgen = { version = "0.13", default-features = false, features = ["crypto", "ring"] }
+rcgen = { version = "0.14", default-features = false, features = ["crypto", "ring"] }
 rustls = { version = "0.23", default-features = false, features = ["std", "tls12", "ring"] }
 tokio-rustls = { version = "0.26", default-features = false, features = ["tls12", "ring"] }
