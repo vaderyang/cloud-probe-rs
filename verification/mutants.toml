@@ -64,160 +64,213 @@ minimum_test_timeout = 120.0
 # previous revision of this file pinned `gre.rs` by line and rotted away).
 
 exclude_re = [
-  # cpgolib/src/cpworker/client.rs
-  "cpgolib/src/cpworker/client\\.rs:127:9:",  # runner timeout: mutation loops forever, no finite test can report it
-  "cpgolib/src/cpworker/client\\.rs:223:9:",  # runner timeout: mutation loops forever, no finite test can report it
+  # ------------------------------------------------------------------ cpgolib
+  # dial()/dial_with_timeout() replaced by Ok(()): no socket is ever created, so
+  # the mock server behind `dial_sends_the_v1_handshake` blocks in accept() and the
+  # run never ends. The handshake tests do fail, but a hang is what the harness sees.
+  "cpgolib/src/cpworker/client\\.rs:127:9:",  # runner timeout: dial never touches the socket, so the test's accept() waits forever (no finite budget reports a failure)
+  "cpgolib/src/cpworker/client\\.rs:223:9:",  # runner timeout: same body as dial_with_timeout, same hang in the mock server's accept()
 
-  # cpgolib/src/slogx/mod.rs
-  "cpgolib/src/slogx/mod\\.rs:11:5:",  # process-wide init, no observable result
+  # init_default() only installs the process-wide env_logger; its try_init result is
+  # discarded and the two callers are the cpctl/cpdaemon binaries (outside examine_globs),
+  # so no test in scope can observe the body being gone.
+  "cpgolib/src/slogx/mod\\.rs:11:5:",  # process-wide logger init, result discarded, callers are binaries out of scope
 
-  # cpworker/src/bpf/codes.rs
-  "cpworker/src/bpf/codes\\.rs:31:34: replace \\| with \\^",  # | of disjoint constants == ^
-  "cpworker/src/bpf/codes\\.rs:31:42: replace \\| with \\^",  # | of disjoint constants == ^
-  "cpworker/src/bpf/codes\\.rs:33:34:",  # | of disjoint constants == ^
-  "cpworker/src/bpf/codes\\.rs:33:42: replace \\| with \\^",  # | of disjoint constants == ^
-  "cpworker/src/bpf/codes\\.rs:35:34: replace \\| with \\^",  # | of disjoint constants == ^
-  "cpworker/src/bpf/codes\\.rs:35:42: replace \\| with \\^",  # | of disjoint constants == ^
-  "cpworker/src/bpf/codes\\.rs:37:34: replace \\| with \\^",  # | of disjoint constants == ^
-  "cpworker/src/bpf/codes\\.rs:37:42: replace \\| with \\^",  # | of disjoint constants == ^
-  "cpworker/src/bpf/codes\\.rs:39:34: replace \\| with \\^",  # | of disjoint constants == ^
-  "cpworker/src/bpf/codes\\.rs:39:42: replace \\| with \\^",  # | of disjoint constants == ^
-  "cpworker/src/bpf/codes\\.rs:41:36: replace \\| with \\^",  # | of disjoint constants == ^
-  "cpworker/src/bpf/codes\\.rs:41:46: replace \\| with \\^",  # | of disjoint constants == ^
-  "cpworker/src/bpf/codes\\.rs:43:36: replace \\| with \\^",  # | of disjoint constants == ^
-  "cpworker/src/bpf/codes\\.rs:43:46: replace \\| with \\^",  # | of disjoint constants == ^
-  "cpworker/src/bpf/codes\\.rs:45:36: replace \\| with \\^",  # | of disjoint constants == ^
-  "cpworker/src/bpf/codes\\.rs:45:46: replace \\| with \\^",  # | of disjoint constants == ^
-  "cpworker/src/bpf/codes\\.rs:47:36: replace \\| with \\^",  # | of disjoint constants == ^
-  "cpworker/src/bpf/codes\\.rs:47:46: replace \\| with \\^",  # | of disjoint constants == ^
-  "cpworker/src/bpf/codes\\.rs:49:37: replace \\| with \\^",  # | of disjoint constants == ^
-  "cpworker/src/bpf/codes\\.rs:49:48: replace \\| with \\^",  # | of disjoint constants == ^
-  "cpworker/src/bpf/codes\\.rs:51:33: replace \\| with \\^",  # | of disjoint constants == ^
-  "cpworker/src/bpf/codes\\.rs:53:32: replace \\| with \\^",  # | of disjoint constants == ^
+  # ------------------------------------------------- cpworker/src/bpf/codes.rs
+  # Every one of these is `A | B` over cBPF field constants. `| with ^` differs from
+  # `|` only where A and B share a set bit; the constants are the linux/filter.h
+  # encodings (class 0x00-0x06, size 0x00/0x08/0x10, mode 0x20/0x40/0xa0, alu 0x50,
+  # jmp 0x00-0x40, k=0x00), which sit in disjoint fields, so a|b == a^b. The exact
+  # numbers are pinned by codes::tests::opcodes_match_linux_filter_h, so a future
+  # overlap would break that test rather than hide behind this entry.
+  # BPF_LD == BPF_W == 0, so LD_W_ABS's two `|` are also unchanged by `&` (0&0 == 0).
+  "cpworker/src/bpf/codes\\.rs:33:34:",  # BPF_LD|BPF_W is 0|0: ^ and & both give 0
+  "cpworker/src/bpf/codes\\.rs:31:34: replace \\| with \\^",  # | of bit-disjoint constants == ^
+  "cpworker/src/bpf/codes\\.rs:31:42: replace \\| with \\^",  # | of bit-disjoint constants == ^
+  "cpworker/src/bpf/codes\\.rs:33:42: replace \\| with \\^",  # | of bit-disjoint constants == ^
+  "cpworker/src/bpf/codes\\.rs:35:34: replace \\| with \\^",  # | of bit-disjoint constants == ^
+  "cpworker/src/bpf/codes\\.rs:35:42: replace \\| with \\^",  # | of bit-disjoint constants == ^
+  "cpworker/src/bpf/codes\\.rs:37:34: replace \\| with \\^",  # | of bit-disjoint constants == ^
+  "cpworker/src/bpf/codes\\.rs:37:42: replace \\| with \\^",  # | of bit-disjoint constants == ^
+  "cpworker/src/bpf/codes\\.rs:39:34: replace \\| with \\^",  # | of bit-disjoint constants == ^
+  "cpworker/src/bpf/codes\\.rs:39:42: replace \\| with \\^",  # | of bit-disjoint constants == ^
+  "cpworker/src/bpf/codes\\.rs:41:36: replace \\| with \\^",  # | of bit-disjoint constants == ^
+  "cpworker/src/bpf/codes\\.rs:41:46: replace \\| with \\^",  # | of bit-disjoint constants == ^ (BPF_K == 0)
+  "cpworker/src/bpf/codes\\.rs:43:36: replace \\| with \\^",  # | of bit-disjoint constants == ^
+  "cpworker/src/bpf/codes\\.rs:43:46: replace \\| with \\^",  # | of bit-disjoint constants == ^ (BPF_K == 0)
+  "cpworker/src/bpf/codes\\.rs:45:36: replace \\| with \\^",  # | of bit-disjoint constants == ^
+  "cpworker/src/bpf/codes\\.rs:45:46: replace \\| with \\^",  # | of bit-disjoint constants == ^ (BPF_K == 0)
+  "cpworker/src/bpf/codes\\.rs:47:36: replace \\| with \\^",  # | of bit-disjoint constants == ^
+  "cpworker/src/bpf/codes\\.rs:47:46: replace \\| with \\^",  # | of bit-disjoint constants == ^ (BPF_K == 0)
+  "cpworker/src/bpf/codes\\.rs:49:37: replace \\| with \\^",  # | of bit-disjoint constants == ^
+  "cpworker/src/bpf/codes\\.rs:49:48: replace \\| with \\^",  # | of bit-disjoint constants == ^ (BPF_K == 0)
+  "cpworker/src/bpf/codes\\.rs:51:33: replace \\| with \\^",  # BPF_JA == 0: x|0 == x^0
+  "cpworker/src/bpf/codes\\.rs:53:32: replace \\| with \\^",  # BPF_K == 0: x|0 == x^0
 
-  # cpworker/src/bpf/compiler.rs
-  "cpworker/src/bpf/compiler\\.rs:435:9:",  # runner timeout: mutation loops forever, no finite test can report it
-  "cpworker/src/bpf/compiler\\.rs:436:27:",  # runner timeout: mutation loops forever, no finite test can report it
-  "cpworker/src/bpf/compiler\\.rs:444:9:",  # runner timeout: mutation loops forever, no finite test can report it
-  "cpworker/src/bpf/compiler\\.rs:451:26:",  # emit() return value is unused
-  "cpworker/src/bpf/compiler\\.rs:563:24:",  # only built with frag == v6
-  "cpworker/src/bpf/compiler\\.rs:639:24:",  # -1 sentinel is never read
-  "cpworker/src/bpf/compiler\\.rs:655:30: replace - with / in Builder::finish",  # runner timeout: mutation loops forever, no finite test can report it
-  "cpworker/src/bpf/compiler\\.rs:656:28:",  # defensive re-check, always non-negative here
-  "cpworker/src/bpf/compiler\\.rs:666:37:",  # runner timeout: mutation loops forever, no finite test can report it
-  "cpworker/src/bpf/compiler\\.rs:667:37:",  # runner timeout: mutation loops forever, no finite test can report it
-  "cpworker/src/bpf/compiler\\.rs:671:20:",  # runner timeout: mutation loops forever, no finite test can report it
-  "cpworker/src/bpf/compiler\\.rs:674:20:",  # runner timeout: mutation loops forever, no finite test can report it
-  "cpworker/src/bpf/compiler\\.rs:714:31: replace - with / in Builder::finish",  # trampoline distance is 0; p/tp - 1 == 0
-  "cpworker/src/bpf/compiler\\.rs:715:27: replace - with / in Builder::finish",  # runner timeout: mutation loops forever, no finite test can report it
+  # ---------------------------------------------- cpworker/src/bpf/compiler.rs
+  # Two hang shapes here:
+  #   * label/insn numbering breaks, so `Builder::finish()` cannot resolve the
+  #     branches (or `finish_branch()`'s fill loop never reaches the target length);
+  #   * the trampoline fixpoint loop stops raising `need_jt`/`need_jf`, so it re-tests
+  #     the same state forever.
+  # Both are non-terminating for *some* filter in the suite, and the reload-worker
+  # test additionally swallows the worker-thread panic behind an unbounded
+  # `while !worker.is_done()` spin (task.rs), so no budget turns them into Caught.
+  "cpworker/src/bpf/compiler\\.rs:439:9:",  # runner timeout: new_label() stops pushing labels, so finish() can never resolve the branches
+  "cpworker/src/bpf/compiler\\.rs:440:27:",  # runner timeout: same - every label index is now out of range for the label table
+  "cpworker/src/bpf/compiler\\.rs:448:9:",  # runner timeout: replacing emit()'s body also drops the push, so finish_branch()'s `while insns.len() <= ..` fill loop never ends
+  "cpworker/src/bpf/compiler\\.rs:455:26:",  # emit()'s returned index is not read by any call site (all are statements)
+  "cpworker/src/bpf/compiler\\.rs:580:24:",  # equivalent: `frag` is set from `v6` at every Test::L4Proto construction, so && == ||
+  "cpworker/src/bpf/compiler\\.rs:656:24:",  # the rev_index[n] == -1 sentinel is only read for a label bound past the last insn; compile_ast emits both RETs after its final bind
+  "cpworker/src/bpf/compiler\\.rs:672:30: replace - with / in Builder::finish",  # runner timeout: jf_dist becomes p0/rev_index[jf_old], which traps on the (common) rev index 0 and unwinds the reload worker thread
+  "cpworker/src/bpf/compiler\\.rs:673:28:",  # defensive re-check: jt_old/jf_old > i (line 666) means their rev indices are already < rev.len(), so neither distance can go negative
+  "cpworker/src/bpf/compiler\\.rs:683:37:",  # runner timeout: with && the fixpoint never raises need_jt, so the loop re-tests the same over-long distance
+  "cpworker/src/bpf/compiler\\.rs:684:37:",  # runner timeout: with && the fixpoint never raises need_jf, so the loop re-tests the same over-long distance
+  "cpworker/src/bpf/compiler\\.rs:688:20:",  # runner timeout: deleting the ! means nothing raises need_jt when both distances are too long, so the fixpoint repeats forever
+  "cpworker/src/bpf/compiler\\.rs:691:20:",  # runner timeout: deleting the ! means nothing raises need_jf when both distances are too long, so the fixpoint repeats forever
+  "cpworker/src/bpf/compiler\\.rs:731:31: replace - with / in Builder::finish",  # a jf trampoline is only pushed when jf_dist > 255, so tp >= 256 and p == tp+1: p-tp-1 == 0 == p/tp-1
+  "cpworker/src/bpf/compiler\\.rs:732:27: replace - with / in Builder::finish",  # runner timeout: p/rev_index[jf_old] traps on rev index 0 (or reads -1), unwinding the reload worker thread
 
-  # cpworker/src/bpf/interp.rs
-  "cpworker/src/bpf/interp\\.rs:15:22: replace \\| with \\^ in load_be",  # runner timeout: mutation loops forever, no finite test can report it
-  "cpworker/src/bpf/interp\\.rs:61:20:",  # runner timeout: mutation loops forever, no finite test can report it
-  "cpworker/src/bpf/interp\\.rs:61:25:",  # runner timeout: mutation loops forever, no finite test can report it
-  "cpworker/src/bpf/interp\\.rs:65:20:",  # runner timeout: mutation loops forever, no finite test can report it
-  "cpworker/src/bpf/interp\\.rs:65:25:",  # runner timeout: mutation loops forever, no finite test can report it
-  "cpworker/src/bpf/interp\\.rs:69:25: replace \\+ with \\* in run",  # runner timeout: mutation loops forever, no finite test can report it
-  "cpworker/src/bpf/interp\\.rs:73:20:",  # runner timeout: mutation loops forever, no finite test can report it
-  "cpworker/src/bpf/interp\\.rs:73:25:",  # runner timeout: mutation loops forever, no finite test can report it
-  "cpworker/src/bpf/interp\\.rs:79:12: replace \\+= with \\*= in run",  # runner timeout: mutation loops forever, no finite test can report it
+  # ------------------------------------------------ cpworker/src/bpf/interp.rs
+  # `run()` only terminates through a RET, an unsupported opcode, or falling off the
+  # end of the program - every one of which needs pc to move forward. Any mutation
+  # that stops or reverses the pc update is therefore non-terminating for some test
+  # program (measured Timeout at the pinned 120 s budget, not a reportable failure).
+  "cpworker/src/bpf/interp\\.rs:15:22: replace \\| with \\^ in load_be",  # (v << 8) has a zero low byte, so | and ^ agree on u32::from(b)
+  "cpworker/src/bpf/interp\\.rs:61:20:",  # runner timeout: jeq moves pc backwards instead of forward, so the program never reaches its RET
+  "cpworker/src/bpf/interp\\.rs:61:25:",  # runner timeout: 1 * offset lets a 0 jump offset leave pc in place: infinite loop
+  "cpworker/src/bpf/interp\\.rs:65:20:",  # runner timeout: jge moves pc backwards instead of forward, so the program never reaches its RET
+  "cpworker/src/bpf/interp\\.rs:65:25:",  # runner timeout: 1 * offset lets a 0 jump offset leave pc in place: infinite loop
+  "cpworker/src/bpf/interp\\.rs:69:20:",  # runner timeout: jgt moves pc backwards instead of forward, so the program never reaches its RET
+  "cpworker/src/bpf/interp\\.rs:69:25: replace \\+ with \\* in run",  # runner timeout: 1 * offset lets a 0 jump offset leave pc in place: infinite loop
+  "cpworker/src/bpf/interp\\.rs:73:20:",  # runner timeout: jset moves pc backwards instead of forward, so the program never reaches its RET
+  "cpworker/src/bpf/interp\\.rs:73:25:",  # runner timeout: 1 * offset lets a 0 jump offset leave pc in place: infinite loop
+  "cpworker/src/bpf/interp\\.rs:79:12: replace \\+= with \\*= in run",  # runner timeout: pc *= 1 leaves pc on the same load/ALU insn forever
 
-  # cpworker/src/bpf/mod.rs
-  "cpworker/src/bpf/mod\\.rs:125:5:",  # non-Linux stub, unreachable here
+  # -------------------------------------------------- cpworker/src/bpf/mod.rs
+  # cfg(not(target_os = "linux")): on the Linux test host this whole body is compiled
+  # out, so the mutated binary is identical to the baseline and the mutant cannot be
+  # missed for any other reason. (The Linux variant is live-capture job territory.)
+  "cpworker/src/bpf/mod\\.rs:125:5:",  # non-Linux attach_filter stub: not compiled on the test host, so the test binary does not change
 
-  # cpworker/src/bpf/parser.rs
-  "cpworker/src/bpf/parser\\.rs:206:14:",  # runner timeout: mutation loops forever, no finite test can report it
-  "cpworker/src/bpf/parser\\.rs:272:9:",  # runner timeout: mutation loops forever, no finite test can report it
-  "cpworker/src/bpf/parser\\.rs:272:20:",  # runner timeout: mutation loops forever, no finite test can report it
-  "cpworker/src/bpf/parser\\.rs:283:20: replace \\+= with -= in Parser<'a>::bump",  # runner timeout: mutation loops forever, no finite test can report it
-  "cpworker/src/bpf/parser\\.rs:306:22: replace \\+= with -= in Parser<'a>::eat",  # runner timeout: mutation loops forever, no finite test can report it
+  # ------------------------------------------------ cpworker/src/bpf/parser.rs
+  # The parse-position and budget counters: mutating them either makes the tokenizer
+  # re-read the same token forever, or drops the depth/node bound so the deliberately
+  # over-deep and over-complex corpus entries the suite feeds `parse_with()` recurse
+  # without ever being rejected. Measured Timeout at the pinned budget.
+  "cpworker/src/bpf/parser\\.rs:217:14:",  # runner timeout: every accepted filter then fails the trailing-token check, so the worker thread's expect() panics and task::tests::reload_worker_* spins on is_done() forever
+  "cpworker/src/bpf/parser\\.rs:283:9:",  # runner timeout: the MAX_DEPTH guard is gone, so the deep-nesting corpus recurses until the run stalls
+  "cpworker/src/bpf/parser\\.rs:283:20:",  # runner timeout: depth never grows (or walks back), so the MAX_DEPTH guard cannot fire on the deep-nesting corpus
+  "cpworker/src/bpf/parser\\.rs:294:20: replace \\+= with -= in Parser<'a>::bump",  # runner timeout: nodes never grows, so the MAX_NODES guard cannot fire on the over-complex corpus
+  "cpworker/src/bpf/parser\\.rs:317:22: replace \\+= with -= in Parser<'a>::eat",  # runner timeout: eat() rewinds pos, so each keyword loop re-reads the same token forever
 
-  # cpworker/src/bpf/resolvers.rs
-  "cpworker/src/bpf/resolvers\\.rs:142:44: replace < with <= in <impl Resolver for CachedResolver<R>>::lookup",  # Instant equality is unreachable
+  # ----------------------------------------------------------- cpworker/src/bpf/resolvers.rs
+  # `now` is a fresh Instant::now() and `at` was stamped by an earlier one; the TTL is
+  # not injectable, so a test cannot land duration_since(at) exactly on ttl.
+  "cpworker/src/bpf/resolvers\\.rs:142:44: replace < with <= in <impl Resolver for CachedResolver<R>>::lookup",  # Instant equality is not constructible from a test
 
-  # cpworker/src/config.rs
-  "cpworker/src/config\\.rs:596:5: replace object_or_none -> Result<Option<T>> with Ok\\(None\\)",  # runner timeout: mutation loops forever, no finite test can report it
-  "cpworker/src/config\\.rs:597:9: delete match arm Some\\(v @serde_json::Value::Object\\(_\\)\\) in object_or_none",  # runner timeout: mutation loops forever, no finite test can report it
-  "cpworker/src/config\\.rs:802:5: replace int_in -> Result<i64> with Ok\\(0\\)",  # runner timeout: mutation loops forever, no finite test can report it
-  "cpworker/src/config\\.rs:822:5: replace u64_in -> Result<u64> with Ok\\(0\\)",  # runner timeout: mutation loops forever, no finite test can report it
-  "cpworker/src/config\\.rs:863:10: replace <= with > in positive_clamped",  # runner timeout: mutation loops forever, no finite test can report it
-  "cpworker/src/config\\.rs:866:10: replace > with >= in positive_clamped",  # clamp at equality is a no-op
-  "cpworker/src/config\\.rs:877:10: replace < with <= in nonneg_clamped",  # runner timeout: mutation loops forever, no finite test can report it
-  "cpworker/src/config\\.rs:877:10: replace < with == in nonneg_clamped",  # runner timeout: mutation loops forever, no finite test can report it
-  "cpworker/src/config\\.rs:943:27: replace > with >= in RawOutput::build",  # 24-bit mask at equality is a no-op (warning log only)
-  "cpworker/src/config\\.rs:988:32: replace > with < in RawOutput::build",  # warning-log gate only; no observable behaviour
-  "cpworker/src/config\\.rs:988:32: replace > with == in RawOutput::build",  # warning-log gate only; no observable behaviour
-  "cpworker/src/config\\.rs:988:32: replace > with >= in RawOutput::build",  # warning-log gate only; no observable behaviour
-  "cpworker/src/config\\.rs:1017:32: replace > with < in RawOutput::build",  # warning-log gate only; no observable behaviour
-  "cpworker/src/config\\.rs:1017:32: replace > with == in RawOutput::build",  # warning-log gate only; no observable behaviour
-  "cpworker/src/config\\.rs:1017:32: replace > with >= in RawOutput::build",  # warning-log gate only; no observable behaviour
-  "cpworker/src/config\\.rs:1171:58: replace == with != in RawConfig::build",  # runner timeout: mutation loops forever, no finite test can report it
+  # ----------------------------------------------------- cpworker/src/config.rs
+  # The clamping helpers are reached only through Config::parse_str() in the reload
+  # worker thread. Mutations there make that thread's `Config::parse_str(..).expect()`
+  # panic (or hand the capture loop a 0-sized batch); the panic is invisible to the
+  # harness and the test's unbounded `while !worker.is_done()` spin never ends, so the
+  # run is reported Timeout rather than Caught at any budget (AUDIT4 note: this wait
+  # is the reason so many config mutants are timeouts rather than kills).
+  "cpworker/src/config\\.rs:623:5:",  # runner timeout: every optional section reads as absent -> the worker panics on .expect() -> task::tests::reload_worker_* spins on is_done()
+  "cpworker/src/config\\.rs:624:9:",  # runner timeout: same as the whole-body mutation of object_or_none above
+  "cpworker/src/config\\.rs:833:5: replace int_in -> Result<i64> with Ok\\(0\\)",  # runner timeout: range checks vanish -> batch/timeout 0 -> task::tests::poll_packets_batch_drains_rtc_and_pipeline spins without progress
+  "cpworker/src/config\\.rs:853:5: replace u64_in -> Result<u64> with Ok\\(0\\)",  # runner timeout: same, via the u64 wrapper (buffer size 0)
+  "cpworker/src/config\\.rs:894:10:",  # runner timeout: the <=0 rejection inverts, so the worker panics and task::tests::reload_worker_* spins on is_done()
+  "cpworker/src/config\\.rs:908:10: replace < with <= in nonneg_clamped",  # runner timeout: 0 is now rejected -> worker panic -> task::tests::reload_worker_* spins on is_done()
+  "cpworker/src/config\\.rs:908:10: replace < with == in nonneg_clamped",  # runner timeout: negatives are accepted -> i32::MAX clamp -> the capture/pipeline loops never settle
+  # clamp and mask at equality are no-ops: v == max returns max either way, and
+  # 0x00ffffff & 0x00ffffff == 0x00ffffff.
+  "cpworker/src/config\\.rs:897:10: replace > with >= in positive_clamped",  # clamp at equality assigns the same value
+  "cpworker/src/config\\.rs:974:27: replace > with >= in RawOutput::build",  # masking v1 == 0x00ffffff by 0x00ffffff is a no-op (extra warning line only)
+  # Both service_tag gates only feed a log_warn! - the value is never masked here
+  # (unlike vxlan.vni1 above), so the whole if-block is log-only.
+  "cpworker/src/config\\.rs:1019:32:",  # gre.service_tag range check feeds a log_warn! only; the stored value is unchanged
+  "cpworker/src/config\\.rs:1048:32:",  # zmq.service_tag range check feeds a log_warn! only; the stored value is unchanged
+  "cpworker/src/config\\.rs:1204:58:",  # runner timeout: rtc/pipeline branches swap, so the pipeline task gets a 0-sized buffer and task::tests::* never finish
 
-  # cpworker/src/output/gre.rs
-  "cpworker/src/output/gre\\.rs:114:30: replace > with >= in GreOutput::flush_error_info",  # unsigned counters: logging gate only
-  "cpworker/src/output/gre\\.rs:114:56: replace > with >= in GreOutput::flush_error_info",  # unsigned counters: logging gate only
-  "cpworker/src/output/gre\\.rs:114:91: replace > with >= in GreOutput::flush_error_info",  # unsigned counters: logging gate only
-  "cpworker/src/output/gre\\.rs:135:50: replace < with <= in <impl Output for GreOutput>::send_packet",  # slice == caplen: same value either branch
-  "cpworker/src/output/gre\\.rs:186:45:",  # backoff duration is timing-only (negative cast = 6e11 s)
-  "cpworker/src/output/gre\\.rs:186:53:",  # backoff duration is timing-only (negative cast = 6e11 s)
-  "cpworker/src/output/gre\\.rs:188:31: replace \\+= with -= in <impl Output for GreOutput>::send_packet",  # runner timeout: mutation loops forever, no finite test can report it
+  # ---------------------------------------------------- cpworker/src/output/gre.rs
+  "cpworker/src/output/gre\\.rs:114:30: replace > with >= in GreOutput::flush_error_info",  # u64 counters: >= 0 is always true, and re-zeroing zeros (with other_send_error provably empty) only adds a log line
+  "cpworker/src/output/gre\\.rs:114:56: replace > with >= in GreOutput::flush_error_info",  # u64 counters: >= 0 is always true, and re-zeroing zeros (with other_send_error provably empty) only adds a log line
+  "cpworker/src/output/gre\\.rs:114:91: replace > with >= in GreOutput::flush_error_info",  # u64 counters: >= 0 is always true, and re-zeroing zeros (with other_send_error provably empty) only adds a log line
+  "cpworker/src/output/gre\\.rs:135:50: replace < with <= in <impl Output for GreOutput>::send_packet",  # slice == caplen: both branches assign caplen = slice
+  # Line 186 is the ENOBUFS backoff and feeds nothing but thread::sleep: * / + / -
+  # only change (or, with -, negate after the i32 -> u64 cast, i.e. ~208 days of
+  # sleep) the wait between retries. No test observes the duration.
+  "cpworker/src/output/gre\\.rs:186:",  # backoff duration is timing-only (negative value = ~208 days of sleep, i.e. a hang)
+  "cpworker/src/output/gre\\.rs:188:31: replace \\+= with -= in <impl Output for GreOutput>::send_packet",  # runner timeout: retry walks below 10 forever, so the ENOBUFS retry loop never exits
 
-  # cpworker/src/output/vxlan.rs
-  "cpworker/src/output/vxlan\\.rs:81:56: replace \\+ with \\* in vxlan_encapsulate",  # max == 0 still yields one fragment
-  "cpworker/src/output/vxlan\\.rs:81:70: replace \\+ with \\* in vxlan_encapsulate",  # max == 0 still yields one fragment
-  "cpworker/src/output/vxlan\\.rs:173:30: replace > with >= in VxlanOutput::flush_error_info",  # unsigned counters: logging gate only
-  "cpworker/src/output/vxlan\\.rs:173:56: replace > with >= in VxlanOutput::flush_error_info",  # unsigned counters: logging gate only
-  "cpworker/src/output/vxlan\\.rs:173:91: replace > with >= in VxlanOutput::flush_error_info",  # unsigned counters: logging gate only
-  "cpworker/src/output/vxlan\\.rs:222:45:",  # backoff duration is timing-only (negative cast = 6e11 s)
-  "cpworker/src/output/vxlan\\.rs:222:53:",  # backoff duration is timing-only (negative cast = 6e11 s)
-  "cpworker/src/output/vxlan\\.rs:224:31: replace \\+= with -= in VxlanOutput::do_send_packet",  # runner timeout: mutation loops forever, no finite test can report it
-  "cpworker/src/output/vxlan\\.rs:247:50: replace < with <= in <impl Output for VxlanOutput>::send_packet",  # slice == caplen: same value either branch
-  "cpworker/src/output/vxlan\\.rs:276:39:",  # max == 0 still yields one fragment
+  # -------------------------------------------------- cpworker/src/output/vxlan.rs
+  "cpworker/src/output/vxlan\\.rs:173:30: replace > with >= in VxlanOutput::flush_error_info",  # u64 counters: >= 0 is always true, and re-zeroing zeros (with other_send_error provably empty) only adds a log line
+  "cpworker/src/output/vxlan\\.rs:173:56: replace > with >= in VxlanOutput::flush_error_info",  # u64 counters: >= 0 is always true, and re-zeroing zeros (with other_send_error provably empty) only adds a log line
+  "cpworker/src/output/vxlan\\.rs:173:91: replace > with >= in VxlanOutput::flush_error_info",  # u64 counters: >= 0 is always true, and re-zeroing zeros (with other_send_error provably empty) only adds a log line
+  "cpworker/src/output/vxlan\\.rs:222:",  # backoff duration is timing-only (negative value = ~208 days of sleep, i.e. a hang)
+  "cpworker/src/output/vxlan\\.rs:224:31: replace \\+= with -= in VxlanOutput::do_send_packet",  # runner timeout: retry walks below 10 forever, so the ENOBUFS retry loop never exits
+  "cpworker/src/output/vxlan\\.rs:247:50: replace < with <= in <impl Output for VxlanOutput>::send_packet",  # slice == caplen: both branches assign caplen = slice
+  # With `&&` the fast path is skipped, but calculate_fragment_count() returns 1 for
+  # max_payload_size <= 0 and for payload_len <= max, and `count == 1` falls back to
+  # the very same do_send_packet() call. parse_packet() is pure, so the verdict is
+  # identical on all three inputs of the mutation.
+  "cpworker/src/output/vxlan\\.rs:276:39:",  # fast-path guard is redundant: count == 1 lands on the same do_send_packet()
 
-  # cpworker/src/packet.rs
-  "cpworker/src/packet\\.rs:168:15: replace < with <= in parse_packet",  # exact-boundary frame cannot complete the parse anyway
-  "cpworker/src/packet\\.rs:180:19: replace < with <= in parse_packet",  # exact-boundary frame cannot complete the parse anyway
-  "cpworker/src/packet\\.rs:195:19: replace < with <= in parse_packet",  # exact-boundary frame cannot complete the parse anyway
-  "cpworker/src/packet\\.rs:201:19: replace < with <= in parse_packet",  # exact-boundary frame cannot complete the parse anyway
-  "cpworker/src/packet\\.rs:201:19: replace < with == in parse_packet",  # exact-boundary frame cannot complete the parse anyway
-  "cpworker/src/packet\\.rs:220:53: replace \\+ with - in parse_packet",  # shrunk threshold still caught by the final caplen guard
-  "cpworker/src/packet\\.rs:225:32: replace \\+ with - in parse_packet",  # shrunk threshold still caught by the final caplen guard
-  "cpworker/src/packet\\.rs:243:19: replace < with <= in parse_packet",  # exact-boundary frame cannot complete the parse anyway
-  "cpworker/src/packet\\.rs:253:23: replace < with <= in parse_packet",  # exact-boundary frame cannot complete the parse anyway
-  "cpworker/src/packet\\.rs:259:23: replace < with <= in parse_packet",  # exact-boundary frame cannot complete the parse anyway
-  "cpworker/src/packet\\.rs:259:23: replace < with == in parse_packet",  # exact-boundary frame cannot complete the parse anyway
-  "cpworker/src/packet\\.rs:259:32: replace \\+ with - in parse_packet",  # shrunk threshold still caught by the final caplen guard
-  "cpworker/src/packet\\.rs:279:53: replace \\+ with - in parse_packet",  # shrunk threshold still caught by the final caplen guard
-  "cpworker/src/packet\\.rs:284:32: replace \\+ with - in parse_packet",  # shrunk threshold still caught by the final caplen guard
-  "cpworker/src/packet\\.rs:309:22: replace > with >= in parse_packet",  # clamp at equality is a no-op
-  "cpworker/src/packet\\.rs:336:23: replace < with <= in extract_ipport",  # exact-boundary frame cannot complete the parse anyway
-  "cpworker/src/packet\\.rs:354:27: replace < with <= in extract_ipport",  # exact-boundary frame cannot complete the parse anyway
-  "cpworker/src/packet\\.rs:435:40: replace \\+ with - in fill_ports",  # shrunk threshold still caught by the final caplen guard
-  "cpworker/src/packet\\.rs:435:54: replace \\+ with - in fill_ports",  # shrunk threshold still caught by the final caplen guard
+  # ------------------------------------------------------ cpworker/src/packet.rs
+  # parse_packet()/extract_ipport() stack minimum-length guards per layer, so a
+  # threshold that is *loosened* by one step is caught by the next guard down or by
+  # the final `r.payload_offset > caplen` check: the function returns None either
+  # way, which is the only thing a test can observe.
+  # (`< with <=` cases are equality: the frame has exactly one layer's minimum, and
+  # the next layer needs strictly more bytes.)
+  "cpworker/src/packet\\.rs:168:15: replace < with <= in parse_packet",  # a 14-byte frame still fails the IPv4/IPv6 minimum below: None either way
+  "cpworker/src/packet\\.rs:180:19: replace < with <= in parse_packet",  # at caplen == offset+4 the VLAN loop needs another tag or the IP minimum: None either way
+  "cpworker/src/packet\\.rs:195:19: replace < with <= in parse_packet",  # at caplen == offset+20 no TCP/UDP header can be read: None either way
+  "cpworker/src/packet\\.rs:201:19: replace < with <= in parse_packet",  # at caplen == offset+ihl*4 the L4 guards below need 8/20 more bytes: None either way
+  "cpworker/src/packet\\.rs:201:19: replace < with == in parse_packet",  # a truncated option area still trips the L4 guards (offset > caplen): None either way
+  "cpworker/src/packet\\.rs:225:32: replace \\+ with - in parse_packet",  # offset >= 34 so no underflow; an accepted truncated UDP header trips the payload_offset > caplen guard
+  "cpworker/src/packet\\.rs:243:19: replace < with <= in parse_packet",  # at caplen == offset+40 no extension or L4 header can be read: None either way
+  "cpworker/src/packet\\.rs:253:23: replace < with <= in parse_packet",  # at caplen == offset+2 the ext_total >= 8 check below rejects: None either way
+  "cpworker/src/packet\\.rs:259:23: replace < with <= in parse_packet",  # equality already leaves offset == caplen, so the L4 guards reject: None either way
+  "cpworker/src/packet\\.rs:259:23: replace < with == in parse_packet",  # a short ext frame still trips the L4 guards (offset > caplen): None either way
+  "cpworker/src/packet\\.rs:284:32: replace \\+ with - in parse_packet",  # offset >= 54 so no underflow; an accepted truncated UDP header trips the payload_offset > caplen guard
+  "cpworker/src/packet\\.rs:309:22: replace > with >= in parse_packet",  # clamp at equality assigns the same value
+  "cpworker/src/packet\\.rs:336:23: replace < with <= in extract_ipport",  # at len == off+14 the ipv4/ipv6 layers below need 20/40 more: None either way
+  "cpworker/src/packet\\.rs:354:27: replace < with <= in extract_ipport",  # at len == next+4 the loop needs another tag or the IP minimum: None either way
+  # fill_ports()'s VXLAN heuristic only reads what extract_ipport() re-validates: it
+  # starts with its own len >= off+ETH_HDR_LEN check and then needs +20 (v4) or +40
+  # (v6), which is exactly the bound line 435 computes. Loosening it therefore only
+  # lets a call in that returns None, leaving `out` untouched.
+  "cpworker/src/packet\\.rs:435:40: replace \\+ with - in fill_ports",  # extract_ipport() re-checks its own bounds and returns None: inner frames are unchanged
+  "cpworker/src/packet\\.rs:435:54: replace \\+ with - in fill_ports",  # inner_eth + 14 - 20 (inner_eth >= 30, so no underflow); extract_ipport() re-checks and returns None
 
-  # cpworker/src/packet_split.rs
-  "cpworker/src/packet_split\\.rs:169:81: replace \\+ with \\* in build_fragment",  # checksum reads only ihl*4 bytes
+  # ------------------------------------------------- cpworker/src/packet_split.rs
+  # calculate_ip_checksum() re-derives ihl from ip_hdr[0] and sums only
+  # ip_hdr[..ihl.min(len)] - pinned by calculate_ip_checksum_ignores_trailing_bytes -
+  # so a wider slice yields the same checksum.
+  "cpworker/src/packet_split\\.rs:169:81: replace \\+ with \\* in build_fragment",  # callee truncates the slice to ihl*4, so the checksum is unchanged
 
-  # cpworker/src/zmtp/client.rs
-  "cpworker/src/zmtp/client\\.rs:72:9:",  # default body: only in-memory test transports use it
-  "cpworker/src/zmtp/client\\.rs:129:25:",  # compaction is a memory optimisation
-  "cpworker/src/zmtp/client\\.rs:298:9: replace ZmtpPush::is_connected -> bool with true",  # runner timeout: mutation loops forever, no finite test can report it
-  "cpworker/src/zmtp/client\\.rs:298:52:",  # runner timeout: mutation loops forever, no finite test can report it
-  "cpworker/src/zmtp/client\\.rs:379:12:",  # gates one log line only
-  "cpworker/src/zmtp/client\\.rs:392:40:",  # runner timeout: mutation loops forever, no finite test can report it
-  "cpworker/src/zmtp/client\\.rs:392:58: replace < with <= in ZmtpPush::drain_for",  # Instant equality is unreachable
-  "cpworker/src/zmtp/client\\.rs:392:58: replace < with > in ZmtpPush::drain_for",  # runner timeout: mutation loops forever, no finite test can report it
-  "cpworker/src/zmtp/client\\.rs:394:16:",  # extra 1 ms sleep is timing-only
-  "cpworker/src/zmtp/client\\.rs:401:50: replace < with <= in ZmtpPush::maybe_connect",  # Instant equality is unreachable
-  "cpworker/src/zmtp/client\\.rs:478:31: replace match guard e\\.kind\\(\\) == io::ErrorKind::Interrupted with true in ZmtpPush::drive_conn",  # runner timeout: mutation loops forever, no finite test can report it
-  "cpworker/src/zmtp/client\\.rs:478:40:",  # runner timeout: mutation loops forever, no finite test can report it
-  "cpworker/src/zmtp/client\\.rs:493:31: replace match guard e\\.kind\\(\\) == io::ErrorKind::Interrupted with true in ZmtpPush::drive_conn",  # runner timeout: mutation loops forever, no finite test can report it
-  "cpworker/src/zmtp/client\\.rs:493:40:",  # runner timeout: mutation loops forever, no finite test can report it
-  "cpworker/src/zmtp/client\\.rs:535:34: replace \\+= with \\*= in ZmtpPush::flush_pending",  # runner timeout: mutation loops forever, no finite test can report it
-  "cpworker/src/zmtp/client\\.rs:543:35: replace match guard e\\.kind\\(\\) == io::ErrorKind::Interrupted with true in ZmtpPush::flush_pending",  # runner timeout: mutation loops forever, no finite test can report it
-  "cpworker/src/zmtp/client\\.rs:543:44:",  # runner timeout: mutation loops forever, no finite test can report it
-  "cpworker/src/zmtp/client\\.rs:585:9: replace <impl Transport for TcpTransport>::read -> io::Result<usize> with Ok\\(1\\)",  # runner timeout: mutation loops forever, no finite test can report it
-  "cpworker/src/zmtp/client\\.rs:600:58:",  # POLLERR/POLLHUP disjoint; TCP cannot hit the None branch
-  "cpworker/src/zmtp/client\\.rs:621:9:",  # best-effort close; fd closes on drop
-  "cpworker/src/zmtp/client\\.rs:772:12:",  # warn-once latch: logging only
+  # --------------------------------------------------- cpworker/src/zmtp/client.rs
+  "cpworker/src/zmtp/client\\.rs:76:9:",  # default body: only already-connected transports use it (TcpTransport overrides it), so Ok(false) just skips the no-op Connecting arm
+  "cpworker/src/zmtp/client\\.rs:168:25:",  # compaction only: out_off still indexes the same FIFO, so the bytes written to the wire are unchanged
+  "cpworker/src/zmtp/client\\.rs:340:9: replace ZmtpPush::is_connected -> bool with true",  # runner timeout: reports a handshake that never happened, so robustness_tests::connector_covers_every_resolved_address never rotates to the next address
+  "cpworker/src/zmtp/client\\.rs:340:52:",  # runner timeout: same inversion from the other side - the phase never reads as Open, so the connector rotation test never completes
+  "cpworker/src/zmtp/client\\.rs:474:12:",  # gates one log_warn! line only (the body has no other effect)
+  "cpworker/src/zmtp/client\\.rs:487:40:",  # runner timeout: with || the linger deadline is ignored while the queue is non-empty, so drain never stops (zero_linger_does_not_touch_the_socket)
+  "cpworker/src/zmtp/client\\.rs:487:58: replace < with <= in ZmtpPush::drain_for",  # Instant equality is not constructible: drain_for() takes a Duration, the clock is not injectable
+  "cpworker/src/zmtp/client\\.rs:487:58: replace < with > in ZmtpPush::drain_for",  # runner timeout: once past the deadline `now > deadline` stays true, so the drain loop never terminates
+  "cpworker/src/zmtp/client\\.rs:489:16:",  # the 1 ms sleep only burns wall-clock time; the poll sequence per iteration is unchanged
+  "cpworker/src/zmtp/client\\.rs:496:50: replace < with <= in ZmtpPush::maybe_connect",  # Instant equality is not constructible: next_attempt is set from an earlier now() + backoff
+  "cpworker/src/zmtp/client\\.rs:573:31: replace match guard e\\.kind\\(\\) == io::ErrorKind::Interrupted with true in ZmtpPush::drive_conn",  # runner timeout: every hard write error becomes EINTR, so the write loop retries the same slice forever
+  "cpworker/src/zmtp/client\\.rs:573:40:",  # runner timeout: EINTR stops matching and hard errors start matching, so the same non-terminating retry loop is reached
+  "cpworker/src/zmtp/client\\.rs:588:31: replace match guard e\\.kind\\(\\) == io::ErrorKind::Interrupted with true in ZmtpPush::drive_conn",  # runner timeout: every hard read error becomes EINTR, so the unbounded read loop never breaks
+  "cpworker/src/zmtp/client\\.rs:588:40:",  # runner timeout: EINTR stops matching and hard errors start matching, so the read loop never breaks
+  "cpworker/src/zmtp/client\\.rs:631:34: replace \\+= with \\*= in ZmtpPush::flush_pending",  # runner timeout: off *= n leaves the cursor at 0, so `while off < frame_len` never ends
+  "cpworker/src/zmtp/client\\.rs:639:35: replace match guard e\\.kind\\(\\) == io::ErrorKind::Interrupted with true in ZmtpPush::flush_pending",  # runner timeout: every hard write error becomes EINTR, so the frame write loop retries forever
+  "cpworker/src/zmtp/client\\.rs:639:44:",  # runner timeout: EINTR stops matching and hard errors start matching, so the write loop never terminates
+  "cpworker/src/zmtp/client\\.rs:691:9: replace <impl Transport for TcpTransport>::read -> io::Result<usize> with Ok\\(1\\)",  # runner timeout: read never reports EOF/WouldBlock, so drive_conn's read loop appends forever
+  "cpworker/src/zmtp/client\\.rs:706:58:",  # POLLERR(0x8)/POLLHUP(0x10) are disjoint bits (| == ^); the & variant is dead, but a real connect error is re-read by take_error() below
+  "cpworker/src/zmtp/client\\.rs:727:9:",  # best-effort close: the TcpStream owns the only fd, so dropping it sends the same FIN
+  "cpworker/src/zmtp/client\\.rs:878:12:",  # warn-once latch: the inverted guard still only feeds a log_warn!
 ]

@@ -1216,4 +1216,111 @@ mod tests {
         // Truncated one byte before the destination address is complete.
         assert!(extract_ipport(&f[..14 + 40 - 1], 0).is_none());
     }
+
+    /// The v4 TCP split point is `offset + l4_hdr_len`, so the guard is only
+    /// load-bearing once the TCP header is longer than everything in front of it:
+    /// with ihl = 5 that starts at doff = 9 (36 B > 14 + 20 B). Every other frame in
+    /// this module uses doff <= 5, where `offset - l4_hdr_len` (what the 2026-10-02
+    /// sweep mutant `packet.rs:220:53` computes) stays positive and the guard
+    /// decides identically, which is why that mutant survived until this shape
+    /// existed.
+    #[test]
+    fn parse_ipv4_tcp_with_a_header_longer_than_its_prefix() {
+        for doff in 9..=15u8 {
+            let hdr = usize::from(doff) * 4;
+            // NOP padding for the option area, then 6 bytes that really are payload.
+            let options = vec![0x01u8; hdr - 20 + 6];
+            let l4 = tcp(1, 2, doff, &options);
+            let tot_len = u16::try_from(20 + hdr + 6).expect("option frame fits u16");
+            let f = eth(ETHERTYPE_IP, &ipv4_bytes(IPPROTO_TCP, 5, tot_len, &[], &l4));
+            let r = parse_packet(&f)
+                .unwrap_or_else(|| panic!("doff={doff} ({hdr} B TCP header) must parse"));
+            assert_eq!(r.l4_hdr_len, hdr, "doff={doff}");
+            assert_eq!(r.payload_offset, ETH_HDR_LEN + 20 + hdr, "doff={doff}");
+            assert_eq!(r.payload_len, 6, "doff={doff}");
+        }
+
+        // The measured maximum: ihl = 5 + doff = 15 -> a 60 B header that ends
+        // exactly at caplen (94 B), with tot_len advertising no payload. Equality
+        // must be accepted (the guard is `<`), and one byte less must not be.
+        let header_only = tcp(1, 2, 15, &[0x01u8; 40]);
+        let f = eth(
+            ETHERTYPE_IP,
+            &ipv4_bytes(IPPROTO_TCP, 5, 80, &[], &header_only),
+        );
+        assert_eq!(f.len(), 94);
+        let r = parse_packet(&f).expect("a 60 B TCP header ending at caplen must parse");
+        assert_eq!(r.l4_hdr_len, 60);
+        assert_eq!(r.payload_offset, 94);
+        assert_eq!(r.payload_len, 0);
+        assert!(
+            parse_packet(&f[..93]).is_none(),
+            "a capture one byte short of the advertised header cannot be split"
+        );
+    }
+
+    /// The same guard on the IPv6 side (`packet.rs:279:53` in the sweep). Its
+    /// prefix is 14 + 40 = 54 B, so the mutant only diverges from doff = 14
+    /// (56 B) up - doff = 15 is the largest header TCP can advertise at all.
+    #[test]
+    fn parse_ipv6_tcp_with_a_header_longer_than_its_prefix() {
+        for doff in 14..=15u8 {
+            let hdr = usize::from(doff) * 4;
+            let options = vec![0x01u8; hdr - 20 + 6];
+            let l4 = tcp(1, 2, doff, &options);
+            let f = ipv6(
+                IPPROTO_TCP,
+                u16::try_from(hdr + 6).expect("option frame fits u16"),
+                &[],
+                &l4,
+            );
+            let r =
+                parse_packet(&f).unwrap_or_else(|| panic!("v6 doff={doff} ({hdr} B) must parse"));
+            assert_eq!(r.l4_offset, ETH_HDR_LEN + 40, "doff={doff}");
+            assert_eq!(r.l4_hdr_len, hdr, "doff={doff}");
+            assert_eq!(r.payload_offset, ETH_HDR_LEN + 40 + hdr, "doff={doff}");
+            assert_eq!(r.payload_len, 6, "doff={doff}");
+        }
+
+        // Boundary pair for doff = 15: the header ending exactly at caplen parses,
+        // one byte short of it does not.
+        let f = ipv6(IPPROTO_TCP, 60, &[], &tcp(1, 2, 15, &[0x01u8; 40]));
+        assert_eq!(f.len(), 114);
+        let r = parse_packet(&f).expect("a 60 B v6 TCP header ending at caplen must parse");
+        assert_eq!(r.payload_offset, 114);
+        assert_eq!(r.payload_len, 0);
+        assert!(parse_packet(&f[..113]).is_none());
+    }
+
+    /// The extension-header guard is `caplen < offset + ext_total`, where offset
+    /// is the 54 B IPv6 prefix. A header longer than that (hdr_ext_len = 7 -> 64 B)
+    /// is the shape that tells `offset + ext_total` apart from the mutant's
+    /// `offset - ext_total` (`packet.rs:259:32`); the 255 case pins the other half
+    /// of the same guard, an advertised length far past the capture.
+    #[test]
+    fn parse_ipv6_extension_header_longer_than_its_prefix() {
+        let mut ext = vec![0u8; 64];
+        ext[0] = IPPROTO_TCP; // the header's own next-header
+        ext[1] = 7; // (7 + 1) * 8 = 64 B
+        let l4 = tcp(1, 2, 5, &[0u8; 6]);
+        let f = ipv6(IPPROTO_HOPOPTS, 64 + 20 + 6, &ext, &l4);
+        let r = parse_packet(&f).expect("a complete 64 B hopopts header must parse");
+        assert_eq!(r.ipv6_ext_len, 64);
+        assert_eq!(r.l4_offset, ETH_HDR_LEN + 40 + 64);
+        assert_eq!(r.l4_hdr_len, 20);
+        assert_eq!(r.payload_offset, ETH_HDR_LEN + 40 + 64 + 20);
+        assert_eq!(r.payload_len, 6);
+
+        // Truncated inside the advertised extension header: the parse must stop
+        // there rather than carry the stale offset into the L4 guards.
+        assert!(parse_packet(&f[..ETH_HDR_LEN + 40 + 63]).is_none());
+
+        // hdr_ext_len = 255 advertises (255 + 1) * 8 = 2048 B, which the 144 B
+        // capture cannot back; rejecting it is the whole point of the guard.
+        let mut huge = vec![0u8; 64];
+        huge[0] = IPPROTO_TCP;
+        huge[1] = 255;
+        let f = ipv6(IPPROTO_HOPOPTS, 64 + 20 + 6, &huge, &l4);
+        assert!(parse_packet(&f).is_none(), "a 2048 B header cannot fit");
+    }
 }

@@ -1,0 +1,1367 @@
+crates/cpgolib/src/fingerprint.rs:16:5: replace hash_add -> u64 with 0
+crates/cpgolib/src/fingerprint.rs:56:5: replace fingerprint_uuid_string -> String with String::new()
+crates/cpgolib/src/fingerprint.rs:25:7: replace ^= with &= in hash_add_byte
+crates/cpgolib/src/fingerprint.rs:25:5: replace hash_add_byte -> u64 with 1
+crates/cpgolib/src/fingerprint.rs:32:5: replace labels_to_fingerprint -> u64 with 1
+crates/cpgolib/src/fingerprint.rs:32:5: replace labels_to_fingerprint -> u64 with 0
+crates/cpgolib/src/fingerprint.rs:16:5: replace hash_add -> u64 with 1
+crates/cpgolib/src/fingerprint.rs:25:5: replace hash_add_byte -> u64 with 0
+crates/cpgolib/src/fingerprint.rs:17:11: replace ^= with &= in hash_add
+crates/cpgolib/src/fingerprint.rs:48:5: replace fingerprint_string -> String with "xyzzy".into()
+crates/cpgolib/src/fingerprint.rs:48:5: replace fingerprint_string -> String with String::new()
+crates/cpgolib/src/fingerprint.rs:17:11: replace ^= with |= in hash_add
+crates/cpgolib/src/fingerprint.rs:56:5: replace fingerprint_uuid_string -> String with "xyzzy".into()
+crates/cpgolib/src/fingerprint.rs:25:7: replace ^= with |= in hash_add_byte
+crates/cpgolib/src/slogx/mod.rs:28:5: replace error_attr -> String with String::new()
+crates/cpgolib/src/slogx/mod.rs:28:5: replace error_attr -> String with "xyzzy".into()
+crates/cpgolib/src/worker_config.rs:48:9: replace ControlConfig::connect_string -> String with "xyzzy".into()
+crates/cpgolib/src/worker_fingerprint.rs:30:5: replace opt_bool with ()
+crates/cpgolib/src/worker_fingerprint.rs:18:5: replace opt_u64 with ()
+crates/cpgolib/src/worker_fingerprint.rs:36:5: replace opt_str with ()
+crates/cpgolib/src/worker_fingerprint.rs:14:5: replace b with ()
+crates/cpgolib/src/worker_config.rs:48:9: replace ControlConfig::connect_string -> String with String::new()
+crates/cpgolib/src/worker_fingerprint.rs:45:5: replace task_fingerprint_labels -> BTreeMap<String, String> with BTreeMap::new()
+crates/cpgolib/src/worker_config.rs:49:13: delete match arm "unix" in ControlConfig::connect_string
+crates/cpgolib/src/worker_fingerprint.rs:24:5: replace opt_i64 with ()
+crates/cpgolib/src/worker_fingerprint.rs:45:5: replace task_fingerprint_labels -> BTreeMap<String, String> with BTreeMap::from_iter([(String::new(), String::new())])
+crates/cpgolib/src/worker_fingerprint.rs:45:5: replace task_fingerprint_labels -> BTreeMap<String, String> with BTreeMap::from_iter([(String::new(), "xyzzy".into())])
+crates/cpgolib/src/worker_fingerprint.rs:60:5: replace task_fingerprint -> String with "xyzzy".into()
+crates/cpgolib/src/worker_fingerprint.rs:60:5: replace task_fingerprint -> String with String::new()
+crates/cpgolib/src/worker_fingerprint.rs:65:5: replace req_pattern_labels with ()
+crates/cpgolib/src/worker_fingerprint.rs:45:5: replace task_fingerprint_labels -> BTreeMap<String, String> with BTreeMap::from_iter([("xyzzy".into(), "xyzzy".into())])
+crates/cpgolib/src/worker_fingerprint.rs:109:5: replace output_labels with ()
+crates/cpgolib/src/worker_fingerprint.rs:45:5: replace task_fingerprint_labels -> BTreeMap<String, String> with BTreeMap::from_iter([("xyzzy".into(), String::new())])
+crates/cpgolib/src/worker_fingerprint.rs:80:5: replace capturer_labels with ()
+crates/cpgolib/src/cpworker/client.rs:104:16: replace != with == in UnixClient::with_timeout
+crates/cpgolib/src/cpworker/client.rs:119:9: replace UnixClient::timeout_for -> Duration with Default::default()
+crates/cpgolib/src/cpworker/client.rs:143:9: replace UnixClient::handshake -> Result<()> with Ok(())
+crates/cpgolib/src/cpworker/client.rs:165:9: replace UnixClient::recv_raw -> Result<Vec<u8>> with Ok(vec![0])
+crates/cpgolib/src/cpworker/client.rs:185:9: replace UnixClient::run_command -> Result<Value> with Ok(Default::default())
+crates/cpgolib/src/cpworker/client.rs:207:55: replace != with == in UnixClient::run_command
+crates/cpgolib/src/cpworker/client.rs:216:9: replace <impl Client for UnixClient>::close -> Result<()> with Ok(())
+crates/cpgolib/src/cpworker/client.rs:165:9: replace UnixClient::recv_raw -> Result<Vec<u8>> with Ok(vec![1])
+crates/cpgolib/src/cpworker/client.rs:227:9: replace <impl Client for UnixClient>::collect_stats_summary -> Result<StatsSummary> with Ok(Default::default())
+crates/cpgolib/src/cpworker/client.rs:165:9: replace UnixClient::recv_raw -> Result<Vec<u8>> with Ok(vec![])
+crates/cpgolib/src/cpworker/stats.rs:5:64: replace * with /
+crates/cpgolib/src/cpworker/stats.rs:5:64: replace * with +
+crates/cpgolib/src/cpworker/client.rs:249:9: replace <impl Client for UnixClient>::reload_config -> Result<()> with Ok(())
+crates/cpgolib/src/cpworker/stats.rs:5:57: replace * with /
+crates/cpgolib/src/cpworker/stats.rs:5:50: replace * with /
+crates/cpgolib/src/cpworker/stats.rs:5:50: replace * with +
+crates/cpgolib/src/cpworker/stats.rs:5:43: replace * with +
+crates/cpgolib/src/cpworker/stats.rs:5:57: replace * with +
+crates/cpgolib/src/cpworker/stats.rs:5:43: replace * with /
+crates/cpgolib/src/cpworker/stats.rs:5:36: replace * with +
+crates/cpgolib/src/cpworker/client.rs:155:9: replace UnixClient::send_raw -> Result<()> with Ok(())
+crates/cpgolib/src/cpworker/stats.rs:5:36: replace * with /
+crates/cpgolib/src/cpworker/stats.rs:92:9: replace BytesStats::compare -> i8 with -1
+crates/cpgolib/src/cpworker/stats.rs:92:9: replace BytesStats::compare -> i8 with 1
+crates/cpgolib/src/cpworker/stats.rs:94:45: delete - in BytesStats::compare
+crates/cpgolib/src/cpworker/stats.rs:98:41: delete - in BytesStats::compare
+crates/cpgolib/src/cpworker/stats.rs:92:9: replace BytesStats::compare -> i8 with 0
+crates/cpgolib/src/cpworker/stats.rs:107:9: replace BytesStats::sub -> (BytesStats, bool) with (Default::default(), false)
+crates/cpgolib/src/cpworker/stats.rs:107:9: replace BytesStats::sub -> (BytesStats, bool) with (Default::default(), true)
+crates/cpgolib/src/cpworker/stats.rs:107:43: replace < with == in BytesStats::sub
+crates/cpgolib/src/cpworker/stats.rs:107:43: replace < with > in BytesStats::sub
+crates/cpgolib/src/cpworker/stats.rs:115:32: replace < with > in BytesStats::sub
+crates/cpgolib/src/cpworker/stats.rs:114:29: replace - with + in BytesStats::sub
+crates/cpgolib/src/cpworker/stats.rs:107:43: replace < with <= in BytesStats::sub
+crates/cpgolib/src/cpworker/stats.rs:114:29: replace - with / in BytesStats::sub
+crates/cpgolib/src/cpworker/stats.rs:115:32: replace < with == in BytesStats::sub
+crates/cpgolib/src/cpworker/stats.rs:116:17: replace -= with /= in BytesStats::sub
+crates/cpgolib/src/cpworker/stats.rs:115:32: replace < with <= in BytesStats::sub
+crates/cpgolib/src/cpworker/stats.rs:117:36: replace - with + in BytesStats::sub
+crates/cpgolib/src/cpworker/stats.rs:116:17: replace -= with += in BytesStats::sub
+crates/cpgolib/src/cpworker/client.rs:148:52: replace != with == in UnixClient::handshake
+crates/cpgolib/src/cpworker/stats.rs:117:26: replace + with * in BytesStats::sub
+crates/cpgolib/src/cpworker/stats.rs:117:36: replace - with / in BytesStats::sub
+crates/cpgolib/src/cpworker/stats.rs:117:26: replace + with - in BytesStats::sub
+crates/cpgolib/src/cpworker/stats.rs:119:21: replace - with + in BytesStats::sub
+crates/cpgolib/src/cpworker/stats.rs:119:21: replace - with / in BytesStats::sub
+crates/cpgolib/src/cpworker/stats.rs:142:41: delete - in PacketsStats::compare
+crates/cpgolib/src/cpworker/stats.rs:136:9: replace PacketsStats::compare -> i8 with 0
+crates/cpgolib/src/cpworker/stats.rs:136:9: replace PacketsStats::compare -> i8 with 1
+crates/cpgolib/src/cpworker/stats.rs:136:9: replace PacketsStats::compare -> i8 with -1
+crates/cpgolib/src/cpworker/stats.rs:138:45: delete - in PacketsStats::compare
+crates/cpgolib/src/cpworker/stats.rs:149:43: replace < with > in PacketsStats::sub
+crates/cpgolib/src/cpworker/stats.rs:149:9: replace PacketsStats::sub -> (PacketsStats, bool) with (Default::default(), true)
+crates/cpgolib/src/cpworker/stats.rs:149:9: replace PacketsStats::sub -> (PacketsStats, bool) with (Default::default(), false)
+crates/cpgolib/src/cpworker/stats.rs:149:43: replace < with == in PacketsStats::sub
+crates/cpgolib/src/cpworker/stats.rs:149:43: replace < with <= in PacketsStats::sub
+crates/cpgolib/src/cpworker/stats.rs:156:31: replace - with / in PacketsStats::sub
+crates/cpgolib/src/cpworker/stats.rs:157:36: replace < with == in PacketsStats::sub
+crates/cpgolib/src/cpworker/stats.rs:157:36: replace < with > in PacketsStats::sub
+crates/cpgolib/src/cpworker/stats.rs:157:36: replace < with <= in PacketsStats::sub
+crates/cpgolib/src/cpworker/stats.rs:156:31: replace - with + in PacketsStats::sub
+crates/cpgolib/src/cpworker/stats.rs:159:41: replace - with / in PacketsStats::sub
+crates/cpgolib/src/cpworker/stats.rs:158:18: replace -= with += in PacketsStats::sub
+crates/cpgolib/src/cpworker/stats.rs:159:29: replace + with - in PacketsStats::sub
+crates/cpgolib/src/cpworker/stats.rs:158:18: replace -= with /= in PacketsStats::sub
+crates/cpgolib/src/cpworker/stats.rs:159:41: replace - with + in PacketsStats::sub
+crates/cpgolib/src/cpworker/stats.rs:159:29: replace + with * in PacketsStats::sub
+crates/cpgolib/src/cpworker/stats.rs:161:23: replace - with + in PacketsStats::sub
+crates/cpgolib/src/cpworker/stats.rs:161:23: replace - with / in PacketsStats::sub
+crates/cpworker/src/bpf/mod.rs:59:9: replace Program::is_empty -> bool with true
+crates/cpworker/src/bpf/mod.rs:59:9: replace Program::is_empty -> bool with false
+crates/cpworker/src/bpf/mod.rs:116:5: replace attach_filter -> io::Result<()> with Ok(())
+crates/cpworker/src/bpf/mod.rs:103:5: replace compile_with -> Result<Program> with Ok(Default::default())
+crates/cpworker/src/bpf/mod.rs:68:9: replace Program::evaluate -> u32 with 0
+crates/cpworker/src/bpf/mod.rs:74:9: replace Program::apply -> bool with true
+crates/cpworker/src/bpf/mod.rs:74:28: replace != with == in Program::apply
+crates/cpworker/src/bpf/mod.rs:68:9: replace Program::evaluate -> u32 with 1
+crates/cpworker/src/bpf/mod.rs:74:9: replace Program::apply -> bool with false
+crates/cpworker/src/bpf/mod.rs:88:5: replace compile -> Result<Program> with Ok(Default::default())
+crates/cpworker/src/config.rs:104:34: replace << with >>
+crates/cpworker/src/config.rs:273:13: delete match arm OutputKind::Zmq(c) in OutputConfig::forward_host
+crates/cpworker/src/config.rs:257:9: replace OutputConfig::output_type -> &'static str with "xyzzy"
+crates/cpworker/src/config.rs:270:9: replace OutputConfig::forward_host -> Option<&str> with None
+crates/cpworker/src/config.rs:270:9: replace OutputConfig::forward_host -> Option<&str> with Some("")
+crates/cpworker/src/config.rs:270:9: replace OutputConfig::forward_host -> Option<&str> with Some("xyzzy")
+crates/cpworker/src/config.rs:271:13: delete match arm OutputKind::Vxlan(c) in OutputConfig::forward_host
+crates/cpworker/src/config.rs:272:13: delete match arm OutputKind::Gre(c) in OutputConfig::forward_host
+crates/cpworker/src/config.rs:257:9: replace OutputConfig::output_type -> &'static str with ""
+crates/cpworker/src/config.rs:325:9: replace LibpcapConfig::effective_bpf -> Result<String> with Ok(String::new())
+crates/cpworker/src/config.rs:379:9: replace CapturerKind::capturer_type -> &'static str with ""
+crates/cpworker/src/config.rs:389:9: replace CapturerKind::snaplen -> i32 with 0
+crates/cpworker/src/config.rs:325:9: replace LibpcapConfig::effective_bpf -> Result<String> with Ok("xyzzy".into())
+crates/cpworker/src/config.rs:379:9: replace CapturerKind::capturer_type -> &'static str with "xyzzy"
+crates/cpworker/src/config.rs:399:9: replace CapturerKind::interface -> Option<&str> with Some("")
+crates/cpworker/src/config.rs:389:9: replace CapturerKind::snaplen -> i32 with -1
+crates/cpworker/src/config.rs:399:9: replace CapturerKind::interface -> Option<&str> with None
+crates/cpworker/src/config.rs:389:9: replace CapturerKind::snaplen -> i32 with 1
+crates/cpworker/src/config.rs:399:9: replace CapturerKind::interface -> Option<&str> with Some("xyzzy")
+crates/cpworker/src/config.rs:496:5: replace canonical_dump -> String with "xyzzy".into()
+crates/cpworker/src/config.rs:496:5: replace canonical_dump -> String with String::new()
+crates/cpworker/src/config.rs:573:5: replace de_nonnull -> std::result::Result<Option<T>, D::Error> with Ok(None)
+crates/cpworker/src/config.rs:584:5: replace de_nonnull_bool -> std::result::Result<bool, D::Error> with Ok(false)
+crates/cpworker/src/config.rs:550:13: delete match arm CapturerKind::Libpcap(l) in canonical_dump
+crates/cpworker/src/config.rs:584:5: replace de_nonnull_bool -> std::result::Result<bool, D::Error> with Ok(true)
+crates/cpworker/src/config.rs:599:5: replace de_int -> std::result::Result<Option<i64>, D::Error> with Ok(Some(0))
+crates/cpworker/src/config.rs:599:5: replace de_int -> std::result::Result<Option<i64>, D::Error> with Ok(None)
+crates/cpworker/src/config.rs:599:5: replace de_int -> std::result::Result<Option<i64>, D::Error> with Ok(Some(1))
+crates/cpworker/src/config.rs:599:5: replace de_int -> std::result::Result<Option<i64>, D::Error> with Ok(Some(-1))
+crates/cpworker/src/config.rs:833:5: replace int_in -> Result<i64> with Ok(1)
+crates/cpworker/src/config.rs:833:5: replace int_in -> Result<i64> with Ok(-1)
+crates/cpworker/src/config.rs:843:5: replace i32_in -> Result<i32> with Ok(1)
+crates/cpworker/src/config.rs:843:5: replace i32_in -> Result<i32> with Ok(0)
+crates/cpworker/src/config.rs:833:8: delete ! in int_in
+crates/cpworker/src/config.rs:843:5: replace i32_in -> Result<i32> with Ok(-1)
+crates/cpworker/src/config.rs:853:5: replace u64_in -> Result<u64> with Ok(1)
+crates/cpworker/src/config.rs:863:5: replace u16_in -> Result<u16> with Ok(0)
+crates/cpworker/src/config.rs:875:5: replace snaplen_in -> Result<i32> with Ok(1)
+crates/cpworker/src/config.rs:863:5: replace u16_in -> Result<u16> with Ok(1)
+crates/cpworker/src/config.rs:875:5: replace snaplen_in -> Result<i32> with Ok(-1)
+crates/cpworker/src/config.rs:875:5: replace snaplen_in -> Result<i32> with Ok(0)
+crates/cpworker/src/config.rs:876:15: replace && with || in snaplen_in
+crates/cpworker/src/config.rs:876:10: replace <= with > in snaplen_in
+crates/cpworker/src/config.rs:876:18: delete ! in snaplen_in
+crates/cpworker/src/config.rs:879:10: replace == with != in snaplen_in
+crates/cpworker/src/config.rs:883:8: delete ! in snaplen_in
+crates/cpworker/src/config.rs:893:5: replace positive_clamped -> Result<i32> with Ok(0)
+crates/cpworker/src/config.rs:893:5: replace positive_clamped -> Result<i32> with Ok(1)
+crates/cpworker/src/config.rs:893:5: replace positive_clamped -> Result<i32> with Ok(-1)
+crates/cpworker/src/config.rs:897:10: replace > with < in positive_clamped
+crates/cpworker/src/config.rs:897:10: replace > with == in positive_clamped
+crates/cpworker/src/config.rs:908:5: replace nonneg_clamped -> Result<i32> with Ok(0)
+crates/cpworker/src/config.rs:908:5: replace nonneg_clamped -> Result<i32> with Ok(1)
+crates/cpworker/src/config.rs:908:5: replace nonneg_clamped -> Result<i32> with Ok(-1)
+crates/cpworker/src/config.rs:908:10: replace < with > in nonneg_clamped
+crates/cpworker/src/config.rs:916:5: replace u32_in -> Result<u32> with Ok(0)
+crates/cpworker/src/config.rs:916:5: replace u32_in -> Result<u32> with Ok(1)
+crates/cpworker/src/config.rs:925:5: replace parse_pmtudisc -> Result<i32> with Ok(0)
+crates/cpworker/src/config.rs:925:5: replace parse_pmtudisc -> Result<i32> with Ok(1)
+crates/cpworker/src/config.rs:925:5: replace parse_pmtudisc -> Result<i32> with Ok(-1)
+crates/cpworker/src/config.rs:935:9: replace RawSplit::build -> Result<SplitConfig> with Ok(Default::default())
+crates/cpworker/src/config.rs:963:37: replace && with || in RawOutput::build
+crates/cpworker/src/config.rs:974:27: replace > with == in RawOutput::build
+crates/cpworker/src/config.rs:974:27: replace > with < in RawOutput::build
+crates/cpworker/src/config.rs:979:28: replace &= with |= in RawOutput::build
+crates/cpworker/src/config.rs:988:29: delete - in RawOutput::build
+crates/cpworker/src/config.rs:1010:29: delete - in RawOutput::build
+crates/cpworker/src/config.rs:1178:54: delete ! in RawTask::build
+crates/cpworker/src/config.rs:1191:24: replace match guard s.eq_ignore_ascii_case("DEBUG") with true in RawConfig::build
+crates/cpworker/src/config.rs:1191:24: replace match guard s.eq_ignore_ascii_case("DEBUG") with false in RawConfig::build
+crates/cpworker/src/config.rs:1192:24: replace match guard s.eq_ignore_ascii_case("INFO") with true in RawConfig::build
+crates/cpworker/src/config.rs:1193:24: replace match guard s.eq_ignore_ascii_case("WARN") with true in RawConfig::build
+crates/cpworker/src/config.rs:1192:24: replace match guard s.eq_ignore_ascii_case("INFO") with false in RawConfig::build
+crates/cpworker/src/config.rs:1193:24: replace match guard s.eq_ignore_ascii_case("WARN") with false in RawConfig::build
+crates/cpworker/src/config.rs:1194:24: replace match guard s.eq_ignore_ascii_case("ERROR") with true in RawConfig::build
+crates/cpworker/src/config.rs:1194:24: replace match guard s.eq_ignore_ascii_case("ERROR") with false in RawConfig::build
+crates/cpworker/src/config.rs:1221:25: replace != with == in RawConfig::build
+crates/cpworker/src/config.rs:1236:76: replace == with != in RawConfig::build
+crates/cpworker/src/config.rs:1259:5: replace bpf_filter_exclude_task_output_hosts -> String with String::new()
+crates/cpworker/src/config.rs:1259:5: replace bpf_filter_exclude_task_output_hosts -> String with "xyzzy".into()
+crates/cpworker/src/config.rs:1263:20: delete ! in bpf_filter_exclude_task_output_hosts
+crates/cpworker/src/config.rs:1271:8: delete ! in bpf_filter_exclude_task_output_hosts
+crates/cpworker/src/config.rs:1283:5: replace task_capturer_snaplen -> i32 with 0
+crates/cpworker/src/config.rs:1283:5: replace task_capturer_snaplen -> i32 with 1
+crates/cpworker/src/config.rs:1283:5: replace task_capturer_snaplen -> i32 with -1
+crates/cpworker/src/packet.rs:49:34: delete -
+crates/cpworker/src/packet.rs:61:5: replace be16 -> u16 with 0
+crates/cpworker/src/packet.rs:61:5: replace be16 -> u16 with 1
+crates/cpworker/src/packet.rs:68:5: replace be32 -> u32 with 0
+crates/cpworker/src/packet.rs:68:5: replace be32 -> u32 with 1
+crates/cpworker/src/packet.rs:96:9: replace IpAddr::format -> String with "xyzzy".into()
+crates/cpworker/src/packet.rs:96:9: replace IpAddr::format -> String with String::new()
+crates/cpworker/src/packet.rs:105:9: replace IpAddr::as_bytes -> &[u8] with Vec::leak(Vec::new())
+crates/cpworker/src/packet.rs:80:5: replace put_be32 with ()
+crates/cpworker/src/packet.rs:105:9: replace IpAddr::as_bytes -> &[u8] with Vec::leak(vec![0])
+crates/cpworker/src/packet.rs:105:9: replace IpAddr::as_bytes -> &[u8] with Vec::leak(vec![1])
+crates/cpworker/src/packet.rs:114:9: replace <impl fmt::Display for IpAddr>::fmt -> fmt::Result with Ok(Default::default())
+crates/cpworker/src/packet.rs:121:5: replace format_mac_addr -> String with String::new()
+crates/cpworker/src/packet.rs:74:5: replace put_be16 with ()
+crates/cpworker/src/packet.rs:121:5: replace format_mac_addr -> String with "xyzzy".into()
+crates/cpworker/src/packet.rs:165:5: replace parse_packet -> Option<PacketParseResult> with None
+crates/cpworker/src/packet.rs:168:15: replace < with == in parse_packet
+crates/cpworker/src/packet.rs:165:5: replace parse_packet -> Option<PacketParseResult> with Some(Default::default())
+crates/cpworker/src/packet.rs:168:15: replace < with > in parse_packet
+crates/cpworker/src/packet.rs:180:19: replace < with == in parse_packet
+crates/cpworker/src/packet.rs:180:19: replace < with > in parse_packet
+crates/cpworker/src/packet.rs:180:28: replace + with - in parse_packet
+crates/cpworker/src/packet.rs:180:28: replace + with * in parse_packet
+crates/cpworker/src/packet.rs:183:12: delete ! in parse_packet
+crates/cpworker/src/packet.rs:187:44: replace + with - in parse_packet
+crates/cpworker/src/packet.rs:187:44: replace + with * in parse_packet
+crates/cpworker/src/packet.rs:187:56: replace + with - in parse_packet
+crates/cpworker/src/packet.rs:187:56: replace + with * in parse_packet
+crates/cpworker/src/packet.rs:188:16: replace += with *= in parse_packet
+crates/cpworker/src/packet.rs:188:16: replace += with -= in parse_packet
+crates/cpworker/src/packet.rs:193:19: replace == with != in parse_packet
+crates/cpworker/src/packet.rs:195:19: replace < with == in parse_packet
+crates/cpworker/src/packet.rs:195:19: replace < with > in parse_packet
+crates/cpworker/src/packet.rs:195:28: replace + with - in parse_packet
+crates/cpworker/src/packet.rs:195:28: replace + with * in parse_packet
+crates/cpworker/src/packet.rs:199:37: replace & with | in parse_packet
+crates/cpworker/src/packet.rs:199:37: replace & with ^ in parse_packet
+crates/cpworker/src/packet.rs:200:28: replace * with + in parse_packet
+crates/cpworker/src/packet.rs:200:28: replace * with / in parse_packet
+crates/cpworker/src/packet.rs:201:43: replace || with && in parse_packet
+crates/cpworker/src/packet.rs:201:28: replace + with - in parse_packet
+crates/cpworker/src/packet.rs:201:59: replace < with > in parse_packet
+crates/cpworker/src/packet.rs:201:59: replace < with == in parse_packet
+crates/cpworker/src/packet.rs:201:28: replace + with * in parse_packet
+crates/cpworker/src/packet.rs:201:19: replace < with > in parse_packet
+crates/cpworker/src/packet.rs:201:59: replace < with <= in parse_packet
+crates/cpworker/src/packet.rs:207:61: replace != with == in parse_packet
+crates/cpworker/src/packet.rs:207:52: replace & with | in parse_packet
+crates/cpworker/src/packet.rs:207:52: replace & with ^ in parse_packet
+crates/cpworker/src/packet.rs:207:34: replace + with * in parse_packet
+crates/cpworker/src/packet.rs:207:34: replace + with - in parse_packet
+crates/cpworker/src/packet.rs:207:46: replace + with - in parse_packet
+crates/cpworker/src/packet.rs:210:40: replace + with - in parse_packet
+crates/cpworker/src/packet.rs:207:46: replace + with * in parse_packet
+crates/cpworker/src/packet.rs:210:40: replace + with * in parse_packet
+crates/cpworker/src/packet.rs:211:16: replace += with *= in parse_packet
+crates/cpworker/src/packet.rs:214:21: replace == with != in parse_packet
+crates/cpworker/src/packet.rs:211:16: replace += with -= in parse_packet
+crates/cpworker/src/packet.rs:215:23: replace < with == in parse_packet
+crates/cpworker/src/packet.rs:215:23: replace < with > in parse_packet
+crates/cpworker/src/packet.rs:215:23: replace < with <= in parse_packet
+crates/cpworker/src/packet.rs:215:32: replace + with * in parse_packet
+crates/cpworker/src/packet.rs:215:32: replace + with - in parse_packet
+crates/cpworker/src/packet.rs:219:68: replace * with + in parse_packet
+crates/cpworker/src/packet.rs:219:52: replace >> with << in parse_packet
+crates/cpworker/src/packet.rs:219:46: replace + with - in parse_packet
+crates/cpworker/src/packet.rs:219:68: replace * with / in parse_packet
+crates/cpworker/src/packet.rs:219:46: replace + with * in parse_packet
+crates/cpworker/src/packet.rs:220:34: replace || with && in parse_packet
+crates/cpworker/src/packet.rs:220:29: replace < with == in parse_packet
+crates/cpworker/src/packet.rs:220:29: replace < with > in parse_packet
+crates/cpworker/src/packet.rs:220:44: replace < with > in parse_packet
+crates/cpworker/src/packet.rs:220:44: replace < with == in parse_packet
+crates/cpworker/src/packet.rs:220:29: replace < with <= in parse_packet
+crates/cpworker/src/packet.rs:220:44: replace < with <= in parse_packet
+crates/cpworker/src/packet.rs:220:53: replace + with * in parse_packet
+crates/cpworker/src/packet.rs:220:53: replace + with - in parse_packet
+crates/cpworker/src/packet.rs:223:20: replace += with -= in parse_packet
+crates/cpworker/src/packet.rs:223:20: replace += with *= in parse_packet
+crates/cpworker/src/packet.rs:224:28: replace == with != in parse_packet
+crates/cpworker/src/packet.rs:225:23: replace < with == in parse_packet
+crates/cpworker/src/packet.rs:225:23: replace < with > in parse_packet
+crates/cpworker/src/packet.rs:225:32: replace + with * in parse_packet
+crates/cpworker/src/packet.rs:225:23: replace < with <= in parse_packet
+crates/cpworker/src/packet.rs:230:20: replace += with -= in parse_packet
+crates/cpworker/src/packet.rs:230:20: replace += with *= in parse_packet
+crates/cpworker/src/packet.rs:236:53: replace + with - in parse_packet
+crates/cpworker/src/packet.rs:236:70: replace + with * in parse_packet
+crates/cpworker/src/packet.rs:236:53: replace + with * in parse_packet
+crates/cpworker/src/packet.rs:236:70: replace + with - in parse_packet
+crates/cpworker/src/packet.rs:237:40: replace + with - in parse_packet
+crates/cpworker/src/packet.rs:237:40: replace + with * in parse_packet
+crates/cpworker/src/packet.rs:238:23: replace < with == in parse_packet
+crates/cpworker/src/packet.rs:241:36: replace - with + in parse_packet
+crates/cpworker/src/packet.rs:238:23: replace < with > in parse_packet
+crates/cpworker/src/packet.rs:241:36: replace - with / in parse_packet
+crates/cpworker/src/packet.rs:238:23: replace < with <= in parse_packet
+crates/cpworker/src/packet.rs:242:26: replace == with != in parse_packet
+crates/cpworker/src/packet.rs:243:19: replace < with > in parse_packet
+crates/cpworker/src/packet.rs:243:19: replace < with == in parse_packet
+crates/cpworker/src/packet.rs:243:28: replace + with - in parse_packet
+crates/cpworker/src/packet.rs:243:28: replace + with * in parse_packet
+crates/cpworker/src/packet.rs:249:43: replace + with * in parse_packet
+crates/cpworker/src/packet.rs:250:16: replace += with *= in parse_packet
+crates/cpworker/src/packet.rs:253:23: replace < with == in parse_packet
+crates/cpworker/src/packet.rs:249:43: replace + with - in parse_packet
+crates/cpworker/src/packet.rs:250:16: replace += with -= in parse_packet
+crates/cpworker/src/packet.rs:253:32: replace + with - in parse_packet
+crates/cpworker/src/packet.rs:253:23: replace < with > in parse_packet
+crates/cpworker/src/packet.rs:253:32: replace + with * in parse_packet
+crates/cpworker/src/packet.rs:257:43: replace + with * in parse_packet
+crates/cpworker/src/packet.rs:257:43: replace + with - in parse_packet
+crates/cpworker/src/packet.rs:258:43: replace * with + in parse_packet
+crates/cpworker/src/packet.rs:258:43: replace * with / in parse_packet
+crates/cpworker/src/packet.rs:258:38: replace + with - in parse_packet
+crates/cpworker/src/packet.rs:258:38: replace + with * in parse_packet
+crates/cpworker/src/packet.rs:259:23: replace < with > in parse_packet
+crates/cpworker/src/packet.rs:262:20: replace += with -= in parse_packet
+crates/cpworker/src/packet.rs:259:32: replace + with - in parse_packet
+crates/cpworker/src/packet.rs:259:32: replace + with * in parse_packet
+crates/cpworker/src/packet.rs:262:20: replace += with *= in parse_packet
+crates/cpworker/src/packet.rs:268:20: replace == with != in parse_packet
+crates/cpworker/src/packet.rs:263:28: replace += with -= in parse_packet
+crates/cpworker/src/packet.rs:273:20: replace == with != in parse_packet
+crates/cpworker/src/packet.rs:263:28: replace += with *= in parse_packet
+crates/cpworker/src/packet.rs:274:23: replace < with > in parse_packet
+crates/cpworker/src/packet.rs:274:23: replace < with == in parse_packet
+crates/cpworker/src/packet.rs:274:23: replace < with <= in parse_packet
+crates/cpworker/src/packet.rs:278:46: replace + with - in parse_packet
+crates/cpworker/src/packet.rs:274:32: replace + with * in parse_packet
+crates/cpworker/src/packet.rs:274:32: replace + with - in parse_packet
+crates/cpworker/src/packet.rs:278:68: replace * with / in parse_packet
+crates/cpworker/src/packet.rs:278:68: replace * with + in parse_packet
+crates/cpworker/src/packet.rs:278:52: replace >> with << in parse_packet
+crates/cpworker/src/packet.rs:278:46: replace + with * in parse_packet
+crates/cpworker/src/packet.rs:279:29: replace < with == in parse_packet
+crates/cpworker/src/packet.rs:279:34: replace || with && in parse_packet
+crates/cpworker/src/packet.rs:279:29: replace < with <= in parse_packet
+crates/cpworker/src/packet.rs:279:29: replace < with > in parse_packet
+crates/cpworker/src/packet.rs:279:44: replace < with <= in parse_packet
+crates/cpworker/src/packet.rs:279:53: replace + with * in parse_packet
+crates/cpworker/src/packet.rs:279:44: replace < with == in parse_packet
+crates/cpworker/src/packet.rs:279:44: replace < with > in parse_packet
+crates/cpworker/src/packet.rs:279:53: replace + with - in parse_packet
+crates/cpworker/src/packet.rs:282:20: replace += with *= in parse_packet
+crates/cpworker/src/packet.rs:283:27: replace == with != in parse_packet
+crates/cpworker/src/packet.rs:282:20: replace += with -= in parse_packet
+crates/cpworker/src/packet.rs:284:23: replace < with <= in parse_packet
+crates/cpworker/src/packet.rs:284:23: replace < with == in parse_packet
+crates/cpworker/src/packet.rs:284:23: replace < with > in parse_packet
+crates/cpworker/src/packet.rs:284:32: replace + with * in parse_packet
+crates/cpworker/src/packet.rs:289:20: replace += with -= in parse_packet
+crates/cpworker/src/packet.rs:289:20: replace += with *= in parse_packet
+crates/cpworker/src/packet.rs:295:59: replace + with - in parse_packet
+crates/cpworker/src/packet.rs:295:59: replace + with * in parse_packet
+crates/cpworker/src/packet.rs:295:76: replace + with * in parse_packet
+crates/cpworker/src/packet.rs:295:76: replace + with - in parse_packet
+crates/cpworker/src/packet.rs:296:29: replace < with == in parse_packet
+crates/cpworker/src/packet.rs:296:29: replace < with > in parse_packet
+crates/cpworker/src/packet.rs:296:46: replace + with * in parse_packet
+crates/cpworker/src/packet.rs:296:29: replace < with <= in parse_packet
+crates/cpworker/src/packet.rs:296:46: replace + with - in parse_packet
+crates/cpworker/src/packet.rs:299:59: replace - with / in parse_packet
+crates/cpworker/src/packet.rs:299:59: replace - with + in parse_packet
+crates/cpworker/src/packet.rs:299:42: replace - with + in parse_packet
+crates/cpworker/src/packet.rs:304:25: replace > with == in parse_packet
+crates/cpworker/src/packet.rs:299:42: replace - with / in parse_packet
+crates/cpworker/src/packet.rs:304:25: replace > with >= in parse_packet
+crates/cpworker/src/packet.rs:304:25: replace > with < in parse_packet
+crates/cpworker/src/packet.rs:308:30: replace - with + in parse_packet
+crates/cpworker/src/packet.rs:308:30: replace - with / in parse_packet
+crates/cpworker/src/packet.rs:309:22: replace > with < in parse_packet
+crates/cpworker/src/packet.rs:309:22: replace > with == in parse_packet
+crates/cpworker/src/packet.rs:336:5: replace extract_ipport -> Option<IpPort> with None
+crates/cpworker/src/packet.rs:336:23: replace < with == in extract_ipport
+crates/cpworker/src/packet.rs:336:37: replace + with - in extract_ipport
+crates/cpworker/src/packet.rs:336:23: replace < with > in extract_ipport
+crates/cpworker/src/packet.rs:339:53: replace + with - in extract_ipport
+crates/cpworker/src/packet.rs:336:37: replace + with * in extract_ipport
+crates/cpworker/src/packet.rs:339:71: replace + with - in extract_ipport
+crates/cpworker/src/packet.rs:339:71: replace + with * in extract_ipport
+crates/cpworker/src/packet.rs:339:53: replace + with * in extract_ipport
+crates/cpworker/src/packet.rs:340:32: replace + with * in extract_ipport
+crates/cpworker/src/packet.rs:340:32: replace + with - in extract_ipport
+crates/cpworker/src/packet.rs:354:27: replace < with == in extract_ipport
+crates/cpworker/src/packet.rs:354:27: replace < with > in extract_ipport
+crates/cpworker/src/packet.rs:354:34: replace + with * in extract_ipport
+crates/cpworker/src/packet.rs:354:34: replace + with - in extract_ipport
+crates/cpworker/src/packet.rs:357:52: replace + with - in extract_ipport
+crates/cpworker/src/packet.rs:357:42: replace + with - in extract_ipport
+crates/cpworker/src/packet.rs:357:42: replace + with * in extract_ipport
+crates/cpworker/src/packet.rs:357:52: replace + with * in extract_ipport
+crates/cpworker/src/packet.rs:358:14: replace += with -= in extract_ipport
+crates/cpworker/src/packet.rs:358:14: replace += with *= in extract_ipport
+crates/cpworker/src/packet.rs:362:9: delete match arm ETHERTYPE_IP in extract_ipport
+crates/cpworker/src/packet.rs:363:9: delete match arm ETHERTYPE_IPV6 in extract_ipport
+crates/cpworker/src/packet.rs:369:23: replace < with == in extract_ipport_ipv4
+crates/cpworker/src/packet.rs:369:5: replace extract_ipport_ipv4 -> Option<IpPort> with None
+crates/cpworker/src/packet.rs:369:23: replace < with > in extract_ipport_ipv4
+crates/cpworker/src/packet.rs:369:23: replace < with <= in extract_ipport_ipv4
+crates/cpworker/src/packet.rs:369:29: replace + with - in extract_ipport_ipv4
+crates/cpworker/src/packet.rs:369:29: replace + with * in extract_ipport_ipv4
+crates/cpworker/src/packet.rs:372:49: replace * with + in extract_ipport_ipv4
+crates/cpworker/src/packet.rs:372:49: replace * with / in extract_ipport_ipv4
+crates/cpworker/src/packet.rs:372:31: replace & with ^ in extract_ipport_ipv4
+crates/cpworker/src/packet.rs:373:17: replace || with && in extract_ipport_ipv4
+crates/cpworker/src/packet.rs:372:31: replace & with | in extract_ipport_ipv4
+crates/cpworker/src/packet.rs:373:12: replace < with == in extract_ipport_ipv4
+crates/cpworker/src/packet.rs:373:12: replace < with > in extract_ipport_ipv4
+crates/cpworker/src/packet.rs:373:12: replace < with <= in extract_ipport_ipv4
+crates/cpworker/src/packet.rs:373:35: replace < with == in extract_ipport_ipv4
+crates/cpworker/src/packet.rs:373:41: replace + with - in extract_ipport_ipv4
+crates/cpworker/src/packet.rs:373:35: replace < with > in extract_ipport_ipv4
+crates/cpworker/src/packet.rs:373:35: replace < with <= in extract_ipport_ipv4
+crates/cpworker/src/packet.rs:373:41: replace + with * in extract_ipport_ipv4
+crates/cpworker/src/packet.rs:380:60: replace + with - in extract_ipport_ipv4
+crates/cpworker/src/packet.rs:381:42: replace + with * in extract_ipport_ipv4
+crates/cpworker/src/packet.rs:380:60: replace + with * in extract_ipport_ipv4
+crates/cpworker/src/packet.rs:393:9: delete match arm IPPROTO_TCP in extract_ipport_ipv4
+crates/cpworker/src/packet.rs:381:42: replace + with - in extract_ipport_ipv4
+crates/cpworker/src/packet.rs:381:56: replace + with - in extract_ipport_ipv4
+crates/cpworker/src/packet.rs:381:56: replace + with * in extract_ipport_ipv4
+crates/cpworker/src/packet.rs:392:24: replace + with - in extract_ipport_ipv4
+crates/cpworker/src/packet.rs:394:9: delete match arm IPPROTO_UDP in extract_ipport_ipv4
+crates/cpworker/src/packet.rs:392:24: replace + with * in extract_ipport_ipv4
+crates/cpworker/src/packet.rs:393:49: replace + with - in extract_ipport_ipv4
+crates/cpworker/src/packet.rs:393:49: replace + with * in extract_ipport_ipv4
+crates/cpworker/src/packet.rs:394:49: replace + with - in extract_ipport_ipv4
+crates/cpworker/src/packet.rs:394:49: replace + with * in extract_ipport_ipv4
+crates/cpworker/src/packet.rs:401:23: replace < with > in extract_ipport_ipv6
+crates/cpworker/src/packet.rs:401:5: replace extract_ipport_ipv6 -> Option<IpPort> with None
+crates/cpworker/src/packet.rs:401:23: replace < with == in extract_ipport_ipv6
+crates/cpworker/src/packet.rs:401:23: replace < with <= in extract_ipport_ipv6
+crates/cpworker/src/packet.rs:401:29: replace + with - in extract_ipport_ipv6
+crates/cpworker/src/packet.rs:404:62: replace + with * in extract_ipport_ipv6
+crates/cpworker/src/packet.rs:405:43: replace + with * in extract_ipport_ipv6
+crates/cpworker/src/packet.rs:401:29: replace + with * in extract_ipport_ipv6
+crates/cpworker/src/packet.rs:404:62: replace + with - in extract_ipport_ipv6
+crates/cpworker/src/packet.rs:405:43: replace + with - in extract_ipport_ipv6
+crates/cpworker/src/packet.rs:405:57: replace + with - in extract_ipport_ipv6
+crates/cpworker/src/packet.rs:405:57: replace + with * in extract_ipport_ipv6
+crates/cpworker/src/packet.rs:416:24: replace + with - in extract_ipport_ipv6
+crates/cpworker/src/packet.rs:416:24: replace + with * in extract_ipport_ipv6
+crates/cpworker/src/packet.rs:417:9: delete match arm IPPROTO_TCP in extract_ipport_ipv6
+crates/cpworker/src/packet.rs:418:9: delete match arm IPPROTO_UDP in extract_ipport_ipv6
+crates/cpworker/src/packet.rs:418:49: replace + with - in extract_ipport_ipv6
+crates/cpworker/src/packet.rs:417:49: replace + with - in extract_ipport_ipv6
+crates/cpworker/src/packet.rs:425:23: replace < with == in fill_ports
+crates/cpworker/src/packet.rs:417:49: replace + with * in extract_ipport_ipv6
+crates/cpworker/src/packet.rs:418:49: replace + with * in extract_ipport_ipv6
+crates/cpworker/src/packet.rs:425:5: replace fill_ports with ()
+crates/cpworker/src/packet.rs:425:23: replace < with > in fill_ports
+crates/cpworker/src/packet.rs:428:41: replace + with - in fill_ports
+crates/cpworker/src/packet.rs:425:23: replace < with <= in fill_ports
+crates/cpworker/src/packet.rs:425:29: replace + with * in fill_ports
+crates/cpworker/src/packet.rs:425:29: replace + with - in fill_ports
+crates/cpworker/src/packet.rs:429:36: replace + with * in fill_ports
+crates/cpworker/src/packet.rs:428:41: replace + with * in fill_ports
+crates/cpworker/src/packet.rs:429:45: replace + with - in fill_ports
+crates/cpworker/src/packet.rs:429:36: replace + with - in fill_ports
+crates/cpworker/src/packet.rs:433:12: replace && with || in fill_ports
+crates/cpworker/src/packet.rs:434:33: replace + with - in fill_ports
+crates/cpworker/src/packet.rs:429:45: replace + with * in fill_ports
+crates/cpworker/src/packet.rs:434:33: replace + with * in fill_ports
+crates/cpworker/src/packet.rs:434:29: replace + with - in fill_ports
+crates/cpworker/src/packet.rs:434:29: replace + with * in fill_ports
+crates/cpworker/src/packet.rs:435:27: replace >= with < in fill_ports
+crates/cpworker/src/packet.rs:435:54: replace + with * in fill_ports
+crates/cpworker/src/packet_split.rs:12:5: replace cksum_fold -> u16 with 0
+crates/cpworker/src/packet.rs:435:40: replace + with * in fill_ports
+crates/cpworker/src/packet_split.rs:12:23: replace + with * in cksum_fold
+crates/cpworker/src/packet_split.rs:12:23: replace + with - in cksum_fold
+crates/cpworker/src/packet_split.rs:12:5: replace cksum_fold -> u16 with 1
+crates/cpworker/src/packet_split.rs:12:30: replace & with | in cksum_fold
+crates/cpworker/src/packet_split.rs:12:16: replace >> with << in cksum_fold
+crates/cpworker/src/packet_split.rs:12:30: replace & with ^ in cksum_fold
+crates/cpworker/src/packet_split.rs:13:23: replace + with - in cksum_fold
+crates/cpworker/src/packet_split.rs:13:16: replace >> with << in cksum_fold
+crates/cpworker/src/packet_split.rs:13:23: replace + with * in cksum_fold
+crates/cpworker/src/packet_split.rs:13:30: replace & with ^ in cksum_fold
+crates/cpworker/src/packet_split.rs:13:30: replace & with | in cksum_fold
+crates/cpworker/src/packet_split.rs:26:13: replace += with *= in cksum_accumulate
+crates/cpworker/src/packet_split.rs:26:13: replace += with -= in cksum_accumulate
+crates/cpworker/src/packet_split.rs:23:5: replace cksum_accumulate -> u32 with 0
+crates/cpworker/src/packet_split.rs:23:5: replace cksum_accumulate -> u32 with 1
+crates/cpworker/src/packet_split.rs:29:13: replace += with -= in cksum_accumulate
+crates/cpworker/src/packet_split.rs:29:13: replace += with *= in cksum_accumulate
+crates/cpworker/src/packet_split.rs:36:5: replace cksum_finish -> u16 with 0
+crates/cpworker/src/packet_split.rs:36:5: replace cksum_finish -> u16 with 1
+crates/cpworker/src/packet_split.rs:36:5: delete ! in cksum_finish
+crates/cpworker/src/packet_split.rs:42:5: replace htons -> u16 with 0
+crates/cpworker/src/packet_split.rs:42:5: replace htons -> u16 with 1
+crates/cpworker/src/packet_split.rs:48:45: replace * with + in calculate_ip_checksum
+crates/cpworker/src/packet_split.rs:48:5: replace calculate_ip_checksum -> u16 with 0
+crates/cpworker/src/packet_split.rs:48:5: replace calculate_ip_checksum -> u16 with 1
+crates/cpworker/src/packet_split.rs:48:27: replace & with | in calculate_ip_checksum
+crates/cpworker/src/packet_split.rs:48:45: replace * with / in calculate_ip_checksum
+crates/cpworker/src/packet_split.rs:48:27: replace & with ^ in calculate_ip_checksum
+crates/cpworker/src/packet_split.rs:58:23: replace + with - in pseudo_header_sum_v4
+crates/cpworker/src/packet_split.rs:54:5: replace pseudo_header_sum_v4 -> u32 with 1
+crates/cpworker/src/packet_split.rs:58:55: replace + with - in pseudo_header_sum_v4
+crates/cpworker/src/packet_split.rs:58:55: replace + with * in pseudo_header_sum_v4
+crates/cpworker/src/packet_split.rs:54:5: replace pseudo_header_sum_v4 -> u32 with 0
+crates/cpworker/src/packet_split.rs:58:23: replace + with * in pseudo_header_sum_v4
+crates/cpworker/src/packet_split.rs:58:18: replace + with * in pseudo_header_sum_v4
+crates/cpworker/src/packet_split.rs:58:18: replace + with - in pseudo_header_sum_v4
+crates/cpworker/src/packet_split.rs:58:13: replace + with - in pseudo_header_sum_v4
+crates/cpworker/src/packet_split.rs:58:8: replace + with * in pseudo_header_sum_v4
+crates/cpworker/src/packet_split.rs:58:13: replace + with * in pseudo_header_sum_v4
+crates/cpworker/src/packet_split.rs:58:8: replace + with - in pseudo_header_sum_v4
+crates/cpworker/src/packet_split.rs:64:13: replace += with *= in pseudo_header_sum_v6
+crates/cpworker/src/packet_split.rs:62:5: replace pseudo_header_sum_v6 -> u32 with 0
+crates/cpworker/src/packet_split.rs:66:32: replace + with - in pseudo_header_sum_v6
+crates/cpworker/src/packet_split.rs:64:13: replace += with -= in pseudo_header_sum_v6
+crates/cpworker/src/packet_split.rs:64:56: replace + with - in pseudo_header_sum_v6
+crates/cpworker/src/packet_split.rs:62:5: replace pseudo_header_sum_v6 -> u32 with 1
+crates/cpworker/src/packet_split.rs:64:56: replace + with * in pseudo_header_sum_v6
+crates/cpworker/src/packet_split.rs:66:32: replace + with * in pseudo_header_sum_v6
+crates/cpworker/src/packet_split.rs:66:9: replace + with - in pseudo_header_sum_v6
+crates/cpworker/src/packet_split.rs:66:9: replace + with * in pseudo_header_sum_v6
+crates/cpworker/src/packet_split.rs:77:5: replace calculate_tcp_checksum -> u16 with 0
+crates/cpworker/src/packet_split.rs:77:5: replace calculate_tcp_checksum -> u16 with 1
+crates/cpworker/src/packet_split.rs:95:5: replace calculate_udp_checksum -> u16 with 0
+crates/cpworker/src/packet_split.rs:109:5: replace put_ne16 with ()
+crates/cpworker/src/packet_split.rs:115:5: replace calculate_fragment_count -> i32 with 1
+crates/cpworker/src/packet_split.rs:115:5: replace calculate_fragment_count -> i32 with 0
+crates/cpworker/src/packet_split.rs:95:5: replace calculate_udp_checksum -> u16 with 1
+crates/cpworker/src/packet_split.rs:115:30: replace || with && in calculate_fragment_count
+crates/cpworker/src/packet_split.rs:115:5: replace calculate_fragment_count -> i32 with -1
+crates/cpworker/src/packet_split.rs:115:25: replace <= with > in calculate_fragment_count
+crates/cpworker/src/packet_split.rs:115:47: replace <= with > in calculate_fragment_count
+crates/cpworker/src/packet_split.rs:125:5: replace udp_checksum_for_wire -> u16 with 0
+crates/cpworker/src/packet_split.rs:125:5: replace udp_checksum_for_wire -> u16 with 1
+crates/cpworker/src/packet_split.rs:125:11: replace == with != in udp_checksum_for_wire
+crates/cpworker/src/packet_split.rs:141:5: replace build_fragment -> Option<usize> with None
+crates/cpworker/src/packet_split.rs:141:5: replace build_fragment -> Option<usize> with Some(0)
+crates/cpworker/src/packet_split.rs:146:35: replace - with + in build_fragment
+crates/cpworker/src/packet_split.rs:143:23: replace >= with < in build_fragment
+crates/cpworker/src/packet_split.rs:141:5: replace build_fragment -> Option<usize> with Some(1)
+crates/cpworker/src/packet_split.rs:153:32: replace + with - in build_fragment
+crates/cpworker/src/packet_split.rs:153:32: replace + with * in build_fragment
+crates/cpworker/src/packet_split.rs:146:35: replace - with / in build_fragment
+crates/cpworker/src/packet_split.rs:154:37: replace || with && in build_fragment
+crates/cpworker/src/packet_split.rs:148:26: replace == with != in build_fragment
+crates/cpworker/src/packet_split.rs:154:25: replace < with > in build_fragment
+crates/cpworker/src/packet_split.rs:154:25: replace < with == in build_fragment
+crates/cpworker/src/packet_split.rs:154:25: replace < with <= in build_fragment
+crates/cpworker/src/packet_split.rs:154:55: replace < with == in build_fragment
+crates/cpworker/src/packet_split.rs:154:55: replace < with > in build_fragment
+crates/cpworker/src/packet_split.rs:160:30: replace + with - in build_fragment
+crates/cpworker/src/packet_split.rs:154:68: replace + with * in build_fragment
+crates/cpworker/src/packet_split.rs:154:55: replace < with <= in build_fragment
+crates/cpworker/src/packet_split.rs:160:30: replace + with * in build_fragment
+crates/cpworker/src/packet_split.rs:160:76: replace + with * in build_fragment
+crates/cpworker/src/packet_split.rs:154:68: replace + with - in build_fragment
+crates/cpworker/src/packet_split.rs:160:76: replace + with - in build_fragment
+crates/cpworker/src/packet_split.rs:164:54: replace + with - in build_fragment
+crates/cpworker/src/packet_split.rs:160:59: replace + with - in build_fragment
+crates/cpworker/src/packet_split.rs:160:59: replace + with * in build_fragment
+crates/cpworker/src/packet_split.rs:164:54: replace + with * in build_fragment
+crates/cpworker/src/packet_split.rs:165:46: replace + with * in build_fragment
+crates/cpworker/src/packet_split.rs:164:39: replace + with - in build_fragment
+crates/cpworker/src/packet_split.rs:165:46: replace + with - in build_fragment
+crates/cpworker/src/packet_split.rs:164:39: replace + with * in build_fragment
+crates/cpworker/src/packet_split.rs:167:36: replace + with - in build_fragment
+crates/cpworker/src/packet_split.rs:168:36: replace + with - in build_fragment
+crates/cpworker/src/packet_split.rs:167:36: replace + with * in build_fragment
+crates/cpworker/src/packet_split.rs:169:81: replace + with - in build_fragment
+crates/cpworker/src/packet_split.rs:168:36: replace + with * in build_fragment
+crates/cpworker/src/packet_split.rs:170:50: replace + with - in build_fragment
+crates/cpworker/src/packet_split.rs:170:50: replace + with * in build_fragment
+crates/cpworker/src/packet_split.rs:173:58: replace + with - in build_fragment
+crates/cpworker/src/packet_split.rs:173:58: replace + with * in build_fragment
+crates/cpworker/src/packet_split.rs:173:43: replace + with * in build_fragment
+crates/cpworker/src/packet_split.rs:173:43: replace + with - in build_fragment
+crates/cpworker/src/packet_split.rs:174:46: replace + with * in build_fragment
+crates/cpworker/src/packet_split.rs:174:46: replace + with - in build_fragment
+crates/cpworker/src/packet_split.rs:178:48: replace + with - in build_fragment
+crates/cpworker/src/packet_split.rs:178:48: replace + with * in build_fragment
+crates/cpworker/src/packet_split.rs:180:41: replace + with - in build_fragment
+crates/cpworker/src/packet_split.rs:184:41: replace + with * in build_fragment
+crates/cpworker/src/packet_split.rs:184:41: replace + with - in build_fragment
+crates/cpworker/src/packet_split.rs:180:41: replace + with * in build_fragment
+crates/cpworker/src/packet_split.rs:185:36: replace + with - in build_fragment
+crates/cpworker/src/packet_split.rs:185:36: replace + with * in build_fragment
+crates/cpworker/src/packet_split.rs:186:36: replace + with * in build_fragment
+crates/cpworker/src/packet_split.rs:202:50: replace + with - in build_fragment
+crates/cpworker/src/packet_split.rs:186:36: replace + with - in build_fragment
+crates/cpworker/src/packet_split.rs:202:50: replace + with * in build_fragment
+crates/cpworker/src/packet_split.rs:205:37: replace + with - in build_fragment
+crates/cpworker/src/packet_split.rs:205:37: replace + with * in build_fragment
+crates/cpworker/src/packet_split.rs:206:46: replace + with - in build_fragment
+crates/cpworker/src/packet_split.rs:206:46: replace + with * in build_fragment
+crates/cpworker/src/packet_split.rs:208:36: replace + with * in build_fragment
+crates/cpworker/src/packet_split.rs:209:36: replace + with - in build_fragment
+crates/cpworker/src/packet_split.rs:209:36: replace + with * in build_fragment
+crates/cpworker/src/packet_split.rs:208:36: replace + with - in build_fragment
+crates/cpworker/src/packet_split.rs:226:45: replace + with * in build_fragment
+crates/cpworker/src/bpf/codes.rs:31:42: replace | with &
+crates/cpworker/src/packet_split.rs:226:45: replace + with - in build_fragment
+crates/cpworker/src/bpf/codes.rs:31:34: replace | with &
+crates/cpworker/src/bpf/codes.rs:33:42: replace | with &
+crates/cpworker/src/bpf/codes.rs:35:34: replace | with &
+crates/cpworker/src/bpf/codes.rs:35:42: replace | with &
+crates/cpworker/src/bpf/codes.rs:37:42: replace | with &
+crates/cpworker/src/bpf/codes.rs:37:34: replace | with &
+crates/cpworker/src/bpf/codes.rs:39:42: replace | with &
+crates/cpworker/src/bpf/codes.rs:39:34: replace | with &
+crates/cpworker/src/bpf/codes.rs:41:46: replace | with &
+crates/cpworker/src/bpf/codes.rs:41:36: replace | with &
+crates/cpworker/src/bpf/codes.rs:43:46: replace | with &
+crates/cpworker/src/bpf/codes.rs:43:36: replace | with &
+crates/cpworker/src/bpf/codes.rs:45:46: replace | with &
+crates/cpworker/src/bpf/codes.rs:45:36: replace | with &
+crates/cpworker/src/bpf/codes.rs:47:36: replace | with &
+crates/cpworker/src/bpf/codes.rs:47:46: replace | with &
+crates/cpworker/src/bpf/codes.rs:49:48: replace | with &
+crates/cpworker/src/bpf/codes.rs:49:37: replace | with &
+crates/cpworker/src/bpf/codes.rs:51:33: replace | with &
+crates/cpworker/src/bpf/codes.rs:53:32: replace | with &
+crates/cpworker/src/bpf/compiler.rs:123:5: replace compile_ast -> Result<Program> with Ok(Default::default())
+crates/cpworker/src/bpf/compiler.rs:214:5: replace full4 -> [u8; 4] with [0; 4]
+crates/cpworker/src/bpf/compiler.rs:214:5: replace full4 -> [u8; 4] with [1; 4]
+crates/cpworker/src/bpf/compiler.rs:353:9: delete match arm (IpAddr::V6(a), IpAddr::V6(m)) in lower_net
+crates/cpworker/src/bpf/compiler.rs:283:9: delete match arm (IpAddr::V4(a), IpAddr::V4(m)) in lower_net
+crates/cpworker/src/bpf/compiler.rs:419:5: replace w4 -> u32 with 0
+crates/cpworker/src/bpf/compiler.rs:423:5: replace w16 -> u32 with 0
+crates/cpworker/src/bpf/compiler.rs:419:5: replace w4 -> u32 with 1
+crates/cpworker/src/bpf/compiler.rs:423:5: replace w16 -> u32 with 1
+crates/cpworker/src/bpf/compiler.rs:423:29: replace * with + in w16
+crates/cpworker/src/bpf/compiler.rs:423:29: replace * with / in w16
+crates/cpworker/src/bpf/compiler.rs:423:43: replace + with * in w16
+crates/cpworker/src/bpf/compiler.rs:423:43: replace + with - in w16
+crates/cpworker/src/bpf/compiler.rs:423:39: replace * with + in w16
+crates/cpworker/src/bpf/compiler.rs:423:57: replace + with - in w16
+crates/cpworker/src/bpf/compiler.rs:423:57: replace + with * in w16
+crates/cpworker/src/bpf/compiler.rs:423:39: replace * with / in w16
+crates/cpworker/src/bpf/compiler.rs:423:53: replace * with / in w16
+crates/cpworker/src/bpf/compiler.rs:423:53: replace * with + in w16
+crates/cpworker/src/bpf/compiler.rs:423:71: replace + with * in w16
+crates/cpworker/src/bpf/compiler.rs:423:71: replace + with - in w16
+crates/cpworker/src/bpf/compiler.rs:423:67: replace * with / in w16
+crates/cpworker/src/bpf/compiler.rs:423:67: replace * with + in w16
+crates/cpworker/src/bpf/compiler.rs:444:9: replace Builder::bind with ()
+crates/cpworker/src/bpf/compiler.rs:470:9: replace Builder::jump with ()
+crates/cpworker/src/bpf/compiler.rs:484:9: replace Builder::test_clear with ()
+crates/cpworker/src/bpf/compiler.rs:460:9: replace Builder::branch with ()
+crates/cpworker/src/bpf/compiler.rs:476:9: replace Builder::test_eq with ()
+crates/cpworker/src/bpf/compiler.rs:490:9: replace Builder::masked_eq_final with ()
+crates/cpworker/src/bpf/compiler.rs:493:34: replace & with | in Builder::masked_eq_final
+crates/cpworker/src/bpf/compiler.rs:490:17: replace != with == in Builder::masked_eq_final
+crates/cpworker/src/bpf/compiler.rs:497:9: replace Builder::masked_eq_cont with ()
+crates/cpworker/src/bpf/compiler.rs:493:34: replace & with ^ in Builder::masked_eq_final
+crates/cpworker/src/bpf/compiler.rs:497:17: replace != with == in Builder::masked_eq_cont
+crates/cpworker/src/bpf/compiler.rs:500:26: replace & with | in Builder::masked_eq_cont
+crates/cpworker/src/bpf/compiler.rs:500:26: replace & with ^ in Builder::masked_eq_cont
+crates/cpworker/src/bpf/compiler.rs:504:9: replace Builder::emit_port_spec with ()
+crates/cpworker/src/bpf/compiler.rs:521:24: replace > with == in Builder::emit_test
+crates/cpworker/src/bpf/compiler.rs:518:9: replace Builder::emit_test with ()
+crates/cpworker/src/bpf/compiler.rs:521:24: replace > with < in Builder::emit_test
+crates/cpworker/src/bpf/compiler.rs:521:24: replace > with >= in Builder::emit_test
+crates/cpworker/src/bpf/compiler.rs:539:53: replace + with - in Builder::emit_test
+crates/cpworker/src/bpf/compiler.rs:539:53: replace + with * in Builder::emit_test
+crates/cpworker/src/bpf/compiler.rs:557:57: replace + with * in Builder::emit_test
+crates/cpworker/src/bpf/compiler.rs:557:61: replace * with / in Builder::emit_test
+crates/cpworker/src/bpf/compiler.rs:558:26: replace < with == in Builder::emit_test
+crates/cpworker/src/bpf/compiler.rs:557:61: replace * with + in Builder::emit_test
+crates/cpworker/src/bpf/compiler.rs:557:57: replace + with - in Builder::emit_test
+crates/cpworker/src/bpf/compiler.rs:558:26: replace < with > in Builder::emit_test
+crates/cpworker/src/bpf/compiler.rs:558:26: replace < with <= in Builder::emit_test
+crates/cpworker/src/bpf/compiler.rs:613:44: replace + with * in Builder::emit_test
+crates/cpworker/src/bpf/compiler.rs:606:44: replace + with * in Builder::emit_test
+crates/cpworker/src/bpf/compiler.rs:606:44: replace + with - in Builder::emit_test
+crates/cpworker/src/bpf/compiler.rs:613:44: replace + with - in Builder::emit_test
+crates/cpworker/src/bpf/compiler.rs:621:9: replace Builder::compile -> Result<()> with Ok(())
+crates/cpworker/src/bpf/compiler.rs:641:9: replace Builder::finish -> Result<Program> with Ok(Default::default())
+crates/cpworker/src/bpf/compiler.rs:666:28: replace || with && in Builder::finish
+crates/cpworker/src/bpf/compiler.rs:666:23: replace <= with > in Builder::finish
+crates/cpworker/src/bpf/compiler.rs:666:38: replace <= with > in Builder::finish
+crates/cpworker/src/bpf/compiler.rs:671:50: replace - with + in Builder::finish
+crates/cpworker/src/bpf/compiler.rs:671:30: replace - with / in Builder::finish
+crates/cpworker/src/bpf/compiler.rs:671:30: replace - with + in Builder::finish
+crates/cpworker/src/bpf/compiler.rs:672:50: replace - with + in Builder::finish
+crates/cpworker/src/bpf/compiler.rs:671:50: replace - with / in Builder::finish
+crates/cpworker/src/bpf/compiler.rs:672:50: replace - with / in Builder::finish
+crates/cpworker/src/bpf/compiler.rs:672:30: replace - with + in Builder::finish
+crates/cpworker/src/bpf/compiler.rs:673:24: replace < with == in Builder::finish
+crates/cpworker/src/bpf/compiler.rs:673:24: replace < with > in Builder::finish
+crates/cpworker/src/bpf/compiler.rs:673:24: replace < with <= in Builder::finish
+crates/cpworker/src/bpf/compiler.rs:673:39: replace < with == in Builder::finish
+crates/cpworker/src/bpf/compiler.rs:673:39: replace < with > in Builder::finish
+crates/cpworker/src/bpf/compiler.rs:673:39: replace < with <= in Builder::finish
+crates/cpworker/src/bpf/compiler.rs:679:39: replace > with < in Builder::finish
+crates/cpworker/src/bpf/compiler.rs:679:39: replace > with == in Builder::finish
+crates/cpworker/src/bpf/compiler.rs:679:39: replace > with >= in Builder::finish
+crates/cpworker/src/bpf/compiler.rs:680:39: replace > with == in Builder::finish
+crates/cpworker/src/bpf/compiler.rs:680:39: replace > with < in Builder::finish
+crates/cpworker/src/bpf/compiler.rs:682:42: replace + with - in Builder::finish
+crates/cpworker/src/bpf/compiler.rs:680:39: replace > with >= in Builder::finish
+crates/cpworker/src/bpf/compiler.rs:682:42: replace + with * in Builder::finish
+crates/cpworker/src/bpf/compiler.rs:683:52: replace <= with > in Builder::finish
+crates/cpworker/src/bpf/compiler.rs:683:48: replace + with - in Builder::finish
+crates/cpworker/src/bpf/compiler.rs:683:48: replace + with * in Builder::finish
+crates/cpworker/src/bpf/compiler.rs:684:52: replace <= with > in Builder::finish
+crates/cpworker/src/bpf/compiler.rs:684:48: replace + with - in Builder::finish
+crates/cpworker/src/bpf/compiler.rs:685:26: replace && with || in Builder::finish
+crates/cpworker/src/bpf/compiler.rs:684:48: replace + with * in Builder::finish
+crates/cpworker/src/bpf/compiler.rs:700:62: replace - with / in Builder::finish
+crates/cpworker/src/bpf/compiler.rs:700:62: replace - with + in Builder::finish
+crates/cpworker/src/bpf/compiler.rs:700:42: replace - with + in Builder::finish
+crates/cpworker/src/bpf/compiler.rs:700:42: replace - with / in Builder::finish
+crates/cpworker/src/bpf/compiler.rs:712:62: replace - with + in Builder::finish
+crates/cpworker/src/bpf/compiler.rs:712:62: replace - with / in Builder::finish
+crates/cpworker/src/bpf/compiler.rs:712:42: replace - with + in Builder::finish
+crates/cpworker/src/bpf/compiler.rs:712:42: replace - with / in Builder::finish
+crates/cpworker/src/bpf/compiler.rs:726:36: replace - with + in Builder::finish
+crates/cpworker/src/bpf/compiler.rs:726:36: replace - with / in Builder::finish
+crates/cpworker/src/bpf/compiler.rs:726:31: replace - with + in Builder::finish
+crates/cpworker/src/bpf/compiler.rs:726:31: replace - with / in Builder::finish
+crates/cpworker/src/bpf/compiler.rs:727:47: replace - with + in Builder::finish
+crates/cpworker/src/bpf/compiler.rs:727:47: replace - with / in Builder::finish
+crates/cpworker/src/bpf/compiler.rs:727:27: replace - with + in Builder::finish
+crates/cpworker/src/bpf/compiler.rs:731:36: replace - with + in Builder::finish
+crates/cpworker/src/bpf/compiler.rs:727:27: replace - with / in Builder::finish
+crates/cpworker/src/bpf/compiler.rs:731:36: replace - with / in Builder::finish
+crates/cpworker/src/bpf/compiler.rs:731:31: replace - with + in Builder::finish
+crates/cpworker/src/bpf/compiler.rs:732:47: replace - with + in Builder::finish
+crates/cpworker/src/bpf/compiler.rs:732:47: replace - with / in Builder::finish
+crates/cpworker/src/bpf/compiler.rs:732:27: replace - with + in Builder::finish
+crates/cpworker/src/bpf/interp.rs:11:5: replace load_be -> Option<u32> with None
+crates/cpworker/src/bpf/interp.rs:11:5: replace load_be -> Option<u32> with Some(0)
+crates/cpworker/src/bpf/interp.rs:11:5: replace load_be -> Option<u32> with Some(1)
+crates/cpworker/src/bpf/interp.rs:15:22: replace | with & in load_be
+crates/cpworker/src/bpf/interp.rs:15:16: replace << with >> in load_be
+crates/cpworker/src/bpf/interp.rs:22:5: replace run -> u32 with 0
+crates/cpworker/src/bpf/interp.rs:22:5: replace run -> u32 with 1
+crates/cpworker/src/bpf/interp.rs:32:13: delete match arm LD_W_ABS in run
+crates/cpworker/src/bpf/interp.rs:36:13: delete match arm LD_H_ABS in run
+crates/cpworker/src/bpf/interp.rs:40:13: delete match arm LD_B_ABS in run
+crates/cpworker/src/bpf/interp.rs:44:13: delete match arm LD_H_IND in run
+crates/cpworker/src/bpf/interp.rs:51:13: delete match arm LDX_MSH in run
+crates/cpworker/src/bpf/interp.rs:55:13: delete match arm ALU_AND_K in run
+crates/cpworker/src/bpf/interp.rs:56:13: delete match arm JMP_JA in run
+crates/cpworker/src/bpf/interp.rs:68:13: delete match arm JMP_JGT_K in run
+crates/cpworker/src/bpf/interp.rs:60:13: delete match arm JMP_JEQ_K in run
+crates/cpworker/src/bpf/interp.rs:64:13: delete match arm JMP_JGE_K in run
+crates/cpworker/src/bpf/interp.rs:76:13: delete match arm RET_K in run
+crates/cpworker/src/bpf/interp.rs:72:13: delete match arm JMP_JSET_K in run
+crates/cpworker/src/bpf/interp.rs:45:38: replace + with - in run
+crates/cpworker/src/bpf/interp.rs:45:38: replace + with * in run
+crates/cpworker/src/bpf/interp.rs:52:42: replace * with / in run
+crates/cpworker/src/bpf/interp.rs:52:42: replace * with + in run
+crates/cpworker/src/bpf/interp.rs:52:35: replace & with | in run
+crates/cpworker/src/bpf/interp.rs:52:35: replace & with ^ in run
+crates/cpworker/src/bpf/interp.rs:55:28: replace &= with |= in run
+crates/cpworker/src/bpf/interp.rs:61:32: replace == with != in run
+crates/cpworker/src/bpf/interp.rs:65:32: replace >= with < in run
+crates/cpworker/src/bpf/interp.rs:69:25: replace + with - in run
+crates/cpworker/src/bpf/interp.rs:69:32: replace > with == in run
+crates/cpworker/src/bpf/interp.rs:69:32: replace > with < in run
+crates/cpworker/src/bpf/interp.rs:69:32: replace > with >= in run
+crates/cpworker/src/bpf/interp.rs:73:40: replace != with == in run
+crates/cpworker/src/bpf/interp.rs:73:32: replace & with | in run
+crates/cpworker/src/bpf/interp.rs:73:32: replace & with ^ in run
+crates/cpworker/src/bpf/interp.rs:79:12: replace += with -= in run
+crates/cpworker/src/bpf/parser.rs:175:9: replace <impl Resolver for DnsResolver>::lookup -> std::io::Result<Vec<IpAddr>> with Ok(vec![])
+crates/cpworker/src/bpf/parser.rs:199:20: replace > with < in parse_with
+crates/cpworker/src/bpf/parser.rs:199:20: replace > with == in parse_with
+crates/cpworker/src/bpf/parser.rs:199:20: replace > with >= in parse_with
+crates/cpworker/src/bpf/parser.rs:229:5: replace tokenize -> Vec<String> with vec![]
+crates/cpworker/src/bpf/parser.rs:229:5: replace tokenize -> Vec<String> with vec![String::new()]
+crates/cpworker/src/bpf/parser.rs:229:5: replace tokenize -> Vec<String> with vec!["xyzzy".into()]
+crates/cpworker/src/bpf/parser.rs:242:13: delete match arm '(' | ')' in tokenize
+crates/cpworker/src/bpf/parser.rs:246:13: delete match arm '!' in tokenize
+crates/cpworker/src/bpf/parser.rs:250:13: delete match arm '&' in tokenize
+crates/cpworker/src/bpf/parser.rs:257:13: delete match arm '|' in tokenize
+crates/cpworker/src/bpf/parser.rs:241:18: replace match guard c.is_whitespace() with true in tokenize
+crates/cpworker/src/bpf/parser.rs:241:18: replace match guard c.is_whitespace() with false in tokenize
+crates/cpworker/src/bpf/parser.rs:252:30: replace == with != in tokenize
+crates/cpworker/src/bpf/parser.rs:259:30: replace == with != in tokenize
+crates/cpworker/src/bpf/parser.rs:284:23: replace > with < in Parser<'a>::enter
+crates/cpworker/src/bpf/parser.rs:284:23: replace > with == in Parser<'a>::enter
+crates/cpworker/src/bpf/parser.rs:284:23: replace > with >= in Parser<'a>::enter
+crates/cpworker/src/bpf/parser.rs:294:9: replace Parser<'a>::bump -> Result<()> with Ok(())
+crates/cpworker/src/bpf/parser.rs:294:20: replace += with *= in Parser<'a>::bump
+crates/cpworker/src/bpf/parser.rs:295:23: replace > with == in Parser<'a>::bump
+crates/cpworker/src/bpf/parser.rs:295:23: replace > with < in Parser<'a>::bump
+crates/cpworker/src/bpf/parser.rs:295:23: replace > with >= in Parser<'a>::bump
+crates/cpworker/src/bpf/parser.rs:304:9: replace Parser<'a>::peek -> Option<&str> with None
+crates/cpworker/src/bpf/parser.rs:304:9: replace Parser<'a>::peek -> Option<&str> with Some("")
+crates/cpworker/src/bpf/parser.rs:304:9: replace Parser<'a>::peek -> Option<&str> with Some("xyzzy")
+crates/cpworker/src/bpf/parser.rs:308:9: replace Parser<'a>::next -> Option<String> with None
+crates/cpworker/src/bpf/parser.rs:308:9: replace Parser<'a>::next -> Option<String> with Some(String::new())
+crates/cpworker/src/bpf/parser.rs:310:22: replace += with -= in Parser<'a>::next
+crates/cpworker/src/bpf/parser.rs:308:9: replace Parser<'a>::next -> Option<String> with Some("xyzzy".into())
+crates/cpworker/src/bpf/parser.rs:310:22: replace += with *= in Parser<'a>::next
+crates/cpworker/src/bpf/parser.rs:316:9: replace Parser<'a>::eat -> bool with true
+crates/cpworker/src/bpf/parser.rs:316:9: replace Parser<'a>::eat -> bool with false
+crates/cpworker/src/bpf/parser.rs:316:24: replace == with != in Parser<'a>::eat
+crates/cpworker/src/bpf/parser.rs:317:22: replace += with *= in Parser<'a>::eat
+crates/cpworker/src/bpf/parser.rs:326:41: replace || with && in Parser<'a>::parse_or
+crates/cpworker/src/bpf/parser.rs:326:27: replace == with != in Parser<'a>::parse_or
+crates/cpworker/src/bpf/parser.rs:326:56: replace == with != in Parser<'a>::parse_or
+crates/cpworker/src/bpf/parser.rs:327:22: replace += with -= in Parser<'a>::parse_or
+crates/cpworker/src/bpf/parser.rs:327:22: replace += with *= in Parser<'a>::parse_or
+crates/cpworker/src/bpf/parser.rs:337:42: replace || with && in Parser<'a>::parse_and
+crates/cpworker/src/bpf/parser.rs:337:27: replace == with != in Parser<'a>::parse_and
+crates/cpworker/src/bpf/parser.rs:338:22: replace += with -= in Parser<'a>::parse_and
+crates/cpworker/src/bpf/parser.rs:337:57: replace == with != in Parser<'a>::parse_and
+crates/cpworker/src/bpf/parser.rs:338:22: replace += with *= in Parser<'a>::parse_and
+crates/cpworker/src/bpf/parser.rs:347:39: replace || with && in Parser<'a>::parse_unary
+crates/cpworker/src/bpf/parser.rs:347:24: replace == with != in Parser<'a>::parse_unary
+crates/cpworker/src/bpf/parser.rs:347:54: replace == with != in Parser<'a>::parse_unary
+crates/cpworker/src/bpf/parser.rs:348:22: replace += with -= in Parser<'a>::parse_unary
+crates/cpworker/src/bpf/parser.rs:348:22: replace += with *= in Parser<'a>::parse_unary
+crates/cpworker/src/bpf/parser.rs:352:24: replace -= with += in Parser<'a>::parse_unary
+crates/cpworker/src/bpf/parser.rs:352:24: replace -= with /= in Parser<'a>::parse_unary
+crates/cpworker/src/bpf/parser.rs:362:24: replace -= with += in Parser<'a>::parse_primary
+crates/cpworker/src/bpf/parser.rs:362:24: replace -= with /= in Parser<'a>::parse_primary
+crates/cpworker/src/bpf/parser.rs:363:16: delete ! in Parser<'a>::parse_primary
+crates/cpworker/src/bpf/parser.rs:373:13: delete match arm Some("src") in Parser<'a>::parse_predicate
+crates/cpworker/src/bpf/parser.rs:377:13: delete match arm Some("dst") in Parser<'a>::parse_predicate
+crates/cpworker/src/bpf/parser.rs:374:26: replace += with -= in Parser<'a>::parse_predicate
+crates/cpworker/src/bpf/parser.rs:374:26: replace += with *= in Parser<'a>::parse_predicate
+crates/cpworker/src/bpf/parser.rs:378:26: replace += with -= in Parser<'a>::parse_predicate
+crates/cpworker/src/bpf/parser.rs:378:26: replace += with *= in Parser<'a>::parse_predicate
+crates/cpworker/src/bpf/parser.rs:389:13: delete match arm "host" in Parser<'a>::parse_predicate
+crates/cpworker/src/bpf/parser.rs:395:13: delete match arm "net" in Parser<'a>::parse_predicate
+crates/cpworker/src/bpf/parser.rs:396:13: delete match arm "port" in Parser<'a>::parse_predicate
+crates/cpworker/src/bpf/parser.rs:401:13: delete match arm "portrange" in Parser<'a>::parse_predicate
+crates/cpworker/src/bpf/parser.rs:406:13: delete match arm "ether" in Parser<'a>::parse_predicate
+crates/cpworker/src/bpf/parser.rs:424:29: replace != with == in Parser<'a>::parse_predicate
+crates/cpworker/src/bpf/parser.rs:475:29: replace match guard matches!(proto, Proto::Ip | Proto::Ip6 | Proto::Arp | Proto::Rarp) with false in Parser<'a>::parse_proto_qualified
+crates/cpworker/src/bpf/parser.rs:482:28: replace match guard matches!(proto, Proto::Ip | Proto::Ip6 | Proto::Arp | Proto::Rarp) with true in Parser<'a>::parse_proto_qualified
+crates/cpworker/src/bpf/parser.rs:459:13: delete match arm Some("proto") in Parser<'a>::parse_proto_qualified
+crates/cpworker/src/bpf/parser.rs:475:29: replace match guard matches!(proto, Proto::Ip | Proto::Ip6 | Proto::Arp | Proto::Rarp) with true in Parser<'a>::parse_proto_qualified
+crates/cpworker/src/bpf/parser.rs:482:28: replace match guard matches!(proto, Proto::Ip | Proto::Ip6 | Proto::Arp | Proto::Rarp) with false in Parser<'a>::parse_proto_qualified
+crates/cpworker/src/bpf/parser.rs:486:29: replace match guard matches!(proto, Proto::Tcp | Proto::Udp) with true in Parser<'a>::parse_proto_qualified
+crates/cpworker/src/bpf/parser.rs:486:29: replace match guard matches!(proto, Proto::Tcp | Proto::Udp) with false in Parser<'a>::parse_proto_qualified
+crates/cpworker/src/bpf/parser.rs:499:34: replace match guard matches!(proto, Proto::Tcp | Proto::Udp) with false in Parser<'a>::parse_proto_qualified
+crates/cpworker/src/bpf/parser.rs:499:34: replace match guard matches!(proto, Proto::Tcp | Proto::Udp) with true in Parser<'a>::parse_proto_qualified
+crates/cpworker/src/bpf/parser.rs:463:20: delete ! in Parser<'a>::parse_proto_qualified
+crates/cpworker/src/bpf/parser.rs:466:26: replace += with *= in Parser<'a>::parse_proto_qualified
+crates/cpworker/src/bpf/parser.rs:466:26: replace += with -= in Parser<'a>::parse_proto_qualified
+crates/cpworker/src/bpf/parser.rs:476:26: replace += with -= in Parser<'a>::parse_proto_qualified
+crates/cpworker/src/bpf/parser.rs:471:31: replace == with != in Parser<'a>::parse_proto_qualified
+crates/cpworker/src/bpf/parser.rs:476:26: replace += with *= in Parser<'a>::parse_proto_qualified
+crates/cpworker/src/bpf/parser.rs:483:26: replace += with -= in Parser<'a>::parse_proto_qualified
+crates/cpworker/src/bpf/parser.rs:487:26: replace += with -= in Parser<'a>::parse_proto_qualified
+crates/cpworker/src/bpf/parser.rs:483:26: replace += with *= in Parser<'a>::parse_proto_qualified
+crates/cpworker/src/bpf/parser.rs:487:26: replace += with *= in Parser<'a>::parse_proto_qualified
+crates/cpworker/src/bpf/parser.rs:488:35: replace == with != in Parser<'a>::parse_proto_qualified
+crates/cpworker/src/bpf/parser.rs:500:26: replace += with *= in Parser<'a>::parse_proto_qualified
+crates/cpworker/src/bpf/parser.rs:500:26: replace += with -= in Parser<'a>::parse_proto_qualified
+crates/cpworker/src/bpf/parser.rs:501:35: replace == with != in Parser<'a>::parse_proto_qualified
+crates/cpworker/src/bpf/parser.rs:524:9: replace Parser<'a>::parse_u16 -> Result<u16> with Ok(0)
+crates/cpworker/src/bpf/parser.rs:524:9: replace Parser<'a>::parse_u16 -> Result<u16> with Ok(1)
+crates/cpworker/src/bpf/parser.rs:544:15: replace > with == in Parser<'a>::parse_range
+crates/cpworker/src/bpf/parser.rs:544:15: replace > with < in Parser<'a>::parse_range
+crates/cpworker/src/bpf/parser.rs:544:15: replace > with >= in Parser<'a>::parse_range
+crates/cpworker/src/bpf/parser.rs:551:9: replace Parser<'a>::parse_mac -> Result<[u8; 6]> with Ok([0; 6])
+crates/cpworker/src/bpf/parser.rs:551:9: replace Parser<'a>::parse_mac -> Result<[u8; 6]> with Ok([1; 6])
+crates/cpworker/src/bpf/parser.rs:562:9: replace Parser<'a>::parse_ethertype -> Result<u32> with Ok(0)
+crates/cpworker/src/bpf/parser.rs:562:9: replace Parser<'a>::parse_ethertype -> Result<u32> with Ok(1)
+crates/cpworker/src/bpf/parser.rs:580:9: replace Parser<'a>::resolve -> Result<Vec<IpAddr>> with Ok(vec![])
+crates/cpworker/src/bpf/parser.rs:680:5: replace named_ethertype -> Option<u32> with None
+crates/cpworker/src/bpf/parser.rs:680:5: replace named_ethertype -> Option<u32> with Some(0)
+crates/cpworker/src/bpf/parser.rs:681:9: delete match arm "ip" in named_ethertype
+crates/cpworker/src/bpf/parser.rs:680:5: replace named_ethertype -> Option<u32> with Some(1)
+crates/cpworker/src/bpf/parser.rs:682:9: delete match arm "ip6" in named_ethertype
+crates/cpworker/src/bpf/parser.rs:683:9: delete match arm "arp" in named_ethertype
+crates/cpworker/src/bpf/parser.rs:684:9: delete match arm "rarp" in named_ethertype
+crates/cpworker/src/bpf/parser.rs:693:5: replace parse_u32_base0 -> Option<u32> with None
+crates/cpworker/src/bpf/parser.rs:693:5: replace parse_u32_base0 -> Option<u32> with Some(1)
+crates/cpworker/src/bpf/parser.rs:698:27: replace && with || in parse_u32_base0
+crates/cpworker/src/bpf/parser.rs:693:5: replace parse_u32_base0 -> Option<u32> with Some(0)
+crates/cpworker/src/bpf/parser.rs:693:21: replace || with && in parse_u32_base0
+crates/cpworker/src/bpf/parser.rs:698:23: replace > with == in parse_u32_base0
+crates/cpworker/src/bpf/parser.rs:698:23: replace > with < in parse_u32_base0
+crates/cpworker/src/bpf/parser.rs:698:23: replace > with >= in parse_u32_base0
+crates/cpworker/src/bpf/parser.rs:712:9: delete match arm "ip6" | "ipv6" in proto_from_keyword
+crates/cpworker/src/bpf/parser.rs:710:5: replace proto_from_keyword -> Option<Proto> with None
+crates/cpworker/src/bpf/parser.rs:713:9: delete match arm "arp" in proto_from_keyword
+crates/cpworker/src/bpf/parser.rs:711:9: delete match arm "ip" in proto_from_keyword
+crates/cpworker/src/bpf/parser.rs:714:9: delete match arm "rarp" in proto_from_keyword
+crates/cpworker/src/bpf/parser.rs:715:9: delete match arm "tcp" in proto_from_keyword
+crates/cpworker/src/bpf/parser.rs:716:9: delete match arm "udp" in proto_from_keyword
+crates/cpworker/src/bpf/parser.rs:717:9: delete match arm "icmp" in proto_from_keyword
+crates/cpworker/src/bpf/parser.rs:718:9: delete match arm "icmp6" | "icmpv6" in proto_from_keyword
+crates/cpworker/src/bpf/parser.rs:743:5: replace net_masks -> Result<Vec<(IpAddr, IpAddr)>> with Ok(vec![])
+crates/cpworker/src/bpf/parser.rs:751:32: replace != with == in net_masks
+crates/cpworker/src/bpf/parser.rs:787:5: replace bounded_addrs -> Result<Vec<IpAddr>> with Ok(vec![])
+crates/cpworker/src/bpf/parser.rs:757:12: delete ! in net_masks
+crates/cpworker/src/bpf/parser.rs:787:20: replace > with == in bounded_addrs
+crates/cpworker/src/bpf/parser.rs:787:20: replace > with >= in bounded_addrs
+crates/cpworker/src/bpf/parser.rs:787:20: replace > with < in bounded_addrs
+crates/cpworker/src/bpf/parser.rs:798:5: replace parse_mac -> Result<[u8; 6]> with Ok([1; 6])
+crates/cpworker/src/bpf/parser.rs:798:5: replace parse_mac -> Result<[u8; 6]> with Ok([0; 6])
+crates/cpworker/src/bpf/parser.rs:814:21: replace > with == in prefix_mask
+crates/cpworker/src/bpf/parser.rs:800:20: replace != with == in parse_mac
+crates/cpworker/src/bpf/parser.rs:814:21: replace > with < in prefix_mask
+crates/cpworker/src/bpf/parser.rs:814:21: replace > with >= in prefix_mask
+crates/cpworker/src/bpf/parser.rs:817:32: replace == with != in prefix_mask
+crates/cpworker/src/bpf/parser.rs:820:26: replace << with >> in prefix_mask
+crates/cpworker/src/bpf/parser.rs:820:33: replace - with / in prefix_mask
+crates/cpworker/src/bpf/parser.rs:820:33: replace - with + in prefix_mask
+crates/cpworker/src/bpf/parser.rs:825:21: replace > with < in prefix_mask
+crates/cpworker/src/bpf/parser.rs:825:21: replace > with == in prefix_mask
+crates/cpworker/src/bpf/parser.rs:825:21: replace > with >= in prefix_mask
+crates/cpworker/src/bpf/parser.rs:828:32: replace == with != in prefix_mask
+crates/cpworker/src/bpf/parser.rs:831:27: replace << with >> in prefix_mask
+crates/cpworker/src/bpf/parser.rs:831:35: replace - with + in prefix_mask
+crates/cpworker/src/bpf/parser.rs:831:35: replace - with / in prefix_mask
+crates/cpworker/src/bpf/parser.rs:840:9: delete match arm (IpAddr::V4(a), IpAddr::V4(m)) in mask_addr
+crates/cpworker/src/bpf/parser.rs:840:82: replace & with | in mask_addr
+crates/cpworker/src/bpf/parser.rs:841:9: delete match arm (IpAddr::V6(a), IpAddr::V6(m)) in mask_addr
+crates/cpworker/src/bpf/parser.rs:840:82: replace & with ^ in mask_addr
+crates/cpworker/src/bpf/parser.rs:841:83: replace & with ^ in mask_addr
+crates/cpworker/src/bpf/resolvers.rs:62:5: replace clear_name_cache with ()
+crates/cpworker/src/bpf/resolvers.rs:53:5: replace global_table -> Table with Default::default()
+crates/cpworker/src/bpf/parser.rs:841:83: replace & with | in mask_addr
+crates/cpworker/src/bpf/resolvers.rs:70:5: replace name_cache_len -> usize with 0
+crates/cpworker/src/bpf/resolvers.rs:70:5: replace name_cache_len -> usize with 1
+crates/cpworker/src/bpf/resolvers.rs:120:9: replace CachedResolver<R>::len -> usize with 0
+crates/cpworker/src/bpf/resolvers.rs:126:9: replace CachedResolver<R>::is_empty -> bool with true
+crates/cpworker/src/bpf/resolvers.rs:120:9: replace CachedResolver<R>::len -> usize with 1
+crates/cpworker/src/bpf/resolvers.rs:142:55: replace && with || in <impl Resolver for CachedResolver<R>>::lookup
+crates/cpworker/src/bpf/resolvers.rs:142:44: replace < with == in <impl Resolver for CachedResolver<R>>::lookup
+crates/cpworker/src/bpf/resolvers.rs:139:9: replace <impl Resolver for CachedResolver<R>>::lookup -> std::io::Result<Vec<IpAddr>> with Ok(vec![])
+crates/cpworker/src/bpf/resolvers.rs:131:9: replace CachedResolver<R>::clear with ()
+crates/cpworker/src/bpf/resolvers.rs:126:9: replace CachedResolver<R>::is_empty -> bool with false
+crates/cpworker/src/bpf/resolvers.rs:126:20: replace == with != in CachedResolver<R>::is_empty
+crates/cpworker/src/bpf/resolvers.rs:142:44: replace < with > in <impl Resolver for CachedResolver<R>>::lookup
+crates/cpworker/src/bpf/resolvers.rs:142:58: delete ! in <impl Resolver for CachedResolver<R>>::lookup
+crates/cpworker/src/bpf/resolvers.rs:149:28: replace >= with < in <impl Resolver for CachedResolver<R>>::lookup
+crates/cpworker/src/bpf/resolvers.rs:169:5: replace prewarm -> super::Result<()> with Ok(())
+crates/cpworker/src/bpf/linux.rs:44:11: replace != with == in attach
+crates/cpworker/src/output/gre.rs:22:27: replace | with & in gre_header
+crates/cpworker/src/output/gre.rs:22:5: replace gre_header -> [u8; GRE_HDR_LEN] with [0; GRE_HDR_LEN]
+crates/cpworker/src/bpf/linux.rs:24:5: replace attach -> io::Result<()> with Ok(())
+crates/cpworker/src/output/gre.rs:22:27: replace | with ^ in gre_header
+crates/cpworker/src/output/gre.rs:22:5: replace gre_header -> [u8; GRE_HDR_LEN] with [1; GRE_HDR_LEN]
+crates/cpworker/src/output/gre.rs:22:46: replace << with >> in gre_header
+crates/cpworker/src/output/gre.rs:55:5: replace set_pmtudisc -> std::io::Result<()> with Ok(())
+crates/cpworker/src/output/gre.rs:51:5: replace set_bind_device -> std::io::Result<()> with Ok(())
+crates/cpworker/src/output/gre.rs:114:60: replace || with && in GreOutput::flush_error_info
+crates/cpworker/src/output/gre.rs:112:9: replace GreOutput::flush_error_info with ()
+crates/cpworker/src/output/gre.rs:114:30: replace > with == in GreOutput::flush_error_info
+crates/cpworker/src/output/gre.rs:114:34: replace || with && in GreOutput::flush_error_info
+crates/cpworker/src/output/gre.rs:114:30: replace > with < in GreOutput::flush_error_info
+crates/cpworker/src/output/gre.rs:114:56: replace > with == in GreOutput::flush_error_info
+crates/cpworker/src/output/gre.rs:114:56: replace > with < in GreOutput::flush_error_info
+crates/cpworker/src/output/gre.rs:114:91: replace > with == in GreOutput::flush_error_info
+crates/cpworker/src/output/gre.rs:114:91: replace > with < in GreOutput::flush_error_info
+crates/cpworker/src/output/gre.rs:134:9: replace <impl Output for GreOutput>::send_packet -> i32 with 0
+crates/cpworker/src/output/gre.rs:134:9: replace <impl Output for GreOutput>::send_packet -> i32 with 1
+crates/cpworker/src/output/gre.rs:134:9: replace <impl Output for GreOutput>::send_packet -> i32 with -1
+crates/cpworker/src/output/gre.rs:135:27: replace && with || in <impl Output for GreOutput>::send_packet
+crates/cpworker/src/output/gre.rs:135:23: replace > with == in <impl Output for GreOutput>::send_packet
+crates/cpworker/src/output/gre.rs:135:23: replace > with < in <impl Output for GreOutput>::send_packet
+crates/cpworker/src/output/gre.rs:135:23: replace > with >= in <impl Output for GreOutput>::send_packet
+crates/cpworker/src/output/gre.rs:135:50: replace < with > in <impl Output for GreOutput>::send_packet
+crates/cpworker/src/output/gre.rs:135:50: replace < with == in <impl Output for GreOutput>::send_packet
+crates/cpworker/src/output/gre.rs:143:20: delete - in <impl Output for GreOutput>::send_packet
+crates/cpworker/src/output/gre.rs:140:19: replace == with != in <impl Output for GreOutput>::send_packet
+crates/cpworker/src/output/gre.rs:147:40: replace + with - in <impl Output for GreOutput>::send_packet
+crates/cpworker/src/output/gre.rs:147:16: delete ! in <impl Output for GreOutput>::send_packet
+crates/cpworker/src/output/gre.rs:147:40: replace + with * in <impl Output for GreOutput>::send_packet
+crates/cpworker/src/output/gre.rs:150:39: replace + with - in <impl Output for GreOutput>::send_packet
+crates/cpworker/src/output/gre.rs:150:39: replace + with * in <impl Output for GreOutput>::send_packet
+crates/cpworker/src/output/gre.rs:152:24: delete - in <impl Output for GreOutput>::send_packet
+crates/cpworker/src/output/gre.rs:159:43: replace + with - in <impl Output for GreOutput>::send_packet
+crates/cpworker/src/output/gre.rs:163:30: replace > with == in <impl Output for GreOutput>::send_packet
+crates/cpworker/src/output/gre.rs:159:43: replace + with * in <impl Output for GreOutput>::send_packet
+crates/cpworker/src/output/gre.rs:161:41: replace == with != in <impl Output for GreOutput>::send_packet
+crates/cpworker/src/output/gre.rs:163:30: replace > with < in <impl Output for GreOutput>::send_packet
+crates/cpworker/src/output/gre.rs:163:30: replace > with >= in <impl Output for GreOutput>::send_packet
+crates/cpworker/src/output/gre.rs:168:33: replace + with - in <impl Output for GreOutput>::send_packet
+crates/cpworker/src/output/gre.rs:163:61: replace + with * in <impl Output for GreOutput>::send_packet
+crates/cpworker/src/output/gre.rs:163:61: replace + with - in <impl Output for GreOutput>::send_packet
+crates/cpworker/src/output/gre.rs:168:33: replace + with * in <impl Output for GreOutput>::send_packet
+crates/cpworker/src/output/gre.rs:173:29: replace < with > in <impl Output for GreOutput>::send_packet
+crates/cpworker/src/output/gre.rs:173:29: replace < with <= in <impl Output for GreOutput>::send_packet
+crates/cpworker/src/output/gre.rs:174:58: replace += with -= in <impl Output for GreOutput>::send_packet
+crates/cpworker/src/output/gre.rs:173:29: replace < with == in <impl Output for GreOutput>::send_packet
+crates/cpworker/src/output/gre.rs:174:58: replace += with *= in <impl Output for GreOutput>::send_packet
+crates/cpworker/src/output/gre.rs:175:64: replace - with + in <impl Output for GreOutput>::send_packet
+crates/cpworker/src/output/gre.rs:178:32: delete - in <impl Output for GreOutput>::send_packet
+crates/cpworker/src/output/gre.rs:175:64: replace - with / in <impl Output for GreOutput>::send_packet
+crates/cpworker/src/output/gre.rs:185:58: replace && with || in <impl Output for GreOutput>::send_packet
+crates/cpworker/src/output/gre.rs:185:41: replace == with != in <impl Output for GreOutput>::send_packet
+crates/cpworker/src/output/gre.rs:185:67: replace < with > in <impl Output for GreOutput>::send_packet
+crates/cpworker/src/output/gre.rs:185:67: replace < with <= in <impl Output for GreOutput>::send_packet
+crates/cpworker/src/output/gre.rs:185:67: replace < with == in <impl Output for GreOutput>::send_packet
+crates/cpworker/src/output/gre.rs:191:41: replace == with != in <impl Output for GreOutput>::send_packet
+crates/cpworker/src/output/gre.rs:188:31: replace += with *= in <impl Output for GreOutput>::send_packet
+crates/cpworker/src/output/gre.rs:192:57: replace += with -= in <impl Output for GreOutput>::send_packet
+crates/cpworker/src/output/gre.rs:192:57: replace += with *= in <impl Output for GreOutput>::send_packet
+crates/cpworker/src/output/gre.rs:197:67: replace += with *= in <impl Output for GreOutput>::send_packet
+crates/cpworker/src/output/gre.rs:197:67: replace += with -= in <impl Output for GreOutput>::send_packet
+crates/cpworker/src/output/gre.rs:194:70: replace == with != in <impl Output for GreOutput>::send_packet
+crates/cpworker/src/output/gre.rs:201:28: delete - in <impl Output for GreOutput>::send_packet
+crates/cpworker/src/output/gre.rs:211:5: replace _pmtudisc_consts -> [i32; 3] with [1; 3]
+crates/cpworker/src/output/gre.rs:211:5: replace _pmtudisc_consts -> [i32; 3] with [0; 3]
+crates/cpworker/src/output/vxlan.rs:21:5: replace set_bind_device -> std::io::Result<()> with Ok(())
+crates/cpworker/src/output/vxlan.rs:25:5: replace set_pmtudisc -> std::io::Result<()> with Ok(())
+crates/cpworker/src/output/vxlan.rs:30:5: replace rte_raw_cksum -> u16 with 0
+crates/cpworker/src/output/gre.rs:211:5: replace _pmtudisc_consts -> [i32; 3] with [-1; 3]
+crates/cpworker/src/output/vxlan.rs:30:5: replace rte_raw_cksum -> u16 with 1
+crates/cpworker/src/output/vxlan.rs:31:52: replace * with / in rte_raw_cksum
+crates/cpworker/src/output/vxlan.rs:31:48: replace / with % in rte_raw_cksum
+crates/cpworker/src/output/vxlan.rs:31:52: replace * with + in rte_raw_cksum
+crates/cpworker/src/output/vxlan.rs:31:48: replace / with * in rte_raw_cksum
+crates/cpworker/src/output/vxlan.rs:33:13: replace += with -= in rte_raw_cksum
+crates/cpworker/src/output/vxlan.rs:33:13: replace += with *= in rte_raw_cksum
+crates/cpworker/src/output/vxlan.rs:36:13: replace += with -= in rte_raw_cksum
+crates/cpworker/src/output/vxlan.rs:38:38: replace + with - in rte_raw_cksum
+crates/cpworker/src/output/vxlan.rs:36:13: replace += with *= in rte_raw_cksum
+crates/cpworker/src/output/vxlan.rs:38:31: replace >> with << in rte_raw_cksum
+crates/cpworker/src/output/vxlan.rs:38:38: replace + with * in rte_raw_cksum
+crates/cpworker/src/output/vxlan.rs:38:17: replace & with | in rte_raw_cksum
+crates/cpworker/src/output/vxlan.rs:38:45: replace & with | in rte_raw_cksum
+crates/cpworker/src/output/vxlan.rs:38:17: replace & with ^ in rte_raw_cksum
+crates/cpworker/src/output/vxlan.rs:38:45: replace & with ^ in rte_raw_cksum
+crates/cpworker/src/output/vxlan.rs:39:38: replace + with * in rte_raw_cksum
+crates/cpworker/src/output/vxlan.rs:39:38: replace + with - in rte_raw_cksum
+crates/cpworker/src/output/vxlan.rs:39:31: replace >> with << in rte_raw_cksum
+crates/cpworker/src/output/vxlan.rs:39:45: replace & with | in rte_raw_cksum
+crates/cpworker/src/output/vxlan.rs:39:17: replace & with ^ in rte_raw_cksum
+crates/cpworker/src/output/vxlan.rs:39:17: replace & with | in rte_raw_cksum
+crates/cpworker/src/output/vxlan.rs:39:45: replace & with ^ in rte_raw_cksum
+crates/cpworker/src/output/vxlan.rs:59:5: replace vxlan_encapsulate -> usize with 0
+crates/cpworker/src/output/vxlan.rs:59:5: replace vxlan_encapsulate -> usize with 1
+crates/cpworker/src/output/vxlan.rs:65:41: replace * with + in vxlan_encapsulate
+crates/cpworker/src/output/vxlan.rs:61:38: replace + with - in vxlan_encapsulate
+crates/cpworker/src/output/vxlan.rs:61:38: replace + with * in vxlan_encapsulate
+crates/cpworker/src/output/vxlan.rs:66:27: replace + with * in vxlan_encapsulate
+crates/cpworker/src/output/vxlan.rs:65:41: replace * with / in vxlan_encapsulate
+crates/cpworker/src/output/vxlan.rs:66:27: replace + with - in vxlan_encapsulate
+crates/cpworker/src/output/vxlan.rs:66:60: replace + with - in vxlan_encapsulate
+crates/cpworker/src/output/vxlan.rs:66:60: replace + with * in vxlan_encapsulate
+crates/cpworker/src/output/vxlan.rs:66:51: replace + with * in vxlan_encapsulate
+crates/cpworker/src/output/vxlan.rs:66:51: replace + with - in vxlan_encapsulate
+crates/cpworker/src/output/vxlan.rs:67:16: replace += with -= in vxlan_encapsulate
+crates/cpworker/src/output/vxlan.rs:68:27: replace + with - in vxlan_encapsulate
+crates/cpworker/src/output/vxlan.rs:67:16: replace += with *= in vxlan_encapsulate
+crates/cpworker/src/output/vxlan.rs:68:60: replace + with - in vxlan_encapsulate
+crates/cpworker/src/output/vxlan.rs:68:27: replace + with * in vxlan_encapsulate
+crates/cpworker/src/output/vxlan.rs:68:51: replace + with - in vxlan_encapsulate
+crates/cpworker/src/output/vxlan.rs:68:51: replace + with * in vxlan_encapsulate
+crates/cpworker/src/output/vxlan.rs:68:60: replace + with * in vxlan_encapsulate
+crates/cpworker/src/output/vxlan.rs:69:16: replace += with *= in vxlan_encapsulate
+crates/cpworker/src/output/vxlan.rs:69:16: replace += with -= in vxlan_encapsulate
+crates/cpworker/src/output/vxlan.rs:72:20: replace == with != in vxlan_encapsulate
+crates/cpworker/src/output/vxlan.rs:74:19: replace != with == in vxlan_encapsulate
+crates/cpworker/src/output/vxlan.rs:75:52: replace << with >> in vxlan_encapsulate
+crates/cpworker/src/output/vxlan.rs:73:34: replace << with >> in vxlan_encapsulate
+crates/cpworker/src/output/vxlan.rs:81:70: replace + with - in vxlan_encapsulate
+crates/cpworker/src/output/vxlan.rs:75:44: replace & with | in vxlan_encapsulate
+crates/cpworker/src/output/vxlan.rs:75:44: replace & with ^ in vxlan_encapsulate
+crates/cpworker/src/output/vxlan.rs:76:26: replace &= with |= in vxlan_encapsulate
+crates/cpworker/src/output/vxlan.rs:81:70: replace + with * in vxlan_encapsulate
+crates/cpworker/src/output/vxlan.rs:88:19: replace + with - in vxlan_encapsulate
+crates/cpworker/src/output/vxlan.rs:81:56: replace + with * in vxlan_encapsulate
+crates/cpworker/src/output/vxlan.rs:171:9: replace VxlanOutput::flush_error_info with ()
+crates/cpworker/src/output/vxlan.rs:88:19: replace + with * in vxlan_encapsulate
+crates/cpworker/src/output/vxlan.rs:173:60: replace || with && in VxlanOutput::flush_error_info
+crates/cpworker/src/output/vxlan.rs:173:30: replace > with == in VxlanOutput::flush_error_info
+crates/cpworker/src/output/vxlan.rs:173:34: replace || with && in VxlanOutput::flush_error_info
+crates/cpworker/src/output/vxlan.rs:173:30: replace > with < in VxlanOutput::flush_error_info
+crates/cpworker/src/output/vxlan.rs:173:56: replace > with == in VxlanOutput::flush_error_info
+crates/cpworker/src/output/vxlan.rs:173:56: replace > with < in VxlanOutput::flush_error_info
+crates/cpworker/src/output/vxlan.rs:173:91: replace > with < in VxlanOutput::flush_error_info
+crates/cpworker/src/output/vxlan.rs:173:91: replace > with == in VxlanOutput::flush_error_info
+crates/cpworker/src/output/vxlan.rs:195:9: replace VxlanOutput::do_send_packet -> i32 with 1
+crates/cpworker/src/output/vxlan.rs:195:9: replace VxlanOutput::do_send_packet -> i32 with 0
+crates/cpworker/src/output/vxlan.rs:195:9: replace VxlanOutput::do_send_packet -> i32 with -1
+crates/cpworker/src/output/vxlan.rs:209:29: replace < with == in VxlanOutput::do_send_packet
+crates/cpworker/src/output/vxlan.rs:209:29: replace < with <= in VxlanOutput::do_send_packet
+crates/cpworker/src/output/vxlan.rs:209:29: replace < with > in VxlanOutput::do_send_packet
+crates/cpworker/src/output/vxlan.rs:210:58: replace += with -= in VxlanOutput::do_send_packet
+crates/cpworker/src/output/vxlan.rs:210:58: replace += with *= in VxlanOutput::do_send_packet
+crates/cpworker/src/output/vxlan.rs:211:64: replace - with / in VxlanOutput::do_send_packet
+crates/cpworker/src/output/vxlan.rs:211:64: replace - with + in VxlanOutput::do_send_packet
+crates/cpworker/src/output/vxlan.rs:214:32: delete - in VxlanOutput::do_send_packet
+crates/cpworker/src/output/vxlan.rs:221:58: replace && with || in VxlanOutput::do_send_packet
+crates/cpworker/src/output/vxlan.rs:221:41: replace == with != in VxlanOutput::do_send_packet
+crates/cpworker/src/output/vxlan.rs:221:67: replace < with > in VxlanOutput::do_send_packet
+crates/cpworker/src/output/vxlan.rs:221:67: replace < with == in VxlanOutput::do_send_packet
+crates/cpworker/src/output/vxlan.rs:221:67: replace < with <= in VxlanOutput::do_send_packet
+crates/cpworker/src/output/vxlan.rs:224:31: replace += with *= in VxlanOutput::do_send_packet
+crates/cpworker/src/output/vxlan.rs:228:57: replace += with *= in VxlanOutput::do_send_packet
+crates/cpworker/src/output/vxlan.rs:227:41: replace == with != in VxlanOutput::do_send_packet
+crates/cpworker/src/output/vxlan.rs:230:70: replace == with != in VxlanOutput::do_send_packet
+crates/cpworker/src/output/vxlan.rs:228:57: replace += with -= in VxlanOutput::do_send_packet
+crates/cpworker/src/output/vxlan.rs:233:67: replace += with -= in VxlanOutput::do_send_packet
+crates/cpworker/src/output/vxlan.rs:246:9: replace <impl Output for VxlanOutput>::send_packet -> i32 with 0
+crates/cpworker/src/output/vxlan.rs:237:28: delete - in VxlanOutput::do_send_packet
+crates/cpworker/src/output/vxlan.rs:233:67: replace += with *= in VxlanOutput::do_send_packet
+crates/cpworker/src/output/vxlan.rs:246:9: replace <impl Output for VxlanOutput>::send_packet -> i32 with 1
+crates/cpworker/src/output/vxlan.rs:246:9: replace <impl Output for VxlanOutput>::send_packet -> i32 with -1
+crates/cpworker/src/output/vxlan.rs:247:27: replace && with || in <impl Output for VxlanOutput>::send_packet
+crates/cpworker/src/output/vxlan.rs:247:23: replace > with == in <impl Output for VxlanOutput>::send_packet
+crates/cpworker/src/output/vxlan.rs:247:23: replace > with < in <impl Output for VxlanOutput>::send_packet
+crates/cpworker/src/output/vxlan.rs:247:50: replace < with == in <impl Output for VxlanOutput>::send_packet
+crates/cpworker/src/output/vxlan.rs:247:23: replace > with >= in <impl Output for VxlanOutput>::send_packet
+crates/cpworker/src/output/vxlan.rs:247:50: replace < with > in <impl Output for VxlanOutput>::send_packet
+crates/cpworker/src/output/vxlan.rs:255:20: delete - in <impl Output for VxlanOutput>::send_packet
+crates/cpworker/src/output/vxlan.rs:259:16: delete ! in <impl Output for VxlanOutput>::send_packet
+crates/cpworker/src/output/vxlan.rs:252:19: replace == with != in <impl Output for VxlanOutput>::send_packet
+crates/cpworker/src/output/vxlan.rs:259:42: replace + with - in <impl Output for VxlanOutput>::send_packet
+crates/cpworker/src/output/vxlan.rs:259:42: replace + with * in <impl Output for VxlanOutput>::send_packet
+crates/cpworker/src/output/vxlan.rs:262:41: replace + with - in <impl Output for VxlanOutput>::send_packet
+crates/cpworker/src/output/vxlan.rs:262:41: replace + with * in <impl Output for VxlanOutput>::send_packet
+crates/cpworker/src/output/vxlan.rs:268:41: replace == with != in <impl Output for VxlanOutput>::send_packet
+crates/cpworker/src/output/vxlan.rs:264:24: delete - in <impl Output for VxlanOutput>::send_packet
+crates/cpworker/src/output/vxlan.rs:270:30: replace > with == in <impl Output for VxlanOutput>::send_packet
+crates/cpworker/src/output/vxlan.rs:270:30: replace > with < in <impl Output for VxlanOutput>::send_packet
+crates/cpworker/src/output/vxlan.rs:270:61: replace + with - in <impl Output for VxlanOutput>::send_packet
+crates/cpworker/src/output/vxlan.rs:270:30: replace > with >= in <impl Output for VxlanOutput>::send_packet
+crates/cpworker/src/output/vxlan.rs:270:61: replace + with * in <impl Output for VxlanOutput>::send_packet
+crates/cpworker/src/output/vxlan.rs:276:34: replace == with != in <impl Output for VxlanOutput>::send_packet
+crates/cpworker/src/output/vxlan.rs:276:49: replace <= with > in <impl Output for VxlanOutput>::send_packet
+crates/cpworker/src/output/vxlan.rs:284:18: replace == with != in <impl Output for VxlanOutput>::send_packet
+crates/cpworker/src/output/vxlan.rs:303:20: replace != with == in <impl Output for VxlanOutput>::send_packet
+crates/cpworker/src/zmtp/client.rs:177:9: replace Conn::out_pending -> bool with true
+crates/cpworker/src/zmtp/client.rs:188:9: replace Conn::can_write_messages -> bool with true
+crates/cpworker/src/zmtp/client.rs:188:9: replace Conn::can_write_messages -> bool with false
+crates/cpworker/src/zmtp/client.rs:188:35: replace && with || in Conn::can_write_messages
+crates/cpworker/src/zmtp/client.rs:188:20: replace == with != in Conn::can_write_messages
+crates/cpworker/src/zmtp/client.rs:188:38: delete ! in Conn::can_write_messages
+crates/cpworker/src/zmtp/client.rs:177:9: replace Conn::out_pending -> bool with false
+crates/cpworker/src/zmtp/client.rs:181:22: replace != with == in Conn::out_pending
+crates/cpworker/src/zmtp/client.rs:192:9: replace Conn::handshake_expired -> bool with false
+crates/cpworker/src/zmtp/client.rs:192:9: replace Conn::handshake_expired -> bool with true
+crates/cpworker/src/zmtp/client.rs:192:20: replace != with == in Conn::handshake_expired
+crates/cpworker/src/zmtp/client.rs:202:41: replace < with == in Conn::advance
+crates/cpworker/src/zmtp/client.rs:192:35: replace && with || in Conn::handshake_expired
+crates/cpworker/src/zmtp/client.rs:202:41: replace < with <= in Conn::advance
+crates/cpworker/src/zmtp/client.rs:192:42: replace >= with < in Conn::handshake_expired
+crates/cpworker/src/zmtp/client.rs:202:41: replace < with > in Conn::advance
+crates/cpworker/src/zmtp/client.rs:198:9: replace Conn::advance -> Result<(), ()> with Ok(())
+crates/cpworker/src/zmtp/client.rs:238:33: delete match arm Ok(codec::Command::Ping(data)) in Conn::advance
+crates/cpworker/src/zmtp/client.rs:164:9: replace Conn::queue_out with ()
+crates/cpworker/src/zmtp/client.rs:241:33: delete match arm Ok(codec::Command::Error(_)) in Conn::advance
+crates/cpworker/src/zmtp/client.rs:262:55: replace * with +
+crates/cpworker/src/zmtp/client.rs:262:55: replace * with /
+crates/cpworker/src/zmtp/client.rs:262:48: replace * with +
+crates/cpworker/src/zmtp/client.rs:262:48: replace * with /
+crates/cpworker/src/zmtp/client.rs:318:9: replace ZmtpPush::max_queued_bytes -> usize with 0
+crates/cpworker/src/zmtp/client.rs:318:9: replace ZmtpPush::max_queued_bytes -> usize with 1
+crates/cpworker/src/zmtp/client.rs:334:9: replace ZmtpPush::handshakes_given_up -> u64 with 0
+crates/cpworker/src/zmtp/client.rs:221:36: delete ! in Conn::advance
+crates/cpworker/src/zmtp/client.rs:334:9: replace ZmtpPush::handshakes_given_up -> u64 with 1
+crates/cpworker/src/zmtp/client.rs:346:9: replace ZmtpPush::queued -> usize with 0
+crates/cpworker/src/zmtp/client.rs:346:9: replace ZmtpPush::queued -> usize with 1
+crates/cpworker/src/zmtp/client.rs:352:9: replace ZmtpPush::hwm -> usize with 0
+crates/cpworker/src/zmtp/client.rs:352:9: replace ZmtpPush::hwm -> usize with 1
+crates/cpworker/src/zmtp/client.rs:359:9: replace ZmtpPush::can_write_messages -> bool with true
+crates/cpworker/src/zmtp/client.rs:368:9: replace ZmtpPush::queued_bytes -> usize with 0
+crates/cpworker/src/zmtp/client.rs:359:9: replace ZmtpPush::can_write_messages -> bool with false
+crates/cpworker/src/zmtp/client.rs:368:9: replace ZmtpPush::queued_bytes -> usize with 1
+crates/cpworker/src/zmtp/client.rs:340:9: replace ZmtpPush::is_connected -> bool with false
+crates/cpworker/src/zmtp/client.rs:391:32: replace + with * in ZmtpPush::send_with_account
+crates/cpworker/src/zmtp/client.rs:391:47: replace > with == in ZmtpPush::send_with_account
+crates/cpworker/src/zmtp/client.rs:391:32: replace + with - in ZmtpPush::send_with_account
+crates/cpworker/src/zmtp/client.rs:391:47: replace > with >= in ZmtpPush::send_with_account
+crates/cpworker/src/zmtp/client.rs:391:47: replace > with < in ZmtpPush::send_with_account
+crates/cpworker/src/zmtp/client.rs:392:43: replace || with && in ZmtpPush::send_with_account
+crates/cpworker/src/zmtp/client.rs:392:31: replace >= with < in ZmtpPush::send_with_account
+crates/cpworker/src/zmtp/client.rs:392:74: replace > with == in ZmtpPush::send_with_account
+crates/cpworker/src/zmtp/client.rs:392:74: replace > with < in ZmtpPush::send_with_account
+crates/cpworker/src/zmtp/client.rs:392:74: replace > with >= in ZmtpPush::send_with_account
+crates/cpworker/src/zmtp/client.rs:392:65: replace + with - in ZmtpPush::send_with_account
+crates/cpworker/src/zmtp/client.rs:396:28: replace += with -= in ZmtpPush::send_with_account
+crates/cpworker/src/zmtp/client.rs:396:28: replace += with *= in ZmtpPush::send_with_account
+crates/cpworker/src/zmtp/client.rs:421:9: replace ZmtpPush::discard_queued -> usize with 0
+crates/cpworker/src/zmtp/client.rs:411:9: replace ZmtpPush::take_loss_report -> LossReport with Default::default()
+crates/cpworker/src/zmtp/client.rs:421:9: replace ZmtpPush::discard_queued -> usize with 1
+crates/cpworker/src/zmtp/client.rs:425:23: replace += with -= in ZmtpPush::discard_queued
+crates/cpworker/src/zmtp/client.rs:425:23: replace += with *= in ZmtpPush::discard_queued
+crates/cpworker/src/zmtp/client.rs:434:9: replace ZmtpPush::report_loss with ()
+crates/cpworker/src/zmtp/client.rs:392:65: replace + with * in ZmtpPush::send_with_account
+crates/cpworker/src/zmtp/client.rs:471:34: replace += with -= in ZmtpPush::abandon_handshake
+crates/cpworker/src/zmtp/client.rs:471:34: replace += with *= in ZmtpPush::abandon_handshake
+crates/cpworker/src/zmtp/client.rs:441:9: replace ZmtpPush::poll with ()
+crates/cpworker/src/zmtp/client.rs:461:9: replace ZmtpPush::conn_pending_or_stalled -> bool with true
+crates/cpworker/src/zmtp/client.rs:461:9: replace ZmtpPush::conn_pending_or_stalled -> bool with false
+crates/cpworker/src/zmtp/client.rs:468:9: replace ZmtpPush::abandon_handshake with ()
+crates/cpworker/src/zmtp/client.rs:486:9: replace ZmtpPush::drain_for with ()
+crates/cpworker/src/zmtp/client.rs:486:39: replace + with - in ZmtpPush::drain_for
+crates/cpworker/src/zmtp/client.rs:487:58: replace < with == in ZmtpPush::drain_for
+crates/cpworker/src/zmtp/client.rs:487:15: delete ! in ZmtpPush::drain_for
+crates/cpworker/src/zmtp/client.rs:496:9: replace ZmtpPush::maybe_connect with ()
+crates/cpworker/src/zmtp/client.rs:496:50: replace < with == in ZmtpPush::maybe_connect
+crates/cpworker/src/zmtp/client.rs:496:32: replace || with && in ZmtpPush::maybe_connect
+crates/cpworker/src/zmtp/client.rs:540:35: replace == with != in ZmtpPush::drive
+crates/cpworker/src/zmtp/client.rs:544:30: replace && with || in ZmtpPush::drive
+crates/cpworker/src/zmtp/client.rs:496:50: replace < with > in ZmtpPush::maybe_connect
+crates/cpworker/src/zmtp/client.rs:544:20: delete ! in ZmtpPush::drive
+crates/cpworker/src/zmtp/client.rs:517:39: replace + with - in ZmtpPush::maybe_connect
+crates/cpworker/src/zmtp/client.rs:544:44: replace == with != in ZmtpPush::drive
+crates/cpworker/src/zmtp/client.rs:537:9: replace ZmtpPush::drive with ()
+crates/cpworker/src/zmtp/client.rs:572:31: replace match guard e.kind() == io::ErrorKind::WouldBlock with true in ZmtpPush::drive_conn
+crates/cpworker/src/zmtp/client.rs:557:9: replace ZmtpPush::drive_conn -> Result<(), ()> with Ok(())
+crates/cpworker/src/zmtp/client.rs:557:23: replace == with != in ZmtpPush::drive_conn
+crates/cpworker/src/zmtp/client.rs:572:31: replace match guard e.kind() == io::ErrorKind::WouldBlock with false in ZmtpPush::drive_conn
+crates/cpworker/src/zmtp/client.rs:568:28: replace < with <= in ZmtpPush::drive_conn
+crates/cpworker/src/zmtp/client.rs:573:31: replace match guard e.kind() == io::ErrorKind::Interrupted with false in ZmtpPush::drive_conn
+crates/cpworker/src/zmtp/client.rs:571:39: replace += with -= in ZmtpPush::drive_conn
+crates/cpworker/src/zmtp/client.rs:572:40: replace == with != in ZmtpPush::drive_conn
+crates/cpworker/src/zmtp/client.rs:577:25: replace == with != in ZmtpPush::drive_conn
+crates/cpworker/src/zmtp/client.rs:587:31: replace match guard e.kind() == io::ErrorKind::WouldBlock with true in ZmtpPush::drive_conn
+crates/cpworker/src/zmtp/client.rs:568:28: replace < with == in ZmtpPush::drive_conn
+crates/cpworker/src/zmtp/client.rs:568:28: replace < with > in ZmtpPush::drive_conn
+crates/cpworker/src/zmtp/client.rs:588:31: replace match guard e.kind() == io::ErrorKind::Interrupted with false in ZmtpPush::drive_conn
+crates/cpworker/src/zmtp/client.rs:587:31: replace match guard e.kind() == io::ErrorKind::WouldBlock with false in ZmtpPush::drive_conn
+crates/cpworker/src/zmtp/client.rs:599:9: replace ZmtpPush::flush_pending with ()
+crates/cpworker/src/zmtp/client.rs:599:12: delete ! in ZmtpPush::flush_pending
+crates/cpworker/src/zmtp/client.rs:587:40: replace == with != in ZmtpPush::drive_conn
+crates/cpworker/src/zmtp/client.rs:621:23: replace < with == in ZmtpPush::flush_pending
+crates/cpworker/src/zmtp/client.rs:621:23: replace < with > in ZmtpPush::flush_pending
+crates/cpworker/src/zmtp/client.rs:632:35: replace match guard e.kind() == io::ErrorKind::WouldBlock with true in ZmtpPush::flush_pending
+crates/cpworker/src/zmtp/client.rs:621:23: replace < with <= in ZmtpPush::flush_pending
+crates/cpworker/src/zmtp/client.rs:632:35: replace match guard e.kind() == io::ErrorKind::WouldBlock with false in ZmtpPush::flush_pending
+crates/cpworker/src/zmtp/client.rs:639:35: replace match guard e.kind() == io::ErrorKind::Interrupted with false in ZmtpPush::flush_pending
+crates/cpworker/src/zmtp/client.rs:631:34: replace += with -= in ZmtpPush::flush_pending
+crates/cpworker/src/zmtp/client.rs:632:44: replace == with != in ZmtpPush::flush_pending
+crates/cpworker/src/zmtp/client.rs:634:44: replace += with -= in ZmtpPush::flush_pending
+crates/cpworker/src/zmtp/client.rs:634:44: replace += with *= in ZmtpPush::flush_pending
+crates/cpworker/src/zmtp/client.rs:571:39: replace += with *= in ZmtpPush::drive_conn
+crates/cpworker/src/zmtp/client.rs:652:24: replace == with != in ZmtpPush::flush_pending
+crates/cpworker/src/zmtp/client.rs:653:40: replace += with -= in ZmtpPush::flush_pending
+crates/cpworker/src/zmtp/client.rs:653:40: replace += with *= in ZmtpPush::flush_pending
+crates/cpworker/src/zmtp/client.rs:670:9: replace ZmtpPush::schedule_reconnect with ()
+crates/cpworker/src/zmtp/client.rs:676:44: replace + with - in ZmtpPush::schedule_reconnect
+crates/cpworker/src/zmtp/client.rs:677:38: replace * with / in ZmtpPush::schedule_reconnect
+crates/cpworker/src/zmtp/client.rs:688:9: replace <impl Transport for TcpTransport>::write -> io::Result<usize> with Ok(0)
+crates/cpworker/src/zmtp/client.rs:691:9: replace <impl Transport for TcpTransport>::read -> io::Result<usize> with Ok(0)
+crates/cpworker/src/zmtp/client.rs:694:9: replace <impl Transport for TcpTransport>::check_connected -> io::Result<bool> with Ok(true)
+crates/cpworker/src/zmtp/client.rs:694:9: replace <impl Transport for TcpTransport>::check_connected -> io::Result<bool> with Ok(false)
+crates/cpworker/src/zmtp/client.rs:694:12: delete ! in <impl Transport for TcpTransport>::check_connected
+crates/cpworker/src/zmtp/client.rs:688:9: replace <impl Transport for TcpTransport>::write -> io::Result<usize> with Ok(1)
+crates/cpworker/src/zmtp/client.rs:724:12: delete ! in <impl Transport for TcpTransport>::check_connected
+crates/cpworker/src/zmtp/client.rs:747:9: replace <impl Resolver for SystemResolver>::resolve -> io::Result<Vec<SocketAddr>> with Ok(vec![])
+crates/cpworker/src/zmtp/client.rs:818:37: delete ! in BackgroundResolver::with_worker_resolver
+crates/cpworker/src/zmtp/client.rs:848:60: replace >= with < in <impl Resolver for BackgroundResolver>::resolve
+crates/cpworker/src/zmtp/client.rs:851:18: replace && with || in <impl Resolver for BackgroundResolver>::resolve
+crates/cpworker/src/zmtp/client.rs:844:9: replace <impl Resolver for BackgroundResolver>::resolve -> io::Result<Vec<SocketAddr>> with Ok(vec![])
+crates/cpworker/src/zmtp/client.rs:851:21: delete ! in <impl Resolver for BackgroundResolver>::resolve
+crates/cpworker/src/zmtp/client.rs:885:16: replace match guard e.raw_os_error() == Some(libc::EINPROGRESS) || e.kind() == io::ErrorKind::WouldBlock with true in connect_stream
+crates/cpworker/src/zmtp/client.rs:885:16: replace match guard e.raw_os_error() == Some(libc::EINPROGRESS) || e.kind() == io::ErrorKind::WouldBlock with false in connect_stream
+crates/cpworker/src/zmtp/client.rs:886:17: replace || with && in connect_stream
+crates/cpworker/src/zmtp/client.rs:885:33: replace == with != in connect_stream
+crates/cpworker/src/zmtp/client.rs:886:29: replace == with != in connect_stream
+crates/cpworker/src/zmtp/client.rs:901:5: replace set_tcp_timeouts -> io::Result<()> with Ok(())
+crates/cpworker/src/zmtp/client.rs:933:22: replace match guard !v.is_empty() with true in TcpConnector::refresh_addresses
+crates/cpworker/src/zmtp/client.rs:928:9: replace TcpConnector::refresh_addresses with ()
+crates/cpworker/src/zmtp/client.rs:929:12: delete ! in TcpConnector::refresh_addresses
+crates/cpworker/src/zmtp/client.rs:928:66: replace >= with < in TcpConnector::refresh_addresses
+crates/cpworker/src/zmtp/client.rs:933:22: replace match guard !v.is_empty() with false in TcpConnector::refresh_addresses
+crates/cpworker/src/zmtp/client.rs:954:34: replace + with - in <impl Connector for TcpConnector>::start
+crates/cpworker/src/zmtp/client.rs:954:39: replace % with + in <impl Connector for TcpConnector>::start
+crates/cpworker/src/zmtp/client.rs:959:43: replace % with + in <impl Connector for TcpConnector>::start
+crates/cpworker/src/zmtp/client.rs:933:22: delete ! in TcpConnector::refresh_addresses
+crates/cpworker/src/zmtp/client.rs:954:39: replace % with / in <impl Connector for TcpConnector>::start
+crates/cpworker/src/zmtp/client.rs:959:38: replace + with - in <impl Connector for TcpConnector>::start
+crates/cpworker/src/zmtp/client.rs:954:34: replace + with * in <impl Connector for TcpConnector>::start
+crates/cpworker/src/zmtp/client.rs:959:43: replace % with / in <impl Connector for TcpConnector>::start
+crates/cpworker/src/zmtp/client.rs:969:37: replace % with + in <impl Connector for TcpConnector>::start
+crates/cpworker/src/zmtp/client.rs:969:32: replace + with - in <impl Connector for TcpConnector>::start
+crates/cpworker/src/zmtp/client.rs:969:37: replace % with / in <impl Connector for TcpConnector>::start
+crates/cpworker/src/zmtp/client.rs:969:32: replace + with * in <impl Connector for TcpConnector>::start
+crates/cpworker/src/zmtp/codec.rs:25:45: replace * with +
+crates/cpworker/src/zmtp/client.rs:959:38: replace + with * in <impl Connector for TcpConnector>::start
+crates/cpworker/src/zmtp/codec.rs:25:45: replace * with /
+crates/cpworker/src/zmtp/codec.rs:25:38: replace * with +
+crates/cpworker/src/zmtp/codec.rs:25:38: replace * with /
+crates/cpworker/src/zmtp/codec.rs:33:9: replace <impl std::fmt::Display for CodecError>::fmt -> std::fmt::Result with Ok(Default::default())
+crates/cpworker/src/zmtp/codec.rs:87:18: replace < with > in parse_greeting
+crates/cpworker/src/zmtp/codec.rs:54:9: replace Greeting::mechanism_str -> &str with ""
+crates/cpworker/src/zmtp/codec.rs:90:23: replace || with && in parse_greeting
+crates/cpworker/src/zmtp/codec.rs:54:9: replace Greeting::mechanism_str -> &str with "xyzzy"
+crates/cpworker/src/zmtp/codec.rs:57:30: replace == with != in Greeting::mechanism_str
+crates/cpworker/src/zmtp/codec.rs:66:5: replace greeting -> [u8; GREETING_LEN] with [0; GREETING_LEN]
+crates/cpworker/src/zmtp/codec.rs:66:5: replace greeting -> [u8; GREETING_LEN] with [1; GREETING_LEN]
+crates/cpworker/src/zmtp/codec.rs:87:18: replace < with == in parse_greeting
+crates/cpworker/src/zmtp/codec.rs:87:18: replace < with <= in parse_greeting
+crates/cpworker/src/zmtp/codec.rs:90:15: replace != with == in parse_greeting
+crates/cpworker/src/zmtp/codec.rs:131:19: replace < with <= in parse_command_body
+crates/cpworker/src/zmtp/codec.rs:131:23: replace + with - in parse_command_body
+crates/cpworker/src/zmtp/codec.rs:131:19: replace < with == in parse_command_body
+crates/cpworker/src/zmtp/codec.rs:90:33: replace != with == in parse_greeting
+crates/cpworker/src/zmtp/codec.rs:131:23: replace + with * in parse_command_body
+crates/cpworker/src/zmtp/codec.rs:104:26: replace != with == in parse_greeting
+crates/cpworker/src/zmtp/codec.rs:101:24: replace != with == in parse_greeting
+crates/cpworker/src/zmtp/codec.rs:131:19: replace < with > in parse_command_body
+crates/cpworker/src/zmtp/codec.rs:134:47: replace + with - in parse_command_body
+crates/cpworker/src/zmtp/codec.rs:137:24: replace + with - in parse_command_body
+crates/cpworker/src/zmtp/codec.rs:147:9: delete match arm "PING" in parse_command_body
+crates/cpworker/src/zmtp/codec.rs:140:9: delete match arm "ERROR" in parse_command_body
+crates/cpworker/src/zmtp/codec.rs:148:9: delete match arm "PONG" in parse_command_body
+crates/cpworker/src/zmtp/codec.rs:134:47: replace + with * in parse_command_body
+crates/cpworker/src/zmtp/codec.rs:139:9: delete match arm "READY" in parse_command_body
+crates/cpworker/src/zmtp/codec.rs:137:24: replace + with * in parse_command_body
+crates/cpworker/src/zmtp/codec.rs:155:5: replace parse_metadata -> Result<BTreeMap<String, Vec<u8>>, CodecError> with Ok(BTreeMap::new())
+crates/cpworker/src/zmtp/codec.rs:159:22: replace < with == in parse_metadata
+crates/cpworker/src/zmtp/codec.rs:155:5: replace parse_metadata -> Result<BTreeMap<String, Vec<u8>>, CodecError> with Ok(BTreeMap::from_iter([(String::new(), vec![])]))
+crates/cpworker/src/zmtp/codec.rs:155:5: replace parse_metadata -> Result<BTreeMap<String, Vec<u8>>, CodecError> with Ok(BTreeMap::from_iter([(String::new(), vec![0])]))
+crates/cpworker/src/zmtp/codec.rs:155:5: replace parse_metadata -> Result<BTreeMap<String, Vec<u8>>, CodecError> with Ok(BTreeMap::from_iter([(String::new(), vec![1])]))
+crates/cpworker/src/zmtp/codec.rs:155:5: replace parse_metadata -> Result<BTreeMap<String, Vec<u8>>, CodecError> with Ok(BTreeMap::from_iter([("xyzzy".into(), vec![0])]))
+crates/cpworker/src/zmtp/codec.rs:155:5: replace parse_metadata -> Result<BTreeMap<String, Vec<u8>>, CodecError> with Ok(BTreeMap::from_iter([("xyzzy".into(), vec![])]))
+crates/cpworker/src/zmtp/codec.rs:159:22: replace < with <= in parse_metadata
+crates/cpworker/src/zmtp/codec.rs:155:5: replace parse_metadata -> Result<BTreeMap<String, Vec<u8>>, CodecError> with Ok(BTreeMap::from_iter([("xyzzy".into(), vec![1])]))
+crates/cpworker/src/zmtp/codec.rs:156:11: delete ! in parse_metadata
+crates/cpworker/src/zmtp/codec.rs:159:22: replace < with > in parse_metadata
+crates/cpworker/src/zmtp/codec.rs:198:5: replace pong_command -> Vec<u8> with vec![]
+crates/cpworker/src/zmtp/codec.rs:166:22: replace < with == in parse_metadata
+crates/cpworker/src/zmtp/codec.rs:166:22: replace < with > in parse_metadata
+crates/cpworker/src/zmtp/codec.rs:198:5: replace pong_command -> Vec<u8> with vec![0]
+crates/cpworker/src/zmtp/codec.rs:171:22: replace < with == in parse_metadata
+crates/cpworker/src/zmtp/codec.rs:171:22: replace < with > in parse_metadata
+crates/cpworker/src/zmtp/codec.rs:166:22: replace < with <= in parse_metadata
+crates/cpworker/src/zmtp/codec.rs:198:5: replace pong_command -> Vec<u8> with vec![1]
+crates/cpworker/src/zmtp/codec.rs:183:5: replace ready_command -> Vec<u8> with vec![0]
+crates/cpworker/src/zmtp/codec.rs:171:22: replace < with <= in parse_metadata
+crates/cpworker/src/zmtp/codec.rs:183:5: replace ready_command -> Vec<u8> with vec![]
+crates/cpworker/src/zmtp/codec.rs:183:5: replace ready_command -> Vec<u8> with vec![1]
+crates/cpworker/src/zmtp/codec.rs:215:19: replace > with < in frame
+crates/cpworker/src/zmtp/codec.rs:215:19: replace > with == in frame
+crates/cpworker/src/zmtp/codec.rs:215:19: replace > with >= in frame
+crates/cpworker/src/zmtp/codec.rs:216:24: replace | with ^ in frame
+crates/cpworker/src/zmtp/codec.rs:216:24: replace | with & in frame
+crates/cpworker/src/zmtp/codec.rs:219:24: replace & with | in frame
+crates/cpworker/src/zmtp/codec.rs:205:5: replace append_metadata with ()
+crates/cpworker/src/zmtp/codec.rs:214:5: replace frame -> Vec<u8> with vec![0]
+crates/cpworker/src/zmtp/codec.rs:214:5: replace frame -> Vec<u8> with vec![]
+crates/cpworker/src/zmtp/codec.rs:239:9: replace Frame::is_command -> bool with true
+crates/cpworker/src/zmtp/codec.rs:214:5: replace frame -> Vec<u8> with vec![1]
+crates/cpworker/src/zmtp/codec.rs:239:20: replace & with | in Frame::is_command
+crates/cpworker/src/zmtp/codec.rs:219:24: replace & with ^ in frame
+crates/cpworker/src/zmtp/codec.rs:219:26: delete ! in frame
+crates/cpworker/src/zmtp/codec.rs:256:22: replace < with == in parse_frame
+crates/cpworker/src/zmtp/codec.rs:256:22: replace < with > in parse_frame
+crates/cpworker/src/zmtp/codec.rs:239:9: replace Frame::is_command -> bool with false
+crates/cpworker/src/zmtp/codec.rs:239:35: replace != with == in Frame::is_command
+crates/cpworker/src/zmtp/codec.rs:239:20: replace & with ^ in Frame::is_command
+crates/cpworker/src/zmtp/codec.rs:256:22: replace < with <= in parse_frame
+crates/cpworker/src/zmtp/codec.rs:262:23: replace > with == in parse_frame
+crates/cpworker/src/zmtp/codec.rs:252:5: replace parse_frame -> Result<Option<(Frame, usize)>, CodecError> with Ok(None)
+crates/cpworker/src/zmtp/codec.rs:255:43: replace != with == in parse_frame
+crates/cpworker/src/zmtp/codec.rs:262:23: replace > with >= in parse_frame
+crates/cpworker/src/zmtp/codec.rs:255:31: replace & with | in parse_frame
+crates/cpworker/src/zmtp/codec.rs:255:31: replace & with ^ in parse_frame
+crates/cpworker/src/zmtp/codec.rs:267:22: replace < with <= in parse_frame
+crates/cpworker/src/zmtp/codec.rs:267:22: replace < with == in parse_frame
+crates/cpworker/src/zmtp/codec.rs:272:18: replace < with > in parse_frame
+crates/cpworker/src/zmtp/codec.rs:272:24: replace + with - in parse_frame
+crates/cpworker/src/zmtp/codec.rs:275:29: replace + with - in parse_frame
+crates/cpworker/src/zmtp/codec.rs:275:29: replace + with * in parse_frame
+crates/cpworker/src/zmtp/codec.rs:276:41: replace + with - in parse_frame
+crates/cpworker/src/zmtp/codec.rs:276:41: replace + with * in parse_frame
+crates/cpworker/src/zmtp/codec.rs:296:5: replace peer_type_compatible -> bool with true
+crates/cpworker/src/zmtp/codec.rs:267:22: replace < with > in parse_frame
+crates/cpworker/src/zmtp/codec.rs:272:18: replace < with == in parse_frame
+crates/cpworker/src/zmtp/codec.rs:272:18: replace < with <= in parse_frame
+crates/cpworker/src/zmtp/codec.rs:272:24: replace + with * in parse_frame
+crates/cpworker/src/zmtp/codec.rs:284:8: delete ! in decode_command
+crates/cpworker/src/zmtp/codec.rs:296:5: replace peer_type_compatible -> bool with false

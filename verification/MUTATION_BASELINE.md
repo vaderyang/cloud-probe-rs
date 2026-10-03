@@ -64,39 +64,85 @@ cargo mutants --config /tmp/mut-noexcl.toml -j 8 --output /tmp/mutout/sweep
 （`zmtp/client.rs` 的 `write/queue_out/drive_conn` 共 5 例：20 s 下 timeout、60 s 下 caught）。
 **重新基线化时必须用同一份预算。**
 
-## 当前基线（2026-09-30，no-exclude 全量 sweep）
+## 当前基线（2026-10-02，no-exclude 全量 sweep）
 
-范围 = `verify_mutation.sh` 的 examine_globs。**no-exclude** 结果即"测试套件真实能杀多少"：
+范围 = `verify_mutation.sh` 的 examine_globs。**no-exclude** 结果即"测试套件真实能杀多少"。
+权威产物：`verification/mutation-sweep-2026-10-02/`（`outcomes.json` + 四个分类清单 +
+`sweep.log`，命令/`-j`/耗时/两个坑见同目录 `README.md`）。工具 cargo-mutants 27.1.0，
+`-j 12`，全量耗时 18 min；候选数从上一版的 1519 涨到 1593 是源码增长，不是范围变化。
 
 | 范围 | candidates | caught | 存活(missed+timeout) | unviable | 存活分类 |
 |---|---:|---:|---:|---:|---|
 | `cpworker/bpf/codes.rs` | 44 | 21 | 23 | 0 | `\|` vs `^`（位不相交）；`BPF_LD\|BPF_W` 是 `0\|0` |
-| `cpworker/bpf/parser.rs` | 162 | 137 | 6 | 19 | runner timeout（计数变异死循环/栈溢出） |
-| `cpworker/bpf/compiler.rs` | 136 | 106 | 17 | 13 | runner timeout（`finish` 不收敛）＋ 5 等价 |
-| `cpworker/bpf/interp.rs` | 53 | 38 | 15 | 0 | runner timeout（跳转算术使 pc 不动/回退）＋ `\|`/`^` |
+| `cpworker/bpf/parser.rs` | 179 | 154 | 6 | 19 | runner timeout（计数变异死循环/栈溢出） |
+| `cpworker/bpf/compiler.rs` | 139 | 109 | 17 (6m/11t) | 13 | runner timeout（`finish` 不收敛）＋ 等价（含 `ether proto` 1500 边界，本轮已关） |
+| `cpworker/bpf/interp.rs` | 53 | 36 | 17 (1m/16t) | 0 | runner timeout（跳转算术使 pc 不动/回退）＋ `\|`/`^` |
 | `cpworker/bpf/resolvers.rs` | 25 | 17 | 1 | 7 | `Instant` 精确相等不可构造 |
 | `cpworker/bpf/mod.rs` + `linux.rs` | 13 | 12 | 1 | 0 | 非 Linux `attach_filter` 桩 |
-| `cpworker/packet.rs` | 284 | 262 | 19 | 3 | 精确边界帧无法完成解析 / 末段 `caplen` guard 兜住 |
-| `cpworker/packet_split.rs` | 128 | 127 | 1 | 0 | 校验和只读 `ihl*4` 字节 |
-| `cpworker/output/gre.rs` | 76 | 67 | 9 | 0 | 无符号计数日志门 + `slice==caplen` 等价 + 退避时长/`retry` 死循环 |
-| `cpworker/output/vxlan.rs` | 131 | 118 | 12 | 1 | 同上；奇数尾字节分支不可达；`max==0` 仍是单片 |
-| `cpworker/zmtp/client.rs` | 181 | 143 | 24 | 14 | runner timeout ＋ 压缩/日志/1ms/`Instant` 相等/POLLHUP/最佳努力 close |
+| `cpworker/packet.rs` | 288 | 269 | 16 (16m/0t) | 3 | 精确边界帧无法完成解析 / 末段 `caplen` guard 兜住（本轮关掉 3 条：doff=9..15、v6 60 B 扩展头） |
+| `cpworker/packet_split.rs` | 131 | 130 | 1 | 0 | 校验和只读 `ihl*4` 字节 |
+| `cpworker/output/gre.rs` | 76 | 67 | 9 (7m/2t) | 0 | 无符号计数日志门 + `slice==caplen` 等价 + 退避时长/`retry` 死循环 |
+| `cpworker/output/vxlan.rs` | 131 | 120 | 10 (8m/2t) | 1 | 同上；奇数尾字节分支不可达；`max==0` 仍是单片 |
+| `cpworker/zmtp/client.rs` | 188 | 149 | 24 (12m/12t) | 15 | runner timeout ＋ 压缩/日志/1ms/`Instant` 相等/POLLHUP/最佳努力 close |
 | `cpworker/zmtp/codec.rs` | 101 | 95 | 0 | 6 | — |
-| `cpworker/config.rs` | 70 | 59 | 3 | 8 | runner timeout |
+| `cpworker/config.rs` | 110 | 85 | 16 (8m/8t) | 9 | runner timeout ＋ 只写日志的范围门 |
 | `cpgolib/cpworker/client.rs` | 24 | 13 | 2 | 9 | runner timeout（mock accept 阻塞） |
 | `cpgolib/cpworker/stats.rs` | 56 | 56 | 0 | 0 | — |
 | `cpgolib/{fingerprint,worker_config,worker_fingerprint}` | 32 | 32 | 0 | 0 | — |
 | `cpgolib/slogx/mod.rs` | 3 | 2 | 1 | 0 | 进程级 logger 初始化的副作用 |
-| **合计** | **1519** | **1305 (86.0%)** | **134** | **80** | 134 条全部逐条钉住并在 `exclude_re` 附理由 |
+| **合计** | **1593** | **1367 (85.8%)** | **144 (85m+59t)** | **82** | 144 个存活由 119 条 `exclude_re` 逐条钉住并附理由 |
 
-- **0 个未登记存活**：`cargo-mutants --config verification/mutants.toml` 只测 1385 个
-  （1519 − 134 条精确豁免），missed/timeout 均为 0，退出码 0 —— 这就是阻塞门禁的验收条件。
-- 134 条豁免按 `mutation_config_gate.py` 校验：全部仍命中候选、只覆盖存活（不吞 caught）、
+- **0 个未登记存活**：`cargo-mutants --config verification/mutants.toml` 实测 1448 个
+  （1593 − 145 个被豁免命中：144 个存活 + 1 个本来就 unviable 的同位 mutant），
+  `1448 mutants tested in 8m: 1367 caught, 81 unviable`，missed/timeout 均为 0，退出码 0 —— 这就是阻塞门禁的验收条件。
+- 119 条豁免按 `mutation_config_gate.py` 校验：全部仍命中候选、只覆盖存活（不吞 caught）、
   覆盖全部存活、且逐条带理由。
-- Tier 阈值（`policy.toml`：Tier0 ≥85% / Tier1 ≥75%）作为**最低目标**；当前范围 86.0% caught，
+- Tier 阈值（`policy.toml`：Tier0 ≥85% / Tier1 ≥75%）作为**最低目标**；当前范围 85.8% caught，
   其余为上述分类的非等价项，而不是"未测量"。
 
-### 本轮修正（诚实记录）
+### 本轮（2026-10-02）收口：4 条缺口用测试关闭
+
+上一版把 129 条豁免重钉到本轮 sweep 的行号时，故意**不**豁免 4 个存活 —— 它们的等价性
+无法从代码推出，探针显示是真缺口，用测试关闭而不是登记：
+
+| 变异体 | 根因 | 新测试 |
+|---|---|---|
+| `packet.rs:220:53` `+`→`-`（v4 TCP 长度 guard） | 全套帧都是 doff≤5，`offset(34) - l4_hdr_len` 不下溢，guard 判定相同 | `parse_ipv4_tcp_with_a_header_longer_than_its_prefix`：doff=9..=15 断言 `l4_hdr_len`/`payload_offset`/`payload_len`，外加 ihl5+doff15（caplen=94、tot_len=80）的相等边界与截一字节必拒 |
+| `packet.rs:279:53` 同一 guard 的 v6 侧 | prefix=54，需 doff≥14 | `parse_ipv6_tcp_with_a_header_longer_than_its_prefix`：doff=14..=15 + doff=15 的相等/截断边界 |
+| `packet.rs:259:32` `+`→`-`（v6 扩展头 guard） | 现有 ext 帧只有 8 B（< prefix 54 B） | `parse_ipv6_extension_header_longer_than_its_prefix`：hdr_ext_len=7（64 B）完整帧 → `Some` + `ipv6_ext_len=64`；hdr_ext_len=255（声明 2048 B）短帧 → `None` |
+| `compiler.rs:521:24` `>`→`>=`（`ether proto` 802.3 长度边界） | 现有 golden 用了 100 和 0x88b5，从没测 1500 | `ether_proto_length_boundary_is_exactly_the_8023_maximum`：1500 的 6 条指令 golden + 1501 的 4 条 golden + 携带 1500 的帧必须不匹配 |
+
+四条都用手打补丁复验过：打回变异后 `cargo test -p cpworker --lib` 必红（三条是 mutate 路径
+subtract-with-overflow，compiler 那条是 golden 指令序列不符），恢复后全绿。重跑 sweep 后
+这 4 个变异体的判定为 `CaughtMutant`。
+
+### timeout 判定不等于"测不出来"（重要修正）
+
+本 sweep 自己的 per-mutant 日志显示：**59 条 timeout 里有 46 条在同一次运行里已经有测试失败**，
+只是同一次运行里另有测试挂住，整体被报成 Timeout（= 门禁失败）。挂住的测试主要是
+`task::tests::reload_worker_delivers_the_plan_and_its_problems`（17 条）与 `bpf::compiler::tests::*`
+（20 条）：`crates/cpworker/src/task.rs:1246`（以及 2308）的 `while !worker.is_done()` **无上限**，
+reload worker 线程 panic 后 `is_done()` 永远不为真，于是"已经被测出的失败"被掩盖成 hang。
+跟进任务：bead **`cloud-probe-rs-10m`**（给这个自旋加上时间/次数上限并在超限时明确报 panic）。
+剩下 13 条才是真·死循环/死睡（解释器跳转算术让 pc 不动、`Builder::finish()` 不收敛、
+`retry -= 1` 永远 < 10、退避时长负值转 `u64` ≈ 208 天 sleep）。
+
+> 也就是说：这些 mutant 的豁免理由写 "runner timeout" 是对的（harness 确实只能看到 Timeout），
+> 但**不要**把它读成"测试无覆盖"。修掉 `cloud-probe-rs-10m` 之后重跑 sweep，这批判定会大幅
+> 转成 Caught，`exclude_re` 也应随之缩短。
+
+### 另一个假阳性：flaky 的 `unix_control_vectors` 测试
+
+全量 sweep（`-j 12`、机器负载 ~30）把 `output/vxlan.rs:222:45 replace + with *` 和
+`:222:53 replace * with +|/` 判成 Caught，唯一失败测试是
+`crates/cpworker/tests/unix_control_vectors.rs::test_server_drops_client_that_stops_reading`
+（与本文件无关的 socket 时序测试）。用 `-j 4` 单独重跑 `output/vxlan.rs` 的 131 个候选后这 3 条回到
+Missed，手工打回变异跑 `cargo test -p cpworker --lib` 也全绿。因此入库的 `outcomes.json` 里这 3 条
+取自重跑（`recheck-vxlan-rs-outcomes.json` 是证据），**没有**为了迁就假阳性去收窄豁免。
+这暴露了一个门禁风险：flaky 测试会把真实存活伪装成 Caught（本例就差点触发一条"收窄豁免"的
+错误修改）。修它需要给该测试加显式等待而不是固定 sleep，未在本轮范围内。
+
+### 上一轮（2026-09-30）的诚实记录
 
 上一版基线在多个模块写「0 missed / 剩余为等价 guard」，但那些结论建立在**按整行**登记的
 豁免之上。本轮做 no-exclude sweep 后发现并关闭了一批**真实缺口**：
@@ -130,21 +176,24 @@ NUL 校验与 `IP_MTU_DISCOVER` 的非法值在内核里分别返回 `EINVAL`/`E
 - `cpgolib::{stats,fingerprint,worker_config,worker_fingerprint}`：跨单位借位、单位常量、
   `compare` 排序、`ControlConfig::connect_string` 分支、`task_fingerprint` 全字段标签。
 
-### 剩余的 134 条豁免（分类）
+### 剩余的 119 条豁免（覆盖 144 个存活，分类）
 
-1. **runner timeout（52 条 timeout 判定 / 覆盖约 60 个 mutant）**：变异让代码**死循环或睡到天荒地老**
+1. **runner timeout（47 条 / 57 个存活）**：变异让代码**死循环或睡到天荒地老**
    （解释器跳转算术、`finish()` 的标签/细化循环不收敛、`retry -= 1`、退避时长负值转 `u64`、
-   mock accept 阻塞、队列簿记停滞）。没有有限测试能“报错”，cargo-mutants 报 Timeout —— 对门禁而言
-   仍是失败，故必须逐条登记。
-   校验：把 52 个 timeout 判定单独用**提交预算（120 s）**重测一遍（反向排除其它 1467 个
-   candidate），结果仍为 52/52 Timeout，证明这些标注不是“预算太短”造成的假 timeout。
-2. **算术恒等（约 35 条）**：位不相交的 `|`/`^`；`slice == caplen` 时两分支赋同值；
+   mock accept 阻塞、队列簿记停滞）。cargo-mutants 报 Timeout —— 对门禁而言仍是失败，故必须
+   逐条登记。注意：这 59 条 timeout 判定里 46 条同一次运行已有失败测试（见上一节，
+   bead `cloud-probe-rs-10m`），"runner timeout" 描述的是 harness 的可见性，不是测试无覆盖。
+   校验：本 sweep 用的就是提交预算（`minimum_test_timeout = 120.0`、`timeout_multiplier = 3.0`），
+   59 条判定全部在 120 s 下复现，不是预算太短造成的假 timeout。
+2. **算术/结构等价（52 条 / 55 个存活）**：位不相交的 `|`/`^`；`slice == caplen` 时两分支赋同值；
    `payload_len` 在相等处 clamp 是空操作；trampoline 分支里 `p/tp - 1 == 0`；
    缩小的阈值仍被末尾 `payload_offset > caplen` guard 兜住；精确边界帧无法完成更深层解析。
-3. **不可观测（约 20 条）**：只决定一行日志（无符号计数 `>= 0`、warn-once 闩、abandon 的 log、
-   `init_default`）、1 ms sleep、`Instant::now()` 无法钉到相等瞬间、`POLLERR|POLLHUP` 在 TCP 上
-   必然伴随 `take_error()`、连接关闭时的 best-effort `shutdown`、`queue_out` 的压缩只是内存优化。
-4. **平台/无根（2 条）**：非 Linux 的 `attach_filter` 桩；`cpgolib` 的 logger 初始化。
+3. **不可观测（18 条 / 30 个存活）**：只决定一行日志（无符号计数 `>= 0`、warn-once 闩、abandon 的 log、
+   只喂 `log_warn!` 的 service_tag 范围门）、1 ms sleep、`Instant::now()` 无法钉到相等瞬间、
+   `POLLERR|POLLHUP` 在 TCP 上必然伴随 `take_error()`、连接关闭时的 best-effort `shutdown`、
+   `queue_out` 的压缩只是内存优化。
+4. **平台（2 条 / 2 个存活）**：非 Linux `attach_filter` 桩（测试主机上被 cfg 掉，二进制与基线逐字节相同）；
+   `cpgolib` 的进程级 logger 初始化（结果被丢弃，调用方都在 examine_globs 之外）。
 
 ### 未测范围
 
