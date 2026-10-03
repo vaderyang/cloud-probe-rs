@@ -69,6 +69,34 @@ jobs:
       # old exemption keywords) and require the gates above to go red.
       - run: bash parity/verify_hygiene_reverse.sh
 
+  test-aarch64:
+    name: build & test (aarch64)
+    # Found by an external audit, 2026-10-03: every job in this file ran on
+    # ubuntu-latest, so the whole suite - 613 in-crate unit tests, 168 integration
+    # tests, the parity harness, the fuzz targets - had never executed on any
+    # architecture other than x86_64. The release workflow built aarch64 and
+    # checked its glibc floor, but only ever ran `--version`, so any
+    # architecture-dependent behaviour (alignment, integer width, an assumption
+    # that a POSIX struct or a length field is the size it is on x86_64) would
+    # have stayed invisible while every gate stayed green. ubuntu-24.04-arm is a
+    # real arm64 runner and the repository is public, so this is a build-time and
+    # wall-clock cost only.
+    #
+    # Kept to build+test on purpose: the hygiene/liveness/reverse gates in `test`
+    # are source-level and do not depend on the architecture.
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v7
+      - name: System dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            protobuf-compiler
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --workspace --all-targets --locked
+      - run: cargo test --workspace --locked
+
   msrv:
     name: MSRV 1.88 build
     # Cargo.toml declares `rust-version = "1.88"`; until now every job ran on
