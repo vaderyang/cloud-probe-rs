@@ -1094,6 +1094,19 @@ pub struct ReloadWorker {
     handle: Option<JoinHandle<()>>,
 }
 
+struct ReloadCompletion<'a> {
+    done: &'a AtomicBool,
+}
+
+impl Drop for ReloadCompletion<'_> {
+    fn drop(&mut self) {
+        // Unwinding must also release the polling caller; take() reports the
+        // panic via join(). With panic = "abort" the process exits without Drop,
+        // so catching the panic would not help that profile.
+        self.done.store(true, Ordering::Release);
+    }
+}
+
 impl ReloadWorker {
     /// Start preparing a reload of `path` on a worker thread.
     #[must_use]
@@ -1115,8 +1128,8 @@ impl ReloadWorker {
         let handle = std::thread::Builder::new()
             .name("cp-reload".to_string())
             .spawn(move || {
+                let _completion = ReloadCompletion { done: &flag };
                 *result_slot.lock() = Some(work());
-                flag.store(true, Ordering::Release);
             });
         if let Err(e) = handle {
             // No thread means no reload, reported. Falling back to resolving inline
@@ -1149,10 +1162,14 @@ impl ReloadWorker {
     ///
     /// # Errors
     /// Propagated from reading/parsing the configuration, or from failing to spawn
-    /// the worker.
+    /// the worker. A worker panic is reported when unwinding is enabled.
     pub fn take(mut self) -> Result<ReloadPlan> {
-        if let Some(handle) = self.handle.take() {
-            let _ = handle.join();
+        if self
+            .handle
+            .take()
+            .is_some_and(|handle| handle.join().is_err())
+        {
+            return Err(crate::error::Error::new("reload worker panicked"));
         }
         self.plan
             .lock()
@@ -1224,10 +1241,30 @@ mod tests {
         );
     }
 
+    #[test]
+    fn reload_worker_reports_panic_without_leaving_pollers_pending() {
+        let start = std::time::Instant::now();
+        let worker = ReloadWorker::start_with(|| panic!("injected reload failure"));
+        while !worker.is_done() && start.elapsed() < std::time::Duration::from_secs(5) {
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+        assert!(
+            worker.is_done(),
+            "panicked reload worker did not signal completion within 5 seconds"
+        );
+        let err = worker.take().expect_err("a panicked worker must fail");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("reload worker") && msg.contains("panicked"),
+            "the caller must see that the reload worker panicked: {msg}"
+        );
+    }
+
     /// A plan that succeeds is handed over intact, including the early report of
     /// filters that will not compile.
     #[test]
     fn reload_worker_delivers_the_plan_and_its_problems() {
+        let start = std::time::Instant::now();
         let worker = ReloadWorker::start_with(|| {
             let config = Config::parse_str(
                 r#"{
@@ -1243,9 +1280,13 @@ mod tests {
             let problems = warm_task_names(&config);
             Ok(ReloadPlan { config, problems })
         });
-        while !worker.is_done() {
+        while !worker.is_done() && start.elapsed() < std::time::Duration::from_secs(5) {
             std::thread::sleep(std::time::Duration::from_millis(2));
         }
+        assert!(
+            worker.is_done(),
+            "reload worker did not deliver the plan within 5 seconds"
+        );
         let plan = worker.take().expect("plan");
         assert_eq!(plan.config.tasks.len(), 1);
         assert!(
@@ -2304,10 +2345,15 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("cfg.json");
         std::fs::write(&path, r#"{"execution_model":"rtc","tasks":[]}"#).expect("write");
+        let start = std::time::Instant::now();
         let worker = ReloadWorker::start(path.to_str().expect("utf8"));
-        while !worker.is_done() {
+        while !worker.is_done() && start.elapsed() < std::time::Duration::from_secs(5) {
             std::thread::sleep(std::time::Duration::from_millis(1));
         }
+        assert!(
+            worker.is_done(),
+            "reload worker did not read the configuration within 5 seconds"
+        );
         let plan = worker.take().expect("plan");
         assert!(plan.config.tasks.is_empty());
         assert!(plan.problems.is_empty());
